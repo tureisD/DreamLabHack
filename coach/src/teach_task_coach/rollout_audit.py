@@ -23,6 +23,18 @@ class IntentAudit(BaseModel):
     warnings: list[str]
 
 
+class BulkAudit(BaseModel):
+    root: str
+    processed: int
+    partial: int
+    failed: int
+    comparable_rows: int
+    differing_rows: int
+    differing_share: float | None
+    reports: list[IntentAudit]
+    errors: list[str]
+
+
 def audit_rollout(folder: Path) -> IntentAudit:
     info = json.loads((folder / "rollout.json").read_text(encoding="utf-8"))
     files = sorted((folder / "data").rglob("*.parquet"))
@@ -90,4 +102,26 @@ def audit_rollout(folder: Path) -> IntentAudit:
         differing_share=differing / comparable if comparable else None,
         median_staleness_ms=statistics.median(staleness) if staleness else None,
         discarded_replies=discarded, warnings=warnings,
+    )
+
+
+def audit_many(root: Path) -> BulkAudit:
+    reports = []
+    errors = []
+    for marker in sorted(root.glob("*/rollout.json")):
+        try:
+            reports.append(audit_rollout(marker.parent))
+        except (OSError, ValueError, KeyError) as exc:
+            errors.append(f"{marker.parent.name}: {type(exc).__name__}: {exc}")
+    for marker in sorted(root.glob("*/INCOMPLETE.txt")):
+        if not (marker.parent / "rollout.json").exists():
+            errors.append(f"{marker.parent.name}: incomplete recorder output has no rollout.json")
+    comparable = sum(report.comparable_rows for report in reports)
+    differing = sum(report.differing_rows for report in reports)
+    return BulkAudit(
+        root=str(root), processed=len(reports),
+        partial=sum(report.status != "complete" for report in reports), failed=len(errors),
+        comparable_rows=comparable, differing_rows=differing,
+        differing_share=differing / comparable if comparable else None,
+        reports=reports, errors=errors,
     )

@@ -54,6 +54,8 @@ The **Demos** screen can launch a single local SO-101 follower/leader recording 
 
 `teach-task-coach audit-rollout PATH` compares finalized `action` rows with raw chunk replies using the recorded chunk/row indices, reports the differing share, and derives execution staleness from `executed_since_obs`. It is read-only and handles discarded replies. A raw reply does not preserve the exact camera window sent at that inference; this audit does not rewrite or upload training labels.
 
+`teach-task-coach audit-rollouts ROOT` runs the same read-only check across every finalized rollout folder under `ROOT`, reporting processed, partial, and failed counts plus aggregate aligned rows. It notes an `INCOMPLETE.txt` folder without a finalized `rollout.json` and gives repeatable output for unchanged inputs.
+
 The Guide groups labelled baseline runs into station/recording issues and operator-confirmed task failures without logged station faults. It shows human-labelled failure stages and evidence for each category. These are conservative triage suggestions; they do not infer a physical root cause from a video.
 
 For a finalized rollout with `observation.state`, diagnosis also checks whether any state moved more than 0.02 from the first row. A failed run that never moved is marked as an initiation issue. This is a log-based screen, not a query of a checkpoint on new rest-pose observations.

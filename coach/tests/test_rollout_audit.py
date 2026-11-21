@@ -4,7 +4,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from teach_task_coach.rollout_audit import audit_rollout
+from teach_task_coach.rollout_audit import audit_many, audit_rollout
 
 
 def test_intent_audit_aligns_installed_chunks_and_ignores_discarded(tmp_path):
@@ -30,3 +30,13 @@ def test_intent_audit_aligns_installed_chunks_and_ignores_discarded(tmp_path):
     assert report.differing_share == 0.5
     assert report.median_staleness_ms == 100
     assert report.discarded_replies == 1
+    (tmp_path / "unfinished").mkdir()
+    (tmp_path / "unfinished/INCOMPLETE.txt").write_text("interrupted")
+    (tmp_path / "bad").mkdir()
+    (tmp_path / "bad/rollout.json").write_text("{")
+    first = audit_many(tmp_path)
+    second = audit_many(tmp_path)
+    assert first.model_dump() == second.model_dump()
+    assert first.processed == 1
+    assert first.failed == 2
+    assert first.differing_share == 0.5
