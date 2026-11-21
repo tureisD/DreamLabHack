@@ -138,6 +138,8 @@ class TrialRunner:
             key=lambda item: _parse_time(item.started_at_utc) or dt.datetime.max.replace(tzinfo=dt.UTC),
         )
         self.episodes.upsert(episode)
+        if episode.stop_reason == "ModelReady":
+            return self.tasks.record_warmup(trial_id, episode.id)
         return self.tasks.transition(
             trial_id, "awaiting_rollout", "awaiting_label", episode_id=episode.id
         )

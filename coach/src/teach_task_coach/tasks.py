@@ -109,6 +109,12 @@ class TaskStore:
                 angle_deg INTEGER NOT NULL,
                 PRIMARY KEY(task_id, scene_index)
             );
+            CREATE TABLE IF NOT EXISTS trial_warmups (
+                trial_id TEXT NOT NULL REFERENCES trials(id),
+                episode_id TEXT NOT NULL REFERENCES episodes(id),
+                recorded_at TEXT NOT NULL,
+                PRIMARY KEY(trial_id, episode_id)
+            );
             """
         )
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(trials)")}
@@ -243,6 +249,35 @@ class TaskStore:
             self._schema(connection)
             row = connection.execute("SELECT * FROM trials WHERE id = ?", (trial_id,)).fetchone()
         return None if row is None else Trial.model_validate(dict(row))
+
+    def warmup_episode_ids(self, trial_id: str) -> list[str]:
+        with self.db.connect() as connection:
+            self._schema(connection)
+            rows = connection.execute(
+                "SELECT episode_id FROM trial_warmups WHERE trial_id = ? ORDER BY recorded_at, rowid",
+                (trial_id,),
+            ).fetchall()
+        return [row["episode_id"] for row in rows]
+
+    def record_warmup(self, trial_id: str, episode_id: str) -> Trial:
+        with self.db.connect() as connection:
+            self._schema(connection)
+            cursor = connection.execute(
+                """UPDATE trials SET status = 'planned', station_run = NULL,
+                   station_started_at = NULL, start_requested_at = NULL, episode_id = NULL,
+                   last_error = 'Model warmed without a task attempt; start this trial again.'
+                   WHERE id = ? AND status = 'awaiting_rollout'""",
+                (trial_id,),
+            )
+            if cursor.rowcount != 1:
+                raise TrialStateError("Trial is no longer awaiting a rollout.")
+            connection.execute(
+                "INSERT OR IGNORE INTO trial_warmups VALUES (?, ?, ?)",
+                (trial_id, episode_id, _utc_now()),
+            )
+        result = self.get_trial(trial_id)
+        assert result is not None
+        return result
 
     def active_trial(self) -> Trial | None:
         with self.db.connect() as connection:

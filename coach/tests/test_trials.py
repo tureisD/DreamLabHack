@@ -141,3 +141,47 @@ def test_missing_rollout_can_be_abandoned_after_stop(tmp_path):
     response = client.post(f"/api/trials/{trial.id}/abandon", json={"reason": "no recording"})
     assert response.json()["status"] == "abandoned"
     assert response.json()["last_error"] == "no recording"
+
+
+def test_model_ready_rollout_is_preserved_and_trial_can_restart(tmp_path):
+    rollouts = tmp_path / "rollouts"
+    rollouts.mkdir()
+    station = FakeStation()
+    tasks = TaskStore(tmp_path / "data")
+    task = tasks.create_task(TaskInput(
+        name="Task", prompt="put block in bin", baseline_checkpoint="base", success_rule="in bin"
+    ))
+    trial = tasks.create_trial(task.id, TrialInput(start_cell=0))
+    client = TestClient(create_app(
+        PreflightService(station, list), EpisodeStore(tmp_path / "data"),
+        RolloutScanner(rollouts), tasks,
+    ))
+    assert client.post(f"/api/trials/{trial.id}/start").status_code == 200
+    assert client.post(f"/api/trials/{trial.id}/stop").status_code == 200
+    folder = rollouts / "warmup_run1"
+    folder.mkdir()
+    (folder / "rollout.json").write_text(json.dumps({
+        "status": "partial", "task": task.prompt, "checkpoint": "base", "run": 1,
+        "started_at_utc": "2026-11-21T10:00:05+00:00", "frames": 0,
+        "stop_reason": "ModelReady",
+    }))
+    synced = client.post(f"/api/trials/{trial.id}/sync").json()
+    assert synced["status"] == "planned"
+    assert synced["station_run"] is None
+    warmups = client.get(f"/api/trials/{trial.id}/warmups").json()
+    assert len(warmups) == 1
+    assert warmups[0]["stop_reason"] == "ModelReady"
+    assert client.post(f"/api/trials/{trial.id}/start").json()["station_run"] == 2
+
+
+def test_browser_from_remote_origin_cannot_start_robot_or_submit_writes(tmp_path):
+    client = TestClient(create_app(
+        PreflightService(FakeStation(), list), EpisodeStore(tmp_path),
+        RolloutScanner(tmp_path), TaskStore(tmp_path),
+    ))
+    body = {
+        "name": "Task", "prompt": "put block in bin", "baseline_checkpoint": "base",
+        "success_rule": "in bin",
+    }
+    assert client.post("/api/tasks", json=body, headers={"Origin": "https://other.example"}).status_code == 403
+    assert client.post("/api/tasks", json=body, headers={"Origin": "http://localhost:5173"}).status_code == 201

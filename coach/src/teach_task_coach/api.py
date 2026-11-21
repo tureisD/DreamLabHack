@@ -2,10 +2,11 @@
 
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 from dream.errors import DreamError
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -93,6 +94,19 @@ def create_app(
     evaluation_store: EvaluationStore | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Teach it a task", version="0.1.0")
+
+    @app.middleware("http")
+    async def local_browser_writes_only(request: Request, call_next):
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            origin = request.headers.get("origin")
+            if origin:
+                parsed = urlparse(origin)
+                if parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost"):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "Coach writes require a local browser origin."},
+                    )
+        return await call_next(request)
     preflight = service or PreflightService()
     episodes = store or EpisodeStore()
     rollouts = scanner or RolloutScanner()
@@ -213,6 +227,15 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except StationUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/trials/{trial_id}/warmups", response_model=list[EpisodeSummary])
+    def trial_warmups(trial_id: str) -> list[EpisodeSummary]:
+        if tasks.get_trial(trial_id) is None:
+            raise HTTPException(status_code=404, detail="Trial not found.")
+        return [
+            episode for episode_id in tasks.warmup_episode_ids(trial_id)
+            if (episode := episodes.get(episode_id)) is not None
+        ]
 
     @app.post("/api/trials/{trial_id}/stop", response_model=Trial)
     def stop_trial(trial_id: str) -> Trial:
