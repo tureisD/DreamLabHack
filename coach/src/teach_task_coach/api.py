@@ -263,12 +263,22 @@ def create_app(
     @app.post("/api/trials/{trial_id}/start", response_model=Trial)
     def start_trial(trial_id: str) -> Trial:
         try:
+            planned = tasks.get_trial(trial_id)
+            if planned is not None and planned.status == "planned" and planned.evaluation_id and scene_fixture.configured:
+                scene = scene_for_trial(planned, tasks)
+                if scene is None:
+                    raise HTTPException(status_code=409, detail="Scene manifest is missing.")
+                if preflight.station.status()["state"] != "idle":
+                    raise HTTPException(status_code=409, detail="Wait for the robot station to be idle.")
+                scene_fixture.place(scene)
             return runner.start(trial_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Trial not found.") from exc
         except (TrialError, TrialStateError, StationRejected) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except StationUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except (OSError, ValueError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get("/api/trials/{trial_id}/warmups", response_model=list[EpisodeSummary])

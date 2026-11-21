@@ -157,3 +157,31 @@ def test_verified_candidate_promotes_future_runs_and_can_roll_back(tmp_path):
     assert client.get(f"/api/tasks/{task.id}/baseline-trials").json() == []
     assert len(client.get(f"/api/tasks/{task.id}/deployed-trials").json()) == 1
     assert client.post(f"/api/tasks/{task.id}/deployment/rollback").json()["checkpoint"] == "base"
+
+
+def test_configured_fixture_places_scene_before_evaluation_start(tmp_path):
+    client, tasks, episodes, evaluations, task, job, station = setup_comparison(tmp_path)
+    evaluation = client.post(
+        f"/api/tasks/{task.id}/evaluations", json={"fine_tune_job_id": job.id}
+    ).json()
+    trial = tasks.list_evaluation_trials(evaluation["id"])[0]
+
+    class Fixture:
+        configured = True
+
+        def __init__(self):
+            self.scenes = []
+
+        def place(self, scene):
+            self.scenes.append(scene)
+            return {"placed": True, "detail": "placed"}
+
+    fixture = Fixture()
+    local = TestClient(create_app(
+        PreflightService(station, list), episodes, RolloutScanner(tmp_path / "rollouts"),
+        tasks, evaluation_store=evaluations, scene_adapter=fixture,
+    ))
+    assert local.post(f"/api/trials/{trial.id}/start").status_code == 200
+    assert fixture.scenes[0].scene_index == trial.scene_index
+    assert local.post(f"/api/trials/{trial.id}/start").status_code == 409
+    assert len(fixture.scenes) == 1
