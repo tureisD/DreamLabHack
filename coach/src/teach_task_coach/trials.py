@@ -58,6 +58,16 @@ class TrialRunner:
             raise TrialError(f"Finish or sync active trial {active.id} before starting another.")
         task = self.tasks.get_task(trial.task_id)
         assert task is not None
+        if trial.evaluation_id is not None:
+            if any(
+                item.status == "abandoned"
+                for item in self.tasks.list_evaluation_trials(trial.evaluation_id)
+            ):
+                raise TrialError("Evaluation contains an unusable run; plan a fresh comparison.")
+            next_trial = self.tasks.next_evaluation_trial(trial.evaluation_id)
+            if next_trial is None or next_trial.id != trial.id:
+                raise TrialError("Finish the preceding evaluation trial first.")
+        checkpoint = trial.checkpoint or task.baseline_checkpoint
         if not self.scanner.root.is_dir():
             raise TrialError("Local rollout directory is missing; enable station rollouts first.")
         station_status = self.station.status()
@@ -77,7 +87,7 @@ class TrialRunner:
         )
         try:
             started = self.station.post(
-                "start", {"prompt": task.prompt, "checkpoint": task.baseline_checkpoint}
+                "start", {"prompt": task.prompt, "checkpoint": checkpoint}
             )
         except StationRejected as exc:
             self.tasks.transition(trial_id, "starting", "planned", last_error=str(exc))
@@ -119,7 +129,7 @@ class TrialRunner:
         matches = [
             episode
             for episode in found
-            if _matches(trial, episode, task.prompt, task.baseline_checkpoint)
+            if _matches(trial, episode, task.prompt, trial.checkpoint or task.baseline_checkpoint)
         ]
         if not matches:
             return trial
@@ -166,7 +176,7 @@ class TrialRunner:
         status = self.station.status()
         task = self.tasks.get_task(trial.task_id)
         assert task is not None
-        if status.get("prompt") != task.prompt or status.get("checkpoint") != task.baseline_checkpoint:
+        if status.get("prompt") != task.prompt or status.get("checkpoint") != (trial.checkpoint or task.baseline_checkpoint):
             raise TrialError("Station prompt or checkpoint does not match this trial; inspect it manually.")
         if not isinstance(status.get("run"), int) or not status.get("started_at"):
             raise TrialError("Station has no identifiable run for this trial.")

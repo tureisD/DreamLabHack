@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import random
 import sqlite3
 import uuid
 from pathlib import Path
@@ -44,6 +45,19 @@ class Trial(TrialInput):
     episode_id: str | None
     last_error: str | None
     created_at: str
+    checkpoint: str | None = None
+    evaluation_id: str | None = None
+    scene_index: int | None = None
+    sequence_index: int | None = None
+
+
+class HeldoutScene(BaseModel):
+    task_id: str
+    scene_index: int
+    start_cell: int
+    x_fraction: float
+    y_fraction: float
+    angle_deg: int
 
 
 class TrialStateError(ValueError):
@@ -79,11 +93,31 @@ class TaskStore:
                 start_requested_at TEXT,
                 episode_id TEXT REFERENCES episodes(id),
                 last_error TEXT,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                checkpoint TEXT,
+                evaluation_id TEXT,
+                scene_index INTEGER,
+                sequence_index INTEGER
             );
             CREATE INDEX IF NOT EXISTS trials_task_id ON trials(task_id);
+            CREATE TABLE IF NOT EXISTS heldout_scenes (
+                task_id TEXT NOT NULL REFERENCES tasks(id),
+                scene_index INTEGER NOT NULL,
+                start_cell INTEGER NOT NULL,
+                x_fraction REAL NOT NULL,
+                y_fraction REAL NOT NULL,
+                angle_deg INTEGER NOT NULL,
+                PRIMARY KEY(task_id, scene_index)
+            );
             """
         )
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(trials)")}
+        for name, sql_type in (
+            ("checkpoint", "TEXT"), ("evaluation_id", "TEXT"),
+            ("scene_index", "INTEGER"), ("sequence_index", "INTEGER"),
+        ):
+            if name not in columns:
+                connection.execute(f"ALTER TABLE trials ADD COLUMN {name} {sql_type}")
 
     def create_task(self, value: TaskInput) -> Task:
         task = Task(id=uuid.uuid4().hex, created_at=_utc_now(), **value.model_dump())
@@ -100,7 +134,28 @@ class TaskStore:
                     task.created_at,
                 ),
             )
+            rng = random.Random(int(task.id[:16], 16))
+            for scene_index in range(30):
+                cell = scene_index % 9
+                column, row = cell % 3, cell // 3
+                connection.execute(
+                    "INSERT INTO heldout_scenes VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        task.id, scene_index, cell,
+                        round((column + 0.2 + rng.random() * 0.6) / 3, 4),
+                        round((row + 0.2 + rng.random() * 0.6) / 3, 4),
+                        rng.choice((0, 90, 180, 270)),
+                    ),
+                )
         return task
+
+    def heldout_scenes(self, task_id: str) -> list[HeldoutScene]:
+        with self.db.connect() as connection:
+            self._schema(connection)
+            rows = connection.execute(
+                "SELECT * FROM heldout_scenes WHERE task_id = ? ORDER BY scene_index", (task_id,)
+            ).fetchall()
+        return [HeldoutScene.model_validate(dict(row)) for row in rows]
 
     def list_tasks(self) -> list[Task]:
         with self.db.connect() as connection:
@@ -115,6 +170,9 @@ class TaskStore:
         return None if row is None else Task.model_validate(dict(row))
 
     def create_trial(self, task_id: str, value: TrialInput) -> Trial:
+        task = self.get_task(task_id)
+        if task is None:
+            raise KeyError(task_id)
         trial = Trial(
             id=uuid.uuid4().hex,
             task_id=task_id,
@@ -125,14 +183,17 @@ class TaskStore:
             episode_id=None,
             last_error=None,
             created_at=_utc_now(),
+            checkpoint=task.baseline_checkpoint,
             **value.model_dump(),
         )
         with self.db.connect() as connection:
             self._schema(connection)
-            if connection.execute("SELECT 1 FROM tasks WHERE id = ?", (task_id,)).fetchone() is None:
-                raise KeyError(task_id)
             connection.execute(
-                "INSERT INTO trials VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                """INSERT INTO trials
+                   (id, task_id, start_cell, setup_note, status, station_run, station_started_at,
+                    start_requested_at, episode_id, last_error, created_at, checkpoint,
+                    evaluation_id, scene_index, sequence_index)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     trial.id,
                     trial.task_id,
@@ -145,6 +206,8 @@ class TaskStore:
                     trial.episode_id,
                     trial.last_error,
                     trial.created_at,
+                    trial.checkpoint,
+                    None, None, None,
                 ),
             )
         return trial
@@ -153,9 +216,27 @@ class TaskStore:
         with self.db.connect() as connection:
             self._schema(connection)
             rows = connection.execute(
-                "SELECT * FROM trials WHERE task_id = ? ORDER BY created_at, rowid", (task_id,)
+                "SELECT * FROM trials WHERE task_id = ? AND evaluation_id IS NULL ORDER BY created_at, rowid", (task_id,)
             ).fetchall()
         return [Trial.model_validate(dict(row)) for row in rows]
+
+    def list_evaluation_trials(self, evaluation_id: str) -> list[Trial]:
+        with self.db.connect() as connection:
+            self._schema(connection)
+            rows = connection.execute(
+                "SELECT * FROM trials WHERE evaluation_id = ? ORDER BY sequence_index", (evaluation_id,)
+            ).fetchall()
+        return [Trial.model_validate(dict(row)) for row in rows]
+
+    def next_evaluation_trial(self, evaluation_id: str) -> Trial | None:
+        with self.db.connect() as connection:
+            self._schema(connection)
+            row = connection.execute(
+                """SELECT * FROM trials WHERE evaluation_id = ?
+                   AND status NOT IN ('completed', 'abandoned') ORDER BY sequence_index LIMIT 1""",
+                (evaluation_id,),
+            ).fetchone()
+        return None if row is None else Trial.model_validate(dict(row))
 
     def get_trial(self, trial_id: str) -> Trial | None:
         with self.db.connect() as connection:

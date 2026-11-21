@@ -3,6 +3,7 @@ import Runs from './Runs';
 import Tasks from './Tasks';
 import Demos from './Demos';
 import Training from './Training';
+import EvaluationPage from './Evaluation';
 
 type Check = { state: 'ready' | 'blocked' | 'unavailable'; message: string };
 type Model = {
@@ -110,7 +111,7 @@ function Preflight() {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<'preflight' | 'runs' | 'tasks' | 'demos' | 'training'>('preflight');
+  const [screen, setScreen] = useState<'preflight' | 'runs' | 'tasks' | 'demos' | 'training' | 'evaluation'>('preflight');
   return (
     <>
       <nav className="top-nav" aria-label="Coach sections">
@@ -120,8 +121,9 @@ export default function App() {
         <button className={screen === 'runs' ? 'nav-active' : ''} onClick={() => setScreen('runs')}>Run review</button>
         <button className={screen === 'demos' ? 'nav-active' : ''} onClick={() => setScreen('demos')}>Demos</button>
         <button className={screen === 'training' ? 'nav-active' : ''} onClick={() => setScreen('training')}>Training</button>
+        <button className={screen === 'evaluation' ? 'nav-active' : ''} onClick={() => setScreen('evaluation')}>Evaluation</button>
       </nav>
-      {screen === 'preflight' ? <Preflight /> : screen === 'tasks' ? <Tasks /> : screen === 'demos' ? <Demos /> : screen === 'training' ? <Training /> : <Runs />}
+      {screen === 'preflight' ? <Preflight /> : screen === 'tasks' ? <Tasks /> : screen === 'demos' ? <Demos /> : screen === 'training' ? <Training /> : screen === 'evaluation' ? <EvaluationPage /> : <Runs />}
     </>
   );
 }

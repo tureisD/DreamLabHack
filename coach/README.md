@@ -1,6 +1,6 @@
 # Teach it a task
 
-A local companion for the [Dream Labs public library](../dream_library/README.md). It checks the robot station and lists accessible checkpoints, then imports saved station rollouts for review and operator success labels. It does not yet move the robot, upload data, or submit fine-tuning jobs.
+A local companion for the [Dream Labs public library](../dream_library/README.md). It checks the robot station, reviews saved rollouts and demonstrations, submits a Dream FaaS job, and guides a paired before/after evaluation. Robot runs and paid fine-tuning require explicit operator actions.
 
 ## Run locally
 
@@ -36,10 +36,16 @@ The **Demos** screen watches `COACH_DEMOS_DIR` every 15 seconds while open. An e
 
 The **Training** screen freezes all kept, structurally valid demos into a new dataset version. The worker fetches the registered embodiment, runs Dream's local dataset validator, uploads only after an explicit training submission, waits for processing, submits one FaaS job, and polls for its checkpoint. Dataset names and job suffixes are unique and reused during restart reconciliation. Training is charged by Dream Labs; the app does not know your account's per-step price. No API key is written to the repository or browser.
 
+The **Evaluation** screen takes a completed fine-tune and plans 30 held-out scene pairs. These positions are generated when the task is created, before data collection. Each pair runs the baseline and candidate checkpoints on the same scene in randomized, balanced order; the operator confirms every Start, resets the scene, and labels each rollout against the task's success rule. The report shows success counts, paired gain, a bootstrap interval, an exact paired-test p-value, safety stops, and an improved/inconclusive/worse verdict. An improved verdict requires all 30 usable pairs, a gain above the threshold chosen before the comparison, positive interval, p<0.05, and no excess candidate safety stops. This protocol may be underpowered for modest gains; an inconclusive result is not proof that the model is equal. The coach never switches the deployed checkpoint automatically. A comparison with an abandoned run stays in the record and can be restarted.
+
+Task positions are fractions of a marked tabletop, not camera-calibrated robot coordinates. The operator must prepare and reset each scene manually. Tasks created by older coach versions lack the predeclared evaluation scenes and need to be recreated for this evaluation protocol.
+
+The public station does not provide teleoperation for every driver, so this coach currently imports demonstrations from an external LeRobot recorder. Live camera-occlusion and motion-smoothness scoring, autonomous scene setup, and automatic deployment are outside the current build. The Dream API and physical station need real credentials and hardware for an end-to-end test; the automated suite uses fakes for those boundaries.
+
 ## Checks
 
 ```bash
-uv run pytest
+uv run python -m pytest
 uv run ruff check src tests
 cd frontend && npm run build
 ```

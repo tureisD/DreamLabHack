@@ -114,3 +114,13 @@ button.secondary { background: #e6eef2; color: #23546a; }
 .training-row small { margin-top: 5px; color: #74838c; }
 .training-row .trial-error { color: #a53b3b; }
 .training-row .model-ready { color: #187452; }
+.evaluation-select { display: grid; gap: 6px; max-width: 100%; font-size: 13px; font-weight: 650; }
+.evaluation-select select { max-width: 100%; border: 1px solid #cfdae0; border-radius: 8px; padding: 10px; background: white; color: #1a2630; font: inherit; }
+.evaluation-report, .evaluation-next { margin-top: 18px; }
+.evaluation-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
+.evaluation-metrics div { padding: 16px; border-radius: 10px; background: #eef5f7; }
+.evaluation-metrics strong, .evaluation-metrics span { display: block; }
+.evaluation-metrics strong { font-size: 22px; }
+.evaluation-metrics span { color: #62747d; font-size: 12px; margin-top: 5px; }
+.evaluation-next .trial-label { margin-top: 18px; }
+@media (max-width: 700px) { .evaluation-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

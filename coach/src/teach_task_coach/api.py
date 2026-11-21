@@ -12,6 +12,12 @@ from pydantic import BaseModel, Field
 from teach_task_coach.coverage import CoveragePlan, plan
 from teach_task_coach.demos import Demo, DemoError, DemoScanner, DemoStore
 from teach_task_coach.episodes import EpisodeSummary, RolloutScanner
+from teach_task_coach.evaluation import (
+    Evaluation,
+    EvaluationReport,
+    EvaluationRequest,
+    EvaluationStore,
+)
 from teach_task_coach.faas import (
     DatasetVersion,
     DreamGateway,
@@ -83,6 +89,7 @@ def create_app(
     demo_scanner: DemoScanner | None = None,
     faas_store: FaaSStore | None = None,
     dream_gateway: DreamGateway | None = None,
+    evaluation_store: EvaluationStore | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Teach it a task", version="0.1.0")
     preflight = service or PreflightService()
@@ -94,6 +101,7 @@ def create_app(
     recorder = demo_scanner or DemoScanner()
     faas = faas_store or FaaSStore(episodes.data_dir)
     dream = dream_gateway or DreamGateway()
+    evaluations = evaluation_store or EvaluationStore(episodes.data_dir)
 
     @app.get("/api/preflight", response_model=PreflightResult)
     def get_preflight() -> PreflightResult:
@@ -384,6 +392,57 @@ def create_app(
         if result is None:
             raise HTTPException(status_code=404, detail="Fine-tune job not found.")
         return result
+
+    @app.post("/api/tasks/{task_id}/evaluations", response_model=Evaluation, status_code=201)
+    def create_evaluation(task_id: str, value: EvaluationRequest) -> Evaluation:
+        if tasks.get_task(task_id) is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        job = faas.get_finetune(value.fine_tune_job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Fine-tune job not found.")
+        dataset = faas.get_dataset(job.dataset_version_id)
+        if dataset is None or dataset.task_id != task_id:
+            raise HTTPException(status_code=409, detail="Fine-tune job belongs to another task.")
+        if job.status != "succeeded" or not job.checkpoint:
+            raise HTTPException(status_code=409, detail="Fine-tune must have a completed checkpoint.")
+        prior = [item for item in evaluations.list(task_id) if item.fine_tune_job_id == job.id]
+        if prior:
+            latest_trials = tasks.list_evaluation_trials(prior[0].id)
+            if not any(trial.status == "abandoned" for trial in latest_trials) or any(
+                trial.status in ("starting", "running", "awaiting_rollout", "awaiting_label")
+                for trial in latest_trials
+            ):
+                raise HTTPException(status_code=409, detail="A replacement is allowed only after an unusable trial and no active run.")
+        try:
+            return evaluations.create(task_id, job.id, job.checkpoint, value.minimum_effect, tasks)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/tasks/{task_id}/evaluations", response_model=list[Evaluation])
+    def list_evaluations(task_id: str) -> list[Evaluation]:
+        if tasks.get_task(task_id) is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        return evaluations.list(task_id)
+
+    @app.get("/api/evaluations/{evaluation_id}", response_model=Evaluation)
+    def get_evaluation(evaluation_id: str) -> Evaluation:
+        result = evaluations.get(evaluation_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Evaluation not found.")
+        return result
+
+    @app.get("/api/evaluations/{evaluation_id}/trials", response_model=list[Trial])
+    def list_evaluation_trials(evaluation_id: str) -> list[Trial]:
+        if evaluations.get(evaluation_id) is None:
+            raise HTTPException(status_code=404, detail="Evaluation not found.")
+        return tasks.list_evaluation_trials(evaluation_id)
+
+    @app.get("/api/evaluations/{evaluation_id}/report", response_model=EvaluationReport)
+    def get_evaluation_report(evaluation_id: str) -> EvaluationReport:
+        evaluation = evaluations.get(evaluation_id)
+        if evaluation is None:
+            raise HTTPException(status_code=404, detail="Evaluation not found.")
+        return evaluations.report(evaluation, tasks, episodes)
 
     return app
 
