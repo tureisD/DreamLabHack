@@ -2,14 +2,14 @@
 
 **Working branch:** `codex/stat-eval`
 **Merge target:** `codex/local-app`, not `main`
-**Local/application owner:** tureisD
+**Scope:** statistical evaluation engine and validation
 **Your ownership:** this evaluation package and `tests/evaluation/`
 
 This branch is an implementation handoff. `StatisticalEvaluator.evaluate()` is
 currently a deliberate unavailable stub. There is **no working statistical engine**
-yet. The local application will inject your implementation after review and tests.
-Do not change the root README into an evaluator-only guide: it describes the
-combined application that receives your work.
+yet. Start with the branch-root README for the deliverables and acceptance criteria;
+this file supplies the detailed technical guidance. Application development is
+handled separately.
 
 ## The task
 
