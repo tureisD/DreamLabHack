@@ -1,52 +1,30 @@
-# DreamLabHack: local and statistical evaluation workspace
+# DreamLabHack
 
-Development branch: `codex/local-stat-eval`.
+Shared integration base for the Teach it a task / Dream-FDE Studio project.
 
-This branch starts with environment setup only. The remote repository was empty
-when cloned on 2026-11-21; there was no existing application, dependency manifest,
-or test suite to adopt.
+## Active development
 
-## Setup
+| Branch | Responsibility | Merge target |
+| --- | --- | --- |
+| `codex/local-app` | tureisD: local application, rollout import, persistence, UI, and integration | `main` after evaluation integration |
+| `codex/stat-eval` | Evaluation teammate: statistical evaluation engine and reports | `codex/local-app` |
+| `main` | Final team integration | Future reviewed releases |
 
-Use Python 3.12 and uv (or pip inside a Python 3.12 virtual environment).
+Start with the comprehensive README on `codex/local-app`. The evaluator's task,
+implementation guidance, and pitfalls are documented in
+`src/dreamlab/evaluation/README.md` on `codex/stat-eval`.
 
-```powershell
-uv venv --python 3.12 .venv
-uv pip sync --python .venv/Scripts/python.exe requirements-dev.txt
-.venv/Scripts/python.exe -m pytest --version
-.venv/Scripts/ruff.exe --version
+This branch deliberately contains only the shared starting environment. The local
+application scaffold and evaluation handoff are developed on the branches above.
+No complete robot application or statistical evaluator is implemented yet.
+
+The intended merge order is:
+
+```text
+codex/stat-eval -> codex/local-app -> main
 ```
 
-`requirements-dev.in` lists direct development dependencies;
-`requirements-dev.txt` pins the resolved environment. To update intentionally:
+Use pull requests and preserve this common history. Do not merge statistical
+work directly into `main` before validating the combined local application.
 
-```powershell
-uv pip compile --python .venv/Scripts/python.exe requirements-dev.in -o requirements-dev.txt
-```
-
-Raw recordings, local databases, credentials, virtual environments, and generated
-artifacts are excluded from Git. Add only intentionally curated fixtures later.
-
-## Scope and integration
-
-The working scope is local run ingestion and evaluation persistence, baseline vs
-candidate trial tracking, statistical comparison, and reproducible reports within
-the team's broader Teach it a task / Dream-FDE Studio project.
-
-Reference: [team Notion plan](https://app.notion.com/p/DreamLabs-Hack-41ffb173f45e8077a9ddce60400b8388).
-
-The diagrams connect the evaluator to the station adapter, with metadata in
-SQLite and recordings/reports on the local filesystem. Module boundaries and
-shared record schemas will be aligned with the team's implementation before
-application code is added. The statistical method and stopping rules are not
-selected by this environment setup.
-
-No robot control, paid training, model promotion, or remote service is started
-by these setup commands. No application tests exist yet.
-
-## Joining the team history
-
-This setup starts from an empty remote. If the team independently creates the
-main branch, fetch that branch and replay this small setup commit onto it before
-continuing, reconciling any dependency/configuration overlap. Do not force-push
-or overwrite the team's branch.
+[Team plan](https://app.notion.com/p/DreamLabs-Hack-41ffb173f45e8077a9ddce60400b8388)
