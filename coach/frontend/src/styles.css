@@ -123,4 +123,8 @@ button.secondary { background: #e6eef2; color: #23546a; }
 .evaluation-metrics strong { font-size: 22px; }
 .evaluation-metrics span { color: #62747d; font-size: 12px; margin-top: 5px; }
 .evaluation-next .trial-label { margin-top: 18px; }
+.guide-card { margin-top: 18px; }
+.guide-card .guide-action { color: #1c3948; font-size: 18px; }
+.guide-card li { margin: 7px 0; color: #596872; }
+.guide-card .notice { margin-top: 22px; }
 @media (max-width: 700px) { .evaluation-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

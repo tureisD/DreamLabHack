@@ -25,6 +25,7 @@ from teach_task_coach.faas import (
     FineTuneRecord,
     FineTuneRequest,
 )
+from teach_task_coach.guidance import Guidance, guidance
 from teach_task_coach.preflight import PreflightResult, PreflightService
 from teach_task_coach.station import StationRejected, StationUnavailable
 from teach_task_coach.storage import EpisodeStore
@@ -182,6 +183,12 @@ def create_app(
         if task is None:
             raise HTTPException(status_code=404, detail="Task not found.")
         return task
+
+    @app.get("/api/tasks/{task_id}/guidance", response_model=Guidance)
+    def get_guidance(task_id: str) -> Guidance:
+        if tasks.get_task(task_id) is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        return guidance(task_id, tasks, episodes, demos, faas, evaluations)
 
     @app.post("/api/tasks/{task_id}/baseline-trials", response_model=Trial, status_code=201)
     def create_baseline_trial(task_id: str, value: TrialInput) -> Trial:

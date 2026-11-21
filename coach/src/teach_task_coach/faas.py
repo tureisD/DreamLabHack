@@ -153,7 +153,7 @@ class FaaSStore:
         with self.db.connect() as connection:
             self._schema(connection)
             rows = connection.execute(
-                "SELECT * FROM dataset_versions WHERE (? IS NULL OR task_id = ?) ORDER BY created_at DESC",
+                "SELECT * FROM dataset_versions WHERE (? IS NULL OR task_id = ?) ORDER BY created_at DESC, rowid DESC",
                 (task_id, task_id),
             ).fetchall()
         return [self._dataset(row) for row in rows]
@@ -210,7 +210,7 @@ class FaaSStore:
                 """SELECT fine_tune_jobs.* FROM fine_tune_jobs
                    JOIN dataset_versions ON dataset_versions.id = fine_tune_jobs.dataset_version_id
                    WHERE (? IS NULL OR dataset_versions.task_id = ?)
-                   ORDER BY fine_tune_jobs.created_at DESC""",
+                   ORDER BY fine_tune_jobs.created_at DESC, fine_tune_jobs.rowid DESC""",
                 (task_id, task_id),
             ).fetchall()
         return [self._finetune(row) for row in rows]

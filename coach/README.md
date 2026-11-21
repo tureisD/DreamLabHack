@@ -42,6 +42,8 @@ Task positions are fractions of a marked tabletop, not camera-calibrated robot c
 
 The public station does not provide teleoperation for every driver, so this coach currently imports demonstrations from an external LeRobot recorder. Live camera-occlusion and motion-smoothness scoring, autonomous scene setup, and automatic deployment are outside the current build. The Dream API and physical station need real credentials and hardware for an end-to-end test; the automated suite uses fakes for those boundaries.
 
+The **Guide** screen derives the next action from labelled baseline runs, station faults, demo decisions, dataset validation, FaaS job status, and evaluation results. It recommends an initial pilot once every observed failure cell has a kept valid demonstration. This is a coverage stopping rule, not an optimal demo count or success prediction. The suggested first FaaS recipe is the documented default and remains editable.
+
 ## Checks
 
 ```bash
