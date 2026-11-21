@@ -16,7 +16,7 @@ import dream_control
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path.cwd() / "yam_dream1_rollout")
-    parser.add_argument("--seconds", type=float, default=12)
+    parser.add_argument("--seconds", type=float, default=600, help="Wall-clock ceiling; action requests limit simulated motion")
     parser.add_argument("--task", default="pick up the apple")
     parser.add_argument("--model", type=dream_control.resolve_model, default=dream_control.BETA_MODEL)
     parser.add_argument("--seed", type=recorder.scene_seed, help="Repeat a recorded apple placement")
@@ -34,7 +34,8 @@ def main() -> None:
                    "--model", args.model, "--max-requests", str(args.max_requests)]
         if args.dry_run:
             options.append("--dry-run")
-        rows = dream_control.main(options, shared_env=env) or 0
+        details.update(requests_attempted=0, model_action_rows=0)
+        rows = dream_control.main(options, shared_env=env, progress=details) or 0
         details["model_action_rows"] = rows
         if not args.dry_run and not rows:
             raise RuntimeError("Pilot ended with zero executed model actions. Review the partial recording.")

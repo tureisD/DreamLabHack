@@ -318,7 +318,7 @@ class RunViewerSync:
         return True
 
 
-def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collision_view=None):
+def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collision_view=None, progress=None):
     """Run this module entry point.
     @param argv Optional command-line arguments.
     @param shared_env Optional existing simulation environment.
@@ -369,7 +369,8 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
         while any(len(window) < FRAMES for window in windows.values()):
             state = env.state()
             env.step(state["left"], state["right"])
-            capture(env, windows, keep=steps % FRAME_EVERY_STEPS == 0)
+            if steps % FRAME_EVERY_STEPS == 0:
+                capture(env, windows)
             steps += 1
         obs = observation(env, windows, args.task, args.model, args.model in POSE_MODELS)
         if args.dry_run:
@@ -418,6 +419,8 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
             requests_started = 0
             while active() and (args.max_requests is None or requests_started < args.max_requests):
                 requests_started += 1
+                if progress is not None:
+                    progress["requests_attempted"] = requests_started
                 started = time.monotonic()
                 future = pool.submit(policy.get_action)
                 # Hold simulation time while inference is pending; keep the viewer responsive.
@@ -437,6 +440,12 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
                 except Exception as error:
                     if args.max_requests is not None and requests_started >= args.max_requests:
                         raise
+                    # A Windows connection abort can happen during a send or read.
+                    # Its outcome is unknown. Only use another slot in an explicit budget.
+                    if (args.max_requests is not None and type(error).__name__ == "DreamProtocolError"
+                            and isinstance(error.__cause__, ConnectionAbortedError)):
+                        print("Socket aborted. The next request uses a fresh connection and counts against the cap.", flush=True)
+                        continue
                     # The serve restarted the episode: the client already holds the new session, so ask again.
                     if type(error).__name__ == "DreamSessionExpired" and restarts < 3:
                         restarts += 1
@@ -482,8 +491,11 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
                     tick = time.monotonic()
                     env.step(l, r)
                     executed_rows += 1
+                    if progress is not None:
+                        progress["model_action_rows"] = executed_rows
                     kept = steps % FRAME_EVERY_STEPS == 0
-                    images = capture(env, windows, keep=kept)
+                    if viewer or kept:
+                        images = capture(env, windows, keep=kept)
                     if kept:
                         feed(policy, env, windows, args.task, args.model, steps, station=poses)
                     steps += 1

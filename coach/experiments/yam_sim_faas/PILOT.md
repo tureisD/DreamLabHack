@@ -53,3 +53,13 @@ uv run --locked --extra sim python .\experiments\yam_sim_faas\record_yam_demos.p
 This samples the apple's initial X and Y positions within 2.5 cm of the original placement. Seeds 101 and 102 give two reproducible scenes. Omit the seed to choose a fresh starting seed. Repeating a seed repeats the placement and creates a separate run. Run **Scan rollouts** again after collection. Each finished run keeps its videos, state/action rows and an atomic `rollout.json` beside them. The sidecar records simulation provenance and the actual starting position. The scripted pickup check lives in `simulation.script_result`; the operator label is entered separately. Review failures before selecting training examples. An interruption during capture can produce a partial recording, and abrupt process termination can leave an unfinished directory that Coach skips.
 
 Review and label the original 20 Hz recordings. For training, select reviewed scripted successes in a separate source directory before using the 10 Hz conversion in the [experiment notes](README.md). The standalone statistical evaluator requires eligible physical trials for its real-world verdict.
+
+## Save your key on Windows
+
+From the coach directory, run the launcher below after installing the sim extra. The first run opens a masked prompt and checks that your account can serve Dream-1 Beta. It stores the key under Windows current-user DPAPI in `%LOCALAPPDATA%/TeachTaskCoach/dream-key.dpapi`. Later launches under that Windows login reuse the key. Use `-ForgetKey` to remove the local copy or `-ReplaceKey` to enter a replacement and run a pilot.
+
+```powershell
+.\experiments\yam_sim_faas\run_saved_pilot.ps1 -Seed 41 -MaxRequests 5
+```
+
+Each full 48-row response supplies 2.4 seconds of simulated control at 20 Hz. Five full responses give 12 seconds of motion plus 1.65 seconds of camera warm-up. The 600-second wall-clock ceiling leaves time for rendering and network latency. A short reply, spent retry slot, or interruption can shorten the recording. The run sidecar tracks attempted calls and executed rows even if the run is interrupted. To observe a longer attempt, explicitly choose a larger request budget.

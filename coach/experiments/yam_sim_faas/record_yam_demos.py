@@ -39,7 +39,7 @@ CONFIG = {
 
 
 class RecordingYamEnv(YamEnv):
-    def __init__(self, folder, task, seed):
+    def __init__(self, folder, task, seed, *, defer_video=False):
         super().__init__()
         self.folder = folder
         self.task = task
@@ -49,6 +49,7 @@ class RecordingYamEnv(YamEnv):
         self.apple_xy = apple[:2].tolist()
         self.states: list[np.ndarray] = []
         self.actions: list[np.ndarray] = []
+        self.video_poses = [] if defer_video else None
         self.outputs = {}
         for role in ROLES.values():
             video = self.folder / f"videos/chunk-000/observation.images.{role}/episode_000000.mp4"
@@ -64,6 +65,15 @@ class RecordingYamEnv(YamEnv):
         state = self.state()
         self.states.append(np.r_[state["right"], state["left"]].astype(np.float32))
         self.actions.append(np.r_[right, left].astype(np.float32))
+        if self.video_poses is None:
+            self._write_video_frame()
+        else:
+            # Store the actual full scene pose, including the free apple. Rendering
+            # review videos between model calls can outlast the gateway session.
+            self.video_poses.append((self.data.time, self.data.qpos.copy()))
+        return super().step(left, right)
+
+    def _write_video_frame(self):
         images = self.images()
         for camera, role in ROLES.items():
             rgb = np.asarray(Image.fromarray(images[camera]).resize((320, 176), Image.Resampling.BILINEAR))
@@ -71,9 +81,14 @@ class RecordingYamEnv(YamEnv):
             frame = av.VideoFrame.from_ndarray(rgb, format="rgb24")
             for packet in stream.encode(frame):
                 container.mux(packet)
-        return super().step(left, right)
 
     def close(self):
+        if self.video_poses is not None:
+            for instant, pose in self.video_poses:
+                self.data.time = instant
+                self.data.qpos[:] = pose
+                mujoco.mj_forward(self.model, self.data)
+                self._write_video_frame()
         for container, stream in self.outputs.values():
             for packet in stream.encode():
                 container.mux(packet)
@@ -127,7 +142,7 @@ def recording(root, task, checkpoint, seed, source):
     folder = root / f"yam-{uuid4().hex}"
     folder.mkdir()
     started = datetime.now(timezone.utc).isoformat()
-    env = RecordingYamEnv(folder, task, seed)
+    env = RecordingYamEnv(folder, task, seed, defer_video=source == "model")
     details = {"source": source, "seed": seed, "apple_xy_m": env.apple_xy}
     status, reason, error = "complete", "finished", None
     try:

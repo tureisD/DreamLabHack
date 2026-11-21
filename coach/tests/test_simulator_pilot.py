@@ -55,6 +55,8 @@ def test_simulator_pilot_budget_and_review(tmp_path, monkeypatch):
     runs = [client.get("/api/episodes/" + item["id"]).json() for item in client.get("/api/episodes").json()]
     first, failed = sorted(runs, key=lambda r: r["simulation"]["seed"])
     assert first["status"] == "complete" and first["simulation"]["model_action_rows"] == 1
+    assert failed["simulation"]["requests_attempted"] == 1
+    assert failed["simulation"]["model_action_rows"] == 0
     assert failed["status"] == "partial" and failed["success"] is None
     assert first["simulation"]["apple_xy_m"] != failed["simulation"]["apple_xy_m"]
     path = "/api/episodes/" + first["id"]

@@ -14,6 +14,7 @@ import dataclasses
 import http.client
 import json
 import secrets
+import select
 import socket
 import struct
 import time
@@ -196,6 +197,7 @@ class Transport:
         # True once a response was read on the current connection: a failure to send on it is
         # then a stale keep-alive (the gateway closed it idle, or restarted), not a dead gateway.
         self._reused = False
+        self._last_response_at = 0.0
 
     def request(
         self,
@@ -274,6 +276,19 @@ class Transport:
         failure drops the connection first. `tcp_info` is the sender-side TCP health of this request's
         socket (empty on any platform without TCP_INFO). A `timeout_ms` applies to this exchange only; the
         connection goes back to the channel's timeout after it."""
+        # Rendering a recorded chunk can leave a keep-alive socket idle for tens
+        # of seconds. Rotate it before sending the next body, retaining the session ID.
+        if self._reused and self._connection is not None:
+            sock = self._connection.sock
+            expired = time.monotonic() - self._last_response_at >= 5.0
+            # No reply is outstanding here. An idle socket already readable
+            # (often EOF after a peer close) is safe to replace before the POST.
+            try:
+                replace = expired or sock is None or bool(select.select([sock], [], [], 0)[0])
+            except (OSError, ValueError):
+                replace = True
+            if replace:
+                self._drop()
         reused = self._reused
         answered = False  # Once the reply's status line is in, the gateway has processed the request
         timeout_s = (timeout_ms if timeout_ms is not None else self.timeout_ms) / 1000.0
@@ -312,6 +327,7 @@ class Transport:
             self._drop()
             raise DreamProtocolError(_unreachable(self._endpoint(), exc)) from exc
         self._reused = True
+        self._last_response_at = time.monotonic()
         connection.timeout = self.timeout_ms / 1000.0
         if connection.sock is not None:
             connection.sock.settimeout(connection.timeout)

@@ -399,3 +399,19 @@ def test_f18_an_idle_connection_the_gateway_closed_is_retried_once() -> None:
     finally:
         transport.close()
         listener.close()
+
+
+def test_idle_socket_replaced_before_next_post(server):
+    from dream.transport import Transport
+
+    channel = Transport(server.host, server.port, timeout_ms=2000)
+    body = {"checkpoint": "c", "session_id": None, "reset": False, "observation": {}}
+    try:
+        channel.request(body, {})
+        first = channel._connection
+        channel._last_response_at -= 10
+        channel.request(body, {})
+        assert channel._connection is not first
+        assert len(server.requests) == 2
+    finally:
+        channel.close()
