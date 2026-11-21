@@ -1,9 +1,9 @@
 name: evaluation-checks
 on:
   push:
-    branches: [main, codex/stat-eval]
+    branches: [main, codex/stat-eval, codex/stat-eval-extensions]
   pull_request:
-    branches: [main, codex/stat-eval]
+    branches: [main, codex/stat-eval, codex/stat-eval-extensions]
 permissions:
   contents: read
 jobs:

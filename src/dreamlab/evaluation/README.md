@@ -1,5 +1,9 @@
 # Statistical evaluation — teammate implementation assignment
 
+On `codex/stat-eval-extensions`, this is the inherited **parent prerequisite**.
+The follow-on B/C assignment is in `docs/extensions/README.md`; do not duplicate
+the parent's engine implementation or change its methods during this planning step.
+
 **Working branch:** `codex/stat-eval`
 **Merge target:** `main`, directly
 **Scope:** standalone statistical engine, file-based runner, reports and validation

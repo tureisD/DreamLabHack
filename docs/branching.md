@@ -1,5 +1,25 @@
 # Standalone evaluation branch workflow
 
+## Child branch for later improvements
+
+`codex/stat-eval-extensions` starts from parent commit
+`c08056c78896564ce82a3516f4e9b488310d256f`. Its initial PR base is
+**`codex/stat-eval`**. Read [the extension plan](extensions/README.md).
+Wait for the baseline engine's validated release before implementing extensions.
+
+To create a fresh checkout, clone the repository and use
+`git switch --track origin/codex/stat-eval-extensions`. In an existing checkout use
+`git fetch origin`, then switch to the existing child branch. Commit or stash work
+before synchronizing with `git merge origin/codex/stat-eval`; never force-push either
+shared branch. Update child README/contract assumptions after each parent sync.
+
+The intended path is `codex/stat-eval-extensions -> codex/stat-eval -> main`.
+If the baseline is merged and the parent branch retired first, merge current main
+into this child and open its PR against main instead; document that change. Do not
+depend on a deleted parent or rewrite collaborator commits.
+
+The workflow below describes the baseline parent.
+
 Updated 21 November 2026. The local application has been cancelled. The active
 feature branch is **`codex/stat-eval`**, merging directly into **`main`**.
 The intermediate `codex/local-app` branch is retired. Its history was backed up

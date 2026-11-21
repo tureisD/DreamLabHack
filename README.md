@@ -1,14 +1,28 @@
-# DreamLabHack — standalone statistical evaluation
+# DreamLabHack — evaluation extensions and run diagnosis
 
-**Branch:** `codex/stat-eval`
-**Merge target:** `main`
+**Branch:** `codex/stat-eval-extensions`
+**Parent / initial merge target:** `codex/stat-eval`
+
+This child branch plans the next stage **after the parent statistical evaluator is
+implemented and validated**: B1–B6 (STEP, offline screening, initiation probes,
+caching and replay) and C1–C4 (small signal-based run diagnosis and handoffs).
+Start with the [extension plan](docs/extensions/README.md),
+[research audit](docs/extensions/research.md), and
+[implementation tickets](docs/extensions/implementation-plan.md).
+
+This is a planning branch. No STEP dependency, model call, new statistical method,
+diagnostic engine or demo UI is implemented here. Parent code and schemas remain
+unchanged. These extensions do not revive the cancelled local application.
+
+The remainder of this README describes the inherited baseline assignment. Implement
+that work on the parent branch, then synchronize this child before extension work.
 
 Build the statistical engine that answers:
 
 > Did the candidate robot checkpoint improve task success over the baseline,
 > and is the evidence strong enough to recommend switching?
 
-This branch is now the primary implementation branch for this component. The local
+The parent branch is the primary implementation branch for this component. The local
 application has been cancelled; evaluation has no dependency on it. Build a callable
 engine and a small file-based runner/report workflow, with statistical tests and
 reproducible evidence. No robot, web application, or paid training is required.
