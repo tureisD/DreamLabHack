@@ -131,6 +131,10 @@ Use `http://127.0.0.1:8000/docs` for the interactive API and
 The same commands work in a POSIX shell. If the branch already exists locally,
 use `git switch codex/local-app` instead of creating another tracking branch.
 
+If port 8000 is already occupied, use `uv run --locked --all-extras dream-local
+--port 8765` and substitute that port in the URLs. Do not stop an unrelated service
+to run this scaffold. The launcher always binds to loopback.
+
 Local-only dependency setup is available with `uv sync --locked --extra local
 --group dev`; run commands with the same extra. The full commands above install
 both components' dependencies and run all shared checks. The previous
