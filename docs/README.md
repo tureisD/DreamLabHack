@@ -17,12 +17,7 @@ The standalone evaluation component replaces the cancelled local-app workstream.
 
 ## Current state
 
-The contracts, synthetic request fixture, dependency lockfile and CI exist.
-`StatisticalEvaluator` still raises `EvaluationUnavailable`. The runner and planned
-tests are not implemented. Passing scaffold checks does not validate a method.
-
-Existing evaluation commits and model schema are preserved. The obsolete local API,
-app launcher, frontend placeholders, app-only tests and dependencies are removed.
-Useful provenance, dataset and diagnosis guidance is adapted for file-based
-evaluation. No dashboard, video importer, robot adapter, paid training or database
-is required for this assignment.
+The evaluator implements fixed-horizon and finite declared-look comparisons.
+The standalone CLI publishes input snapshots, a report, a summary and a
+reproducibility manifest. The test suite exercises the contract, numerical
+methods, seeded operating characteristics and standalone artifact workflow.

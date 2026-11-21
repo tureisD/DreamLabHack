@@ -45,9 +45,9 @@ its UI, database, station-control or importer assignment during conflict resolut
 2. Open a PR with **base `main`**, head **`codex/stat-eval`**.
 3. Document supported/unsupported designs, input requirements, numerical references,
    simulation evidence, exact commands and any contract changes.
-4. Run lint, formatting, complete tests and package build on Windows/Linux. Verify
-   a fresh installation and standalone request/report round trip once implemented.
-   Method validation remains separate from scaffold tests.
+4. Run lint, formatting, tests and package build on Windows/Linux. Verify a fresh
+   wheel install, Linux request/report round trip, and Windows fail-closed artifact
+   behavior. Method validation remains separate from runner tests.
 5. Resolve main's README deliberately: retain a useful project entry point and the
    evaluator's technical guides. No intermediate app README needs preservation.
 6. Merge after project review. Consumers can call the protocol or exchange versioned

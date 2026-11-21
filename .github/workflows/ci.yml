@@ -1,7 +1,7 @@
 name: evaluation-checks
 on:
   push:
-    branches: [main, codex/stat-eval]
+    branches: [main, codex/stat-eval, codex/stat-eval-implementation]
   pull_request:
     branches: [main, codex/stat-eval]
 permissions:
@@ -23,3 +23,5 @@ jobs:
       - run: uv run --locked --all-extras ruff format --check .
       - run: uv run --locked --all-extras pytest
       - run: uv build
+      - name: Verify fresh wheel and platform CLI behavior
+        run: uv run --locked --all-extras python tests/evaluation/wheel_smoke.py

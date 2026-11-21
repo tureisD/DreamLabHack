@@ -1,1 +1,1 @@
-"""Reserved for the statistical evaluator; implemented on codex/stat-eval."""
+"""Statistical evaluation of explicitly planned two-checkpoint comparisons."""

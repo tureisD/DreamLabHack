@@ -15,8 +15,9 @@ timezones. Differences are probability units: `0.10` means 10 percentage points.
 `planned_trials_per_checkpoint` counts **attempts**, not successful or conveniently
 labeled runs. Replace an invalid trial only under a rule declared before the
 experiment; v1 has no replacement rule and therefore does not authorize replacement.
-`planned_looks` records attempted counts per checkpoint at which a future sequential
-method may decide. A valid schedule does not implement an error-control method.
+`planned_looks` records attempted counts per checkpoint at which a sequential
+method may decide. The numerical guide describes the implemented error control
+and its assumptions. [Sequential method](../src/dreamlab/evaluation/README.md#finite-look-sequential-method)
 
 Every `Trial` identifies an episode, task version, checkpoint, scenario, session,
 optional matched pair, source URI and timestamp. `collection_mode` distinguishes
@@ -65,15 +66,14 @@ or design cannot support the intended inference. Do not return NaN, infinity, fa
 zero-width intervals or zeros for undefined estimates. A report is not approval
 to deploy a model.
 
-Suggested canonical input checksum: SHA-256 over UTF-8 `json.dumps(request.model_dump(
+The canonical input checksum is SHA-256 over UTF-8 `json.dumps(request.model_dump(
 mode="json"), sort_keys=True, separators=(",", ":"), allow_nan=False)`. Preserve
-trial order: it is meaningful for sequential analysis. The standalone runner or calling integration saves the
-exact snapshot used, plus code revision, lockfile identity and report. Include all
-method options and seeds in a versioned configuration before adding stochastic
-algorithms. Do not depend on wall-clock time or hidden global RNG state for results.
+trial order for sequential replay. The standalone runner saves the submitted
+bytes, canonical bytes, report and reproducibility manifest. Include all method
+options and seeds in a versioned configuration before adding stochastic algorithms.
+Keep results independent of wall-clock time and hidden global RNG state.
 
 Statistical consumers may only import `dreamlab.contracts` and statistical
 dependencies. The runner owns file I/O and calls the protocol. Other project
 modules may call the same protocol without a web application. Schema changes
-require producer/consumer review and fixture updates. The evaluator remains an
-unimplemented scaffold until its numerical validation is completed.
+require producer/consumer review and fixture updates.

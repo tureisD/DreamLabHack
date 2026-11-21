@@ -1,89 +1,99 @@
-# Standalone architecture and integration
+# Standalone evaluation workflow
 
-Status: implementation design. The engine today is an unavailable stub.
+`StatisticalEvaluator.evaluate` takes a validated `EvaluationRequest` and returns
+an `EvaluationReport`. The runner owns file I/O and invocation metadata. Other
+project modules can call the same protocol or supply JSON. The producer is
+responsible for freezing the plan, providing all attempts and labels, and keeping
+collection and assignment records. Unique IDs alone cannot verify independence.
 
-```text
-Versioned request JSON / project producer
-  -> schema validation
-  -> immutable input snapshot + canonical hash
-  -> StatisticalEvaluator.evaluate(request)
-       eligibility -> supported method -> decision -> report
-  -> correspondence checks
-  -> report JSON + readable summary + reproducibility manifest
+From an installed checkout on Linux, run:
+
+```sh
+uv sync --locked --extra eval --group dev
+uv run --locked --extra eval dream-eval evaluate --input request.json --output-dir run-001
 ```
 
-## Ownership
+`python -m dreamlab.evaluation evaluate --input - --output-dir run-002` runs the
+same command in the installed environment and reads one JSON request from
+standard input. The parent directory must already exist. Each invocation requires
+a new destination. The command writes its results to files.
 
-The engine takes `EvaluationRequest` and returns `EvaluationReport`. It depends on
-shared contracts and numerical libraries. A thin runner owns file I/O, invocation
-metadata and error presentation. Future project modules call the same protocol or
-supply JSON; no HTTP service is needed.
+| File | Contents |
+| --- | --- |
+| `request.raw.json` | Submitted bytes, including original encoding, whitespace, and line endings. May be malformed. |
+| `request.json` | Validated canonical JSON using the [v1 checksum rule](contracts.md). Includes effective defaults and preserves trial order. The file has no trailing newline. |
+| `report.json` | Schema-validated `EvaluationReport`. The runner also verifies IDs, checkpoint roles, raw counts, the canonical SHA-256, and consistency of the decision and estimates with the plan. V1 binds task identity through request membership and the hash. |
+| `summary.txt` | Decision, counts, estimated rates, effect in probability units, uncertainty, rationale and limitations. Sequential estimates may use an earlier prefix than the raw counts. |
+| `manifest.json` | Artifact-relative input paths, raw and canonical SHA-256, submitted size, effective plan and seed, method settings, engine and package versions, Python and platform, source identity and lockfile SHA-256. |
+| `diagnostics.json` | Failure bundle only. Contains `schema_version`, `exit_code`, `code`, `stage`, `message` and `details`, such as validation paths or expected and actual report values. |
 
-The producer supplies task/plan identity, all attempts, verified labels, checkpoint
-identity and collection provenance. The engine checks statistical suitability.
-Valid JSON and unique session IDs do not prove randomization or independence.
+For evaluable reports, the runner first checks internal estimate/interval
+consistency and then recomputes the deterministic public evaluator result from
+the same canonical request. It requires exact agreement on decisions, arm rates
+and intervals, effect and difference interval, method, engine version, warnings
+and rationale. This prevents a forged but internally consistent report from
+claiming estimates that do not follow from the submitted outcomes. The request
+snapshot is consequently evaluated twice in the normal CLI path; the evaluator
+is pure and deterministic. A `not_evaluable` report must omit inferential estimates.
 
-Keep `src/dreamlab/contracts/models.py` unchanged unless a reviewed extension is
-needed. Its `extra='forbid'` boundary means rich audit metadata belongs in a sidecar
-manifest until incorporated into a jointly reviewed schema version.
+Source identity hashes a compact sorted JSON mapping of package-relative Python
+source paths to each file's byte SHA-256. This covers dirty and untracked Python
+files within the package in a checkout, as well as installed package code. Only
+an editable install whose distribution `direct_url.json` identifies the imported
+checkout records its `uv.lock` and, when available, Git `HEAD`. Otherwise the
+runner hashes `dreamlab/uv.lock` shipped in the wheel, including in a `--target`
+install under an unrelated project. A missing lock has a null checksum; the
+runner does not search ancestor directories. Installed package versions are
+reported separately from the shipped lock identity.
 
-## Planned runner and artifacts
+| Exit | Meaning |
+| --- | --- |
+| `0` | A valid report was published. Inspect `report.decision`, including `not_evaluable`. |
+| `2` | Malformed request content (`malformed_request`) or command-line usage error. |
+| `3` | Evaluator failure (`evaluator_error` or `evaluator_unavailable`). |
+| `4` | Output violated the report schema (`invalid_report`) or did not match the request (`report_mismatch`). |
+| `5` | Input read error (`input_unreadable`), destination collision (`output_collision`), or filesystem failure (`output_error`). |
 
-Implement `src/dreamlab/evaluation/cli.py` later. Proposed invocation:
-`dream-eval evaluate --input request.json --output-dir artifacts/run-001`.
-**This command does not exist yet**; there is no console entry point. Add it with
-integration tests, not a placeholder claiming success.
+An unsuccessful evaluation publishes diagnostics and the submitted bytes if read,
+plus the canonical snapshot if validated. The report, summary and manifest appear
+only in successful bundles. An unreadable input can yield a diagnostics-only
+bundle, including when `--input -` is used with closed standard input. Standard
+error points to published diagnostics or explains usage and publication failures.
+If the bundle cannot be written or published, no partial destination is exposed.
 
-Validate input, save canonical bytes using [contracts](contracts.md), call the engine,
-then verify report evaluation/checkpoint IDs, trial identities, input hash and raw
-counts. Preserve trial order and agree its report convention in shared fixtures.
+The CLI requires Linux with `renameat2(RENAME_NOREPLACE)` and a destination
+filesystem that supports it and enforces Linux/POSIX permissions. On Windows,
+macOS, or a Linux filesystem lacking that rename operation, the CLI exits `5`
+with `output_error` and does not publish. The pure Python evaluator is separate
+and does not need these filesystem primitives.
 
-```text
-artifacts/<run-id>/
-  request.json             exact canonical input
-  report.json              validated result, if produced
-  manifest.json            input hash, engine/config, code and lock identities
-  summary.txt              counts, effect units, uncertainty and limitations
-  diagnostics.json         structured failures when present
-```
+The runner uses an exclusive sibling reservation to coordinate simultaneous
+runs. It opens the output parent once and stages the bundle inside a private
+same-filesystem directory. It exclusively creates files without following
+symlinks, then atomically moves the actual completed directory from inside the
+private directory, without replacing existing files, directories or symlinks.
+Replacing the visible staging entry cannot redirect those writes or publication.
+The caller must select the output parent via a trusted path; this does not protect
+against processes that can access the private staging directory (such as the same
+UID) or modify the destination after publication.
 
-Use a new directory per invocation, atomic publication and explicit handling of
-existing outputs. Never rewrite an old report after labels or methods change.
-Record method options and RNG seed explicitly. Failed execution retains input
-and diagnostics, never a fabricated report.
+Cleanup errors emit `cleanup_warning` on stderr without changing the result of
+publication. Interruption, failed cleanup or an altered staging name can leave
+hidden reservations or staging directories. Verify ownership and that the runner
+has exited before removing leftovers. Publication is atomic for visibility, not
+a guarantee of durability across a system crash.
 
-Recommended exit semantics: success means a well-formed report was produced,
-including `not_evaluable`; malformed input or execution failure returns nonzero.
-Consumers inspect `report.decision`, not the process status, to interpret findings.
-Document exact exit codes when implementing the CLI.
+## Statistical scope
 
-## Capabilities and decisions
+The [numerical guide](../src/dreamlab/evaluation/README.md) describes supported
+v1 fixed-horizon and declared-look group-sequential comparisons. Well-formed
+unsupported or ineligible requests produce `not_evaluable`. `inconclusive`
+describes a supported comparison without a directional verdict. Neither decision
+authorizes deployment. V1 lacks fields for randomization manifests, reset
+confirmation and intervention policies. Preserve that producer evidence separately.
 
-Publish supported schema/design/mode/label-policy combinations in a versioned
-capability description. An importable class does not establish method support.
-Unsupported well-formed designs return `not_evaluable`; the current unimplemented
-engine raises `EvaluationUnavailable`. Programming/numerical exceptions remain errors.
-
-Keep `inconclusive`, `not_evaluable` and execution failure distinct. Undefined
-estimates are null, not zero. Account for success, failure, unknown and invalid.
-Effects are candidate minus baseline in probability units; percentage points are
-display formatting. Reports never authorize deployment.
-
-## Sequential execution and contract gaps
-
-Enable repeated-look execution only after method, schedule and replay validation.
-Persist every look's exact input/result and preserve the first terminal decision.
-Restarts and post-stop data must not rewrite history. Repeated fixed-horizon
-reports are not sequential error control.
-
-V1 cannot fully express randomization manifests, reset confirmation, intervention
-policies, source aliases or simulator-oracle labels. Preserve producer evidence
-and refuse unsupported inference; never invent required values. Sidecars alone
-do not establish validity. Contract changes require fixtures and consumer tests.
-
-## Integration acceptance
-
-Fresh installation -> known request -> real engine -> save/reload -> verify
-IDs/hash/counts and deterministic output. Test unsupported and malformed requests
-separately. This replaces the former browser/database integration requirement and
-needs no hardware, network, video decoder or paid service.
+Run repeated looks only using the predeclared schedule and retain each submitted
+snapshot in its own directory. The engine replays the first terminal decision from
+ordered attempts. The runner neither manages live trial collection nor maintains
+cross-invocation stopping state. Repeated fixed-horizon analyses do not control
+sequential error.

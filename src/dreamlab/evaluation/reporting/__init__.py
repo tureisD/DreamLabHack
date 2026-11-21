@@ -1,1 +1,1 @@
-"""Implement deterministic contract reports and optional renderers here."""
+"""Reproducible contract reports for fixed and sequential evaluations."""

@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "evaluation_id": "synthetic-contract-example",
+  "decision": "inconclusive",
+  "baseline": {
+    "checkpoint_id": "baseline-v1",
+    "attempted": 2,
+    "successes": 1,
+    "failures": 1,
+    "unknown": 0,
+    "invalid": 0,
+    "success_rate": 0.5,
+    "success_interval": {
+      "lower": 0.09453120573423068,
+      "upper": 0.9054687942657693,
+      "confidence_level": 0.95
+    }
+  },
+  "candidate": {
+    "checkpoint_id": "candidate-v2",
+    "attempted": 2,
+    "successes": 2,
+    "failures": 0,
+    "unknown": 0,
+    "invalid": 0,
+    "success_rate": 1.0,
+    "success_interval": {
+      "lower": 0.342380227506653,
+      "upper": 1.0,
+      "confidence_level": 0.95
+    }
+  },
+  "difference": 0.5,
+  "difference_interval": {
+    "lower": -0.2725727851131816,
+    "upper": 0.9054687942657693,
+    "confidence_level": 0.95
+  },
+  "method": "Fixed-horizon: two-sided Wilson score arm intervals and Newcombe difference (method 10)",
+  "engine_version": "1.0.0",
+  "input_sha256": "dd35345f5bdb690c5d5b091b2e814550e762355bb7d74f7cb6c7d6b3378ae130",
+  "trial_ids": [
+    "trial-1",
+    "trial-2",
+    "trial-3",
+    "trial-4"
+  ],
+  "warnings": [
+    "Inference assumes independent binomial attempts under a common task and scenario mix. The plan, seed and IDs do not prove randomization, independence or reset compliance.",
+    "A single planned comparison does not adjust for checkpoint selection. Task success alone does not establish safety, cost or readiness to deploy. Synthetic examples validate software, not robot performance."
+  ],
+  "rationale": "Submitted totals: baseline 2, candidate 2 attempts; planned budget 2 per checkpoint (met). Decision-time prefix: first 4 of 4 submitted trial IDs in order, through \"trial-4\" inclusive. Decision counts: baseline successes=1, failures=1; candidate successes=2, failures=0 (2 attempts per arm; no unknown or invalid outcomes). Arm rates and intervals, and the candidate-minus-baseline difference and interval in probability units, refer to this prefix. The intervals have nominal fixed-sample confidence 1 - 0.05; they do not provide repeated-look error control. Neither directional threshold is crossed (improvement margin 0.1, regression threshold 0); this is not equivalence."
+}

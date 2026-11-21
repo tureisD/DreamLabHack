@@ -1,80 +1,60 @@
-# Evaluation testing, diagnosis and repair
+# Evaluation testing and diagnostics
 
-This replaces the proposed app testing dashboard with a small reproducible
-evaluation validation workflow. It is an implementation specification, not an
-already implemented facility. No browser or database is required.
+From the repository root, use the locked Python 3.12 environment:
 
-## Checks available now
-
-```shell
+```sh
 uv sync --locked --extra eval --group dev
 uv run --locked --extra eval ruff check .
 uv run --locked --extra eval ruff format --check .
 uv run --locked --extra eval pytest
 uv build
+uv run --locked --extra eval python tests/evaluation/wheel_smoke.py
 ```
 
-Today these check structural contracts and explicit engine unavailability only.
-When numerical/simulation tests are added, use `pytest -m "not statistical"` for
-the fast suite and `pytest -m statistical` for the seeded validation study. CI
-still runs the complete suite unless a separately reviewed configuration changes it.
+Use `uv run --locked --extra eval pytest -m 'not statistical'` for deterministic
+checks and `uv run --locked --extra eval pytest -m statistical` for the seeded
+operating-characteristics gate. Linux CI runs the full CLI publication tests.
+Windows CI runs the portable suite and verifies that publication fails closed.
+The fresh-wheel smoke installs into a new environment and a `--target` directory
+under an unrelated project, and verifies the shipped lock bytes. The
+[validation suite](../tests/evaluation/README.md) lists scenario tests.
 
-## Planned scenario catalog
+## Evaluating one case on Linux
 
-| Scenario | Required observation |
-| --- | --- |
-| Reviewed supported fixed-horizon example | Independent expected rates, intervals and decision; correct input hash |
-| Empty/tiny/all-success/all-failure arms | Defined boundary behavior, no NaN/inf or invented precision |
-| Practical-margin and zero-bound equality | Strict decision inequalities implemented exactly |
-| Swapped baseline/candidate | Correct effect orientation and checkpoint identities |
-| Incomplete or over-budget attempts | Explicit eligibility handling; no favorable retrospective subset |
-| Unknown/invalid/unverified/contaminated outcomes | Complete raw counts and explicit inference limitations |
-| Paired, clustered, observational or simulated data | No silent independent real-world analysis |
-| Duplicate attempts or mismatched task/checkpoint | Structural or eligibility rejection at the appropriate boundary |
-| Changed label/input order after a saved run | New input hash; old artifacts remain unchanged |
-| Wrong provider hash/counts/IDs | Integration rejects mismatched output |
-| Unsupported/missing engine | Explicit unavailable/not-evaluable behavior, never a positive fixture report |
-| Repeated look and restart | Same first terminal decision under validated sequential replay |
-| Output path collision or write failure | No overwritten/half-published report; actionable diagnostics |
+```sh
+out=$(mktemp -d)
+uv run --locked --extra eval dream-eval evaluate \
+  --input tests/fixtures/evaluation_request.json --output-dir "$out/fixture"
+cmp "$out/fixture/report.json" tests/evaluation/examples/evaluation_report.json
+```
 
-For invalid fixtures, the test passes when the expected rejection occurs. Separate
-test execution status from the report's scientific decision. `not_evaluable` may
-be the correct result; an unrun validation study is never a pass.
+The fixture demonstrates the file round trip with four synthetic attempts. The
+new directory keeps the submitted bytes, canonical request, report, summary
+and manifest. Compare the input hashes, ordered IDs and raw counts to verify
+correspondence. Changing labels or trial order requires a new directory.
 
-## Result artifacts and diagnosis
+The [standalone workflow](evaluation-workflow.md) documents the exact exit codes
+and `diagnostics.json` fields. `not_evaluable` is a valid report with exit `0`.
+On execution failure, look for `diagnostics.json` and the input snapshots. For a
+collision or publication failure, inspect stderr. Existing bundles are preserved.
+Reproduce with the captured request and effective settings, identify the failing
+boundary, and add an independent reference or regression test before rerunning.
+Keep the original failure and its artifacts for comparison.
 
-Each validation run should save scenario/input hash, method/configuration, seed,
-expected and observed results, numerical tolerances, package versions, timings
-and failure details. Simulation studies additionally record replication counts,
-rate/design settings, Monte Carlo uncertainty and acceptance criteria chosen
-before results are inspected. Store generated artifacts outside tracked source.
+## Seeded software validation
 
-Use stable error categories for malformed input, unsupported design, missing
-provenance, incomplete budget, unavailable engine, numerical failure, report
-mismatch and output-write failure. Attach the exact field/trial or calculation
-involved. Keep unexpected exception details in diagnostic output; do not turn
-them into a statistical verdict.
+```sh
+out=$(mktemp -d)
+uv run --locked --extra eval python tests/evaluation/operating_characteristics.py > "$out/operating-characteristics.json"
+```
 
-To repair an implementation issue:
+This validation study runs a prescribed synthetic grid with finite-law references,
+fixed seeds, replication counts, tolerances and public evaluator parity. It reports
+coverage, false directional findings, power and sequential sample use. The
+single-request CLI evaluates a supplied experiment snapshot and does not run the
+study or orchestrate experiments. See the [validation protocol and results](../tests/evaluation/VALIDATION.md).
 
-1. Reproduce from the saved request, configuration, dependency versions and seed.
-2. Identify the first failing boundary: schema -> eligibility -> method -> decision
-   -> report -> runner serialization.
-3. Add or select an independent reference/edge-case test; fix the code or documented
-   configuration. Do not change observations, remove trials, choose a favorable
-   seed or relax a tolerance merely to obtain a pass.
-4. Rerun the focused test, fast suite and any affected statistical study. Preserve
-   the original failure and link it to the new result/artifact directory.
-
-Statistical validation belongs to the actual decision rule, including the practical
-margin and probability of any sequential false claim. One passing example, an
-ordinary p-value, or the final look alone is insufficient. The detailed method
-guide and [test assignment](../tests/evaluation/README.md) define the deeper checks.
-
-## Performance and independence
-
-Target a fast deterministic suite under 30 seconds on the development machine,
-then measure and document actual runtime. Larger seeded studies can take longer;
-their replication count follows precision requirements, not a desire for a quick
-green result. No robot, API account, GPU or 7–8-hour fine-tune is needed for these
-tests. They validate software/statistical behavior, not physical robot efficacy.
+Store study outputs outside tracked source. Keep simulation acceptance criteria
+fixed before inspecting results. Investigate unexpected outcomes without editing
+trial observations, changing analysis seeds, or relaxing tolerances to obtain a
+pass. These software checks require no robot or external service.
