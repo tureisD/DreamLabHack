@@ -1,1 +1,1 @@
-"""Teach it a task: shared contracts, local application, and evaluation components."""
+"""Teach it a task: shared contracts and standalone statistical evaluation."""

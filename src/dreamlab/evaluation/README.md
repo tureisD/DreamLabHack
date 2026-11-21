@@ -1,15 +1,16 @@
 # Statistical evaluation — teammate implementation assignment
 
 **Working branch:** `codex/stat-eval`
-**Merge target:** `codex/local-app`, not `main`
-**Scope:** statistical evaluation engine and validation
-**Your ownership:** this evaluation package and `tests/evaluation/`
+**Merge target:** `main`, directly
+**Scope:** standalone statistical engine, file-based runner, reports and validation
+**Your ownership:** this evaluation package, `tests/evaluation/`, and evaluation documentation; coordinate shared-contract changes with project consumers
 
 This branch is an implementation handoff. `StatisticalEvaluator.evaluate()` is
 currently a deliberate unavailable stub. There is **no working statistical engine**
 yet. Start with the branch-root README for the deliverables and acceptance criteria;
-this file supplies the detailed technical guidance. Application development is
-handled separately.
+this file supplies the detailed technical guidance. The local application was
+cancelled; this component runs independently and integrates directly into main.
+Read `docs/README.md` for the replacement workflow and implementation plan.
 
 ## The task
 
@@ -25,7 +26,8 @@ You own validation of statistical eligibility, methods, error control, sample-si
 planning utilities, and report construction. You do not own robot control, rollout
 parsing, SQLite migrations, raw video judging, the React UI, dataset upload,
 fine-tuning, or automatic checkpoint switching. Ask for a contract extension when
-necessary rather than reaching into local implementation details.
+necessary rather than depending on an application that no longer exists.
+The thin runner owns file I/O and artifact persistence; the engine stays pure.
 
 ## Install, run checks, and build
 
@@ -43,11 +45,12 @@ uv run --locked --all-extras pytest
 uv build
 ```
 
-Use Python 3.12; uv provisions it. The lockfile is shared with the local branch.
+Use Python 3.12; uv provisions it. This branch owns its evaluation dependencies;
+coordinate manifest/lockfile changes with the broader project before merging.
 No robot, Dream API key, paid FaaS job or GPU is needed for evaluation development.
 For an evaluation-only environment use `--extra eval` instead of `--all-extras`
-and run only `tests/contracts tests/evaluation`; the full suite needs the local
-extra. No evaluation CLI is implemented yet; develop against the protocol below.
+and run the complete suite. The obsolete local extra and API have been removed.
+No evaluation CLI is implemented yet; develop against the protocol below.
 
 ## Existing interface and intended file structure
 
@@ -59,8 +62,8 @@ class StatisticalEvaluator:
     def evaluate(self, request: EvaluationRequest) -> EvaluationReport: ...
 ```
 
-`src/dreamlab/local/api.py` accepts `create_app(evaluator=your_engine)`. Keep the
-core engine independent of FastAPI, HTTP, SQLite, filesystem state and network.
+The standalone runner and future project consumers call this method directly.
+Keep the core engine independent of HTTP, SQLite, filesystem state and network.
 A normal request with an unsuitable design should return a `not_evaluable` report;
 `EvaluationUnavailable` is reserved for missing/unimplemented functionality.
 Unexpected programming errors must not turn into success verdicts.
@@ -69,6 +72,7 @@ Unexpected programming errors must not turn into success verdicts.
 src/dreamlab/evaluation/
   README.md                 This handoff
   engine.py                 Public protocol implementation (stub today)
+  cli.py                    Planned: request JSON -> engine -> saved report/manifest
   methods/
     __init__.py             Namespace exists
     validation.py          Planned: design/label/eligibility checks
@@ -107,7 +111,7 @@ and claim the resulting success rate describes all attempted tasks.
 
 The initial contract has no planned invalid-run replacement policy, automatic
 label calibration, cluster model or adaptive assignment manifest. Add these with
-the local owner before claiming support. Preserve raw outcome counts even when
+the project integration owner before claiming support. Preserve raw outcome counts even when
 estimates are withheld. Retain all trial IDs and input provenance.
 
 ### 2. Fixed-horizon independent comparison first
@@ -170,7 +174,8 @@ the error allocation. Decide only when both arms reach a declared look. Preserve
 interim history and terminal stopping decisions. Replaying the same ordered data
 must recover the same first terminal decision; extra post-stop data cannot rewrite
 history. Missing outcomes cannot silently change the sample clock or trigger an
-unplanned look. Coordinate local scheduling and durable state with tureisD.
+unplanned look. The runner persists immutable look artifacts; agree the replay
+contract with tureisD before enabling sequential execution.
 
 An alternative is a justified confidence-sequence method. Choose one approach,
 record its assumptions, prove or cite its guarantee, and validate it empirically.
@@ -206,7 +211,7 @@ confidence interval to a null estimate or invent a success rate for an empty arm
 Use the canonical checksum recipe in `docs/contracts.md`. Make outputs deterministic
 for a fixed snapshot, engine version and configuration. If a bootstrap or other
 random procedure is later added, make the seed and simulation configuration
-explicit; checkpoint the exact input and method version with the local owner.
+explicit; save the exact input and method version in the runner artifact bundle.
 
 Sample-size utilities should accept baseline rate, minimum relevant gain, alpha,
 power, design and budget. Report assumptions and feasibility. The Notion's rough
@@ -218,7 +223,8 @@ experiment infeasible, and the tool must say so.
 ## Required tests before merge
 
 The current handoff test must be replaced with meaningful engine tests when the
-stub is implemented. Keep the shared contract and local API tests passing.
+stub is implemented. Keep shared contract tests passing and add standalone
+runner tests when that runner is implemented.
 
 1. Independent numerical reference cases; zero/all successes, tiny samples,
    empty arms, extreme thresholds, reversed checkpoint orientation and equality
@@ -234,7 +240,8 @@ stub is implemented. Keep the shared contract and local API tests passing.
 5. Validate the actual margin-based improvement rule, not only an equality-null
    p-value. Keep costly simulations marked `statistical` and publish the command
    and results needed for review. A passing simulation is evidence, not a proof.
-6. HTTP injection test using the real engine, with no robot/network dependency.
+6. Standalone JSON input -> real engine -> saved report -> reload test, with no
+   robot/network dependency; verify hashes, IDs, counts and package installation.
 
 ## Traps to actively avoid
 
@@ -250,7 +257,7 @@ stub is implemented. Keep the shared contract and local API tests passing.
 | Zero-width bootstrap interval with all identical outcomes | Use a method with justified boundary behavior; test extremes |
 | Claiming statistical improvement means operational acceptability | Keep intervention/safety/cost criteria separate and explicit |
 | Assuming sequential stopping always saves time | Measure power and expected sample size under relevant alternatives |
-| Writing directly into local DB or importing its API | Depend only on shared contracts; return a report |
+| Coupling numerical methods to a UI, database or file layout | Depend only on shared contracts; keep I/O in the runner |
 
 ## Completion and merge
 
@@ -259,12 +266,13 @@ limitations, numerical tests, operating-characteristic checks and an example
 reproducible report. Unsupported modes must fail honestly. Do not mark paired,
 sequential or passive causal inference supported until actually validated.
 
-Commit only owned files unless coordinated. Fetch and merge `origin/codex/local-app`
-periodically. Resolve dependency manifest changes together and regenerate the
-lockfile. Open your PR with base **`codex/local-app`** and head **`codex/stat-eval`**.
-Include what is implemented, which designs remain unsupported, exact test commands,
-statistical validation evidence and any shared-contract changes.
+Commit only owned files unless coordinated. Fetch and merge `origin/main` when
+needed; do not rebase or force-push this shared implementation branch. Resolve
+dependency declarations before regenerating the lockfile. Open your PR with base
+**`main`** and head **`codex/stat-eval`**. Include supported/unsupported designs,
+exact test commands, statistical validation artifacts and shared-contract changes.
 
-The local owner then wires the engine into composition/persistence/UI and runs the
-combined flow. Only the combined local branch is subsequently merged into `main`.
-No statistical decision silently deploys a checkpoint or starts a robot.
+Validate a fresh install and the standalone input/report flow before integration.
+Future project consumers can call the protocol or consume the saved report; no
+web application is required. No statistical decision deploys a checkpoint or
+starts a robot. See `docs/branching.md` for collaborator migration instructions.

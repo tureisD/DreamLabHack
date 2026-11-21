@@ -1,9 +1,9 @@
-name: scaffold-checks
+name: evaluation-checks
 on:
   push:
-    branches: [main, codex/local-app, codex/stat-eval]
+    branches: [main, codex/stat-eval]
   pull_request:
-    branches: [main, codex/local-app, codex/stat-eval]
+    branches: [main, codex/stat-eval]
 permissions:
   contents: read
 jobs:

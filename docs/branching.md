@@ -1,64 +1,57 @@
-# Branch and worktree workflow
+# Standalone evaluation branch workflow
 
-The intended merge order is `codex/stat-eval` -> `codex/local-app` -> `main`.
-All branches descend from the same shared base. Never force-push the shared team
-branches. Do not merge an unfinished engine merely to make an API return HTTP 200.
+Updated 21 November 2026. The local application has been cancelled. The active
+feature branch is **`codex/stat-eval`**, merging directly into **`main`**.
+The intermediate `codex/local-app` branch is retired. Its history was backed up
+before deletion; its application plans are not an active assignment.
 
-## Start the evaluation assignment
+## Existing teammate checkout
 
-```shell
-git clone https://github.com/tureisD/DreamLabHack.git
-cd DreamLabHack
-git switch --track origin/codex/stat-eval
-uv sync --locked --all-extras --group dev
-```
-
-Read the root README, `docs/contracts.md`, and
-`src/dreamlab/evaluation/README.md`. Implement only the owned evaluation paths;
-coordinate contract/dependency changes with the local owner.
-
-## Parallel directories on one computer
-
-If your checkout already has the local branch checked out:
+The evaluation branch name and existing commits are preserved. No history rewrite,
+rebase or force-push is required. Commit or stash uncommitted work before updating;
+never discard it to follow these instructions.
 
 ```shell
-git fetch origin
-git worktree add ../DreamLabHack-stat-eval codex/stat-eval
+git fetch origin --prune
+git switch codex/stat-eval
+git merge origin/codex/stat-eval
+uv sync --locked --extra eval --group dev
+uv run --locked --extra eval pytest
 ```
 
-If that branch is not yet local, use `git worktree add -b codex/stat-eval
-../DreamLabHack-stat-eval origin/codex/stat-eval` instead. Do not run both commands.
-Each worktree has its own `.venv` and ignored local artifacts. Never reuse a venv
-across worktrees: editable installs point at a particular directory.
+Restore stashed changes and resolve conflicts if necessary. Numerical implementation
+remains in `src/dreamlab/evaluation/` and `tests/evaluation/`. The reorganization
+removes obsolete app files and updates documentation/dependencies; it does not
+replace statistical methods. Re-sync the environment to remove unused web packages.
+For a new clone, follow the root README. Each worktree needs its own environment.
 
-## Keep evaluation synchronized
+## Keeping up with the larger project
 
-From the stat-eval checkout with committed changes:
+From a clean evaluation checkout:
 
 ```shell
 git fetch origin
-git merge origin/codex/local-app
-uv sync --locked --all-extras --group dev
-uv run --locked --all-extras pytest
+git merge origin/main
 ```
 
-Resolve interfaces with both owners. If dependency declarations conflict, resolve
-`pyproject.toml` first, regenerate `uv.lock` using `uv lock`, then sync/test. Do not
-copy one side of a lockfile and assume it represents the combined manifest.
+Resolve `pyproject.toml` before regenerating `uv.lock` with `uv lock`; do not splice
+lockfile records manually. Coordinate shared-contract changes and fixtures with
+producer/consumer owners. Do not fetch or merge the retired app branch or restore
+its UI, database, station-control or importer assignment during conflict resolution.
 
-## Finish evaluation, then integrate the application
+## Integration into main
 
-1. Push evaluation commits to `codex/stat-eval`.
-2. Open a PR with **base `codex/local-app`**, head `codex/stat-eval`.
-3. Verify contract compatibility, numerical reference results, statistical error
-   checks, fixture report reproducibility, all-input accounting, and no hardware
-   side effects. Document unsupported modes instead of silently falling back.
-4. Merge after review. Update the local composition factory to inject the real
-   evaluator and test persistence/UI against its reports; merging files alone is
-   not a complete integration.
-5. Open the combined local application PR with **base `main`**, head
-   `codex/local-app`. Coordinate with the larger team's other modules at this step.
+1. Push evaluation work without rewriting shared history.
+2. Open a PR with **base `main`**, head **`codex/stat-eval`**.
+3. Document supported/unsupported designs, input requirements, numerical references,
+   simulation evidence, exact commands and any contract changes.
+4. Run lint, formatting, complete tests and package build on Windows/Linux. Verify
+   a fresh installation and standalone request/report round trip once implemented.
+   Method validation remains separate from scaffold tests.
+5. Resolve main's README deliberately: retain a useful project entry point and the
+   evaluator's technical guides. No intermediate app README needs preservation.
+6. Merge after project review. Consumers can call the protocol or exchange versioned
+   JSON files without a web application.
 
-The setup task only creates and publishes the branches. It does not merge feature
-work, change branch protection rules, create required checks, or assign reviewers.
-GitHub Actions supplies checks; enforcement remains a team repository setting.
+This reorganization does not merge the unfinished engine into main. Main's README
+is updated only to point developers to the active assignment.

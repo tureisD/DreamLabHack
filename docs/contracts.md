@@ -2,7 +2,7 @@
 
 Canonical definitions: `src/dreamlab/contracts/models.py`. This is a draft v1
 boundary agreed through code review, not the Dream Labs upstream schema. Preserve
-backward compatibility or increment schema version with both owners' agreement.
+backward compatibility or increment schema version with agreement between the evaluation owner and consuming project modules.
 
 ## Input
 
@@ -30,7 +30,7 @@ are retained in the request and all displayed attempt counts.
 
 An episode ID represents one physical attempt across imports. It must not be
 reused to count the same footage twice. Retries are separate attempts with new
-IDs, linked through the local episode metadata if needed.
+IDs, linked through producer-side provenance metadata if needed.
 
 ## Responsibilities beyond structural validation
 
@@ -67,12 +67,13 @@ to deploy a model.
 
 Suggested canonical input checksum: SHA-256 over UTF-8 `json.dumps(request.model_dump(
 mode="json"), sort_keys=True, separators=(",", ":"), allow_nan=False)`. Preserve
-trial order: it is meaningful for sequential analysis. The local service saves the
+trial order: it is meaningful for sequential analysis. The standalone runner or calling integration saves the
 exact snapshot used, plus code revision, lockfile identity and report. Include all
 method options and seeds in a versioned configuration before adding stochastic
 algorithms. Do not depend on wall-clock time or hidden global RNG state for results.
 
 Statistical consumers may only import `dreamlab.contracts` and statistical
-dependencies. Local code may inject an implementation at composition time; core
-local routes/services depend on the protocol. Schema changes require both owners'
-review and fixture updates. There is no implemented evaluator in the shared scaffold.
+dependencies. The runner owns file I/O and calls the protocol. Other project
+modules may call the same protocol without a web application. Schema changes
+require producer/consumer review and fixture updates. The evaluator remains an
+unimplemented scaffold until its numerical validation is completed.

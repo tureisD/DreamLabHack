@@ -1,4 +1,4 @@
-"""Versioned boundary shared by local-app and stat-eval owners."""
+"""Versioned boundary between evaluation and its project consumers."""
 
 from dreamlab.contracts.evaluation import EvaluationUnavailable, Evaluator
 from dreamlab.contracts.models import (

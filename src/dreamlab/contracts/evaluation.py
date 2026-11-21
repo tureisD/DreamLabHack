@@ -10,7 +10,7 @@ class EvaluationUnavailable(RuntimeError):
 
 
 class Evaluator(Protocol):
-    """Implement on the statistical branch; inject into the local application."""
+    """Implement on the statistical branch; call from independent project consumers."""
 
     def evaluate(self, request: EvaluationRequest) -> EvaluationReport:
         """Compute a reproducible report from an explicit, immutable input snapshot."""

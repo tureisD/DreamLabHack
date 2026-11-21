@@ -1,14 +1,21 @@
-# Statistical evaluation — what to build
+# DreamLabHack — standalone statistical evaluation
 
 **Branch:** `codex/stat-eval`
+**Merge target:** `main`
 
 Build the statistical engine that answers:
 
 > Did the candidate robot checkpoint improve task success over the baseline,
 > and is the evidence strong enough to recommend switching?
 
-This README is the assignment for the evaluation developer. Application development
-is handled separately. Focus on evaluation code, statistical tests, and reports.
+This branch is now the primary implementation branch for this component. The local
+application has been cancelled; evaluation has no dependency on it. Build a callable
+engine and a small file-based runner/report workflow, with statistical tests and
+reproducible evidence. No robot, web application, or paid training is required.
+
+Read the [documentation index](docs/README.md) for the standalone architecture,
+implementation plan, data limitations, test/diagnosis facility and direct-to-main
+integration workflow. The existing numerical assignment below remains in force.
 
 ## Current state
 
@@ -16,6 +23,8 @@ The input/output models, dependencies, example input, and test infrastructure ex
 `StatisticalEvaluator.evaluate()` is a stub that raises `EvaluationUnavailable`.
 **The statistical engine has not been implemented.** Existing passing scaffold tests
 do not demonstrate that any statistical method works.
+The standalone runner is also planned, not implemented. The inherited local API,
+frontend placeholders and their dependencies have been removed.
 
 ## Required deliverables
 
@@ -27,6 +36,7 @@ do not demonstrate that any statistical method works.
 | Verdict logic | Return `improved`, `regressed`, `inconclusive`, or `not_evaluable`, with a plain-language reason. |
 | Sequential evaluation | Support early decisions only with a predeclared schedule and valid error control. Reject this mode until implemented and tested. |
 | Reproducible reports | Include method/version, input checksum, trial IDs, counts, effect, intervals, warnings, and rationale. |
+| Standalone execution | Load a versioned request JSON, call the engine, and save a report plus a reproducibility manifest; keep I/O outside the pure engine. |
 | Statistical validation | Add reference-value tests, edge cases, and seeded simulations of coverage, false positives, and power. |
 
 Sample-size/power planning is a follow-on deliverable after the comparison engine
@@ -81,6 +91,7 @@ additional edge cases. Follow it alongside the actual shared contract.
 ```text
 src/dreamlab/evaluation/
   engine.py                 Public entry point: implement this
+  cli.py                    Planned: standalone file-based runner
   methods/                  Validation, intervals, stopping rules, design-specific methods
   reporting/                Deterministic report construction
   README.md                 Detailed implementation guide
@@ -130,7 +141,7 @@ reference tests, and simulation results with seeds, replication counts, and
 predeclared tolerances. Test the actual margin-based decision rule and the chance
 of any false sequential claim, not just one p-value or the final look.
 
-Open the PR from `codex/stat-eval` into **`codex/local-app`**, not directly into
-`main`. State what works, what remains unsupported, and any contract changes.
-This root README is branch-specific: preserve the target branch's root README
-when integrating, and retain the detailed evaluator guide under the package.
+Open the PR from `codex/stat-eval` directly into **`main`**. State what works,
+what remains unsupported, and any contract changes. Keep this evaluator guide and
+the documentation under `docs/` when integrating; adapt the main root README to
+the broader team's final repository structure. No intermediate app branch exists.

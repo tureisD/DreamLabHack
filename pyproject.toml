@@ -5,20 +5,16 @@ build-backend = "hatchling.build"
 [project]
 name = "dreamlab-hack"
 version = "0.1.0"
-description = "Local robot workflow and statistical evaluation integration scaffold"
+description = "Standalone robot checkpoint statistical evaluation scaffold"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = ["pydantic>=2.10,<3"]
 
 [project.optional-dependencies]
-local = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1"]
 eval = ["numpy>=2,<3", "scipy>=1.14,<2", "statsmodels>=0.14,<0.16"]
 
 [dependency-groups]
-dev = ["pytest>=8,<10", "httpx>=0.28,<1", "ruff>=0.9,<1"]
-
-[project.scripts]
-dream-local = "dreamlab.local.__main__:main"
+dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dreamlab"]
