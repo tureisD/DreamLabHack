@@ -178,6 +178,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT)
     parser.add_argument("--episodes", type=int, default=2)
+    parser.add_argument("--start-pose", choices=("home", "wrist-visible"), default="home")
     parser.add_argument("--seed", type=scene_seed, help="First scene seed; increments per episode")
     args = parser.parse_args()
     if args.episodes < 1:
@@ -185,7 +186,7 @@ if __name__ == "__main__":
     first_seed = args.seed if args.seed is not None else secrets.randbits(32)
     failures = 0
     for index in range(args.episodes):
-        with recording(args.output, TASK, "scripted-yam", first_seed + index, "scripted") as (env, details):
+        with recording(args.output, TASK, "scripted-yam", first_seed + index, "scripted", start_pose=args.start_pose) as (env, details):
             result = mock_pickups.run_trial("apple", env=env, snapshot_dir=env.folder)
             details["script_result"] = result
             failures += int(not result["passed"])

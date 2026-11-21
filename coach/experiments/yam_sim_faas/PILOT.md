@@ -52,6 +52,8 @@ uv run --locked --extra sim python .\experiments\yam_sim_faas\record_yam_demos.p
 
 This samples the apple's initial X and Y positions within 2.5 cm of the original placement. Seeds 101 and 102 give two reproducible scenes. Omit the seed to choose a fresh starting seed. Repeating a seed repeats the placement and creates a separate run. Run **Scan rollouts** again after collection. Each finished run keeps its videos, state/action rows and an atomic `rollout.json` beside them. The sidecar records simulation provenance and the actual starting position. The scripted pickup check lives in `simulation.script_result`; the operator label is entered separately. Review failures before selecting training examples. An interruption during capture can produce a partial recording, and abrupt process termination can leave an unfinished directory that Coach skips.
 
+Add `--start-pose wrist-visible` to collect scripted reach, close, lift and release examples from the same initial arm posture as a wrist-visible model pilot. Use a common seed to compare grasps at the same apple location. Reserve separate seeds for evaluating a trained checkpoint.
+
 Review and label the original 20 Hz recordings. For training, select reviewed scripted successes in a separate source directory before using the 10 Hz conversion in the [experiment notes](README.md). The standalone statistical evaluator requires eligible physical trials for its real-world verdict.
 
 ## Save your key on Windows

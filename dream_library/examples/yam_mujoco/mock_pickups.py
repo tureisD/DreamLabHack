@@ -65,8 +65,9 @@ def run_trial(fruit, yaw=0, lift=0.15, *, env=None, snapshot_dir=None):
         env = YamEnv()
     try:
         home = np.r_[np.zeros(6), 1.0]
+        start = env.state()
         for _ in range(30):
-            env.step(home, home)
+            env.step(start["left"], start["right"])
         p = env.data.body(fruit).xpos.copy()
         initial_z = p[2]
         side = "left" if p[0] > 0 else "right"
