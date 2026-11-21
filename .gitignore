@@ -13,3 +13,11 @@ artifacts/
 *.sqlite3
 *.sqlite-wal
 *.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+dist/
+build/
+node_modules/
+.coverage
+htmlcov/
+.DS_Store

@@ -1,6 +1,0 @@
-# Initial local/statistical evaluation environment; no application implemented yet.
-numpy
-scipy
-statsmodels
-pytest
-ruff
