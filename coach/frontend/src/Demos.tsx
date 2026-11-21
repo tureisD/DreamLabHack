@@ -10,6 +10,7 @@ type Demo = {
 type Cell = { cell: number; baseline_runs: number; baseline_failures: number; kept_demos: number; priority: number };
 type Plan = { cells: Cell[]; next_cell: number | null; reason: string; observed_failure_cells_covered: boolean };
 type ImportResult = { imported: number; skipped: string[] };
+type TeleopStatus = { state: string; session_path: string | null; exit_code: number | null };
 
 async function json<T>(url: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(url, {
@@ -36,6 +37,12 @@ export default function Demos() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [followerPort, setFollowerPort] = useState('');
+  const [leaderPort, setLeaderPort] = useState('');
+  const [followerId, setFollowerId] = useState('so101_follower');
+  const [leaderId, setLeaderId] = useState('so101_leader');
+  const [cameraIndex, setCameraIndex] = useState(0);
+  const [teleop, setTeleop] = useState<TeleopStatus | null>(null);
   const selected = demos.find((demo) => demo.id === selectedId);
 
   useEffect(() => {
@@ -56,6 +63,8 @@ export default function Demos() {
           json<Plan>(`/api/tasks/${taskId}/demo-plan`),
         ]);
         if (active) { setDemos(values); setPlan(coverage); }
+        const state = await json<TeleopStatus>('/api/teleop/status');
+        if (active) setTeleop(state);
       } catch (caught) {
         if (active) setError(caught instanceof Error ? caught.message : 'Could not scan demos.');
       }
@@ -74,6 +83,19 @@ export default function Demos() {
       setPlan(await json<Plan>(`/api/tasks/${taskId}/demo-plan`));
       setMessage(`Indexed ${result.imported} sessions.${result.skipped.length ? ` Skipped: ${result.skipped.join('; ')}` : ''}`);
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not scan demos.'); }
+    finally { setBusy(false); }
+  }
+
+  async function record() {
+    if (!taskId || !window.confirm('The Dream station process must be stopped and the SO-101 workspace clear. Begin one supervised leader/follower recording?')) return;
+    setBusy(true); setError('');
+    try {
+      const status = await json<TeleopStatus>(`/api/tasks/${taskId}/teleop/start`, 'POST', {
+        follower_port: followerPort, leader_port: leaderPort, follower_id: followerId,
+        leader_id: leaderId, camera_index: cameraIndex, seconds: 30,
+      });
+      setTeleop(status); setMessage('LeRobot recording launched. Stay with the arms; the session ends after one episode.');
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not start recorder.'); }
     finally { setBusy(false); }
   }
 
@@ -103,6 +125,7 @@ export default function Demos() {
     {error && <div className="alert" role="alert">{error}</div>}
     {message && <div className="notice" role="status">{message}</div>}
     <div className="demo-task-select"><label>Task <select value={taskId} onChange={(event) => { setTaskId(event.target.value); setSelectedId(''); }}>{tasks.map((task) => <option value={task.id} key={task.id}>{task.name}</option>)}</select></label></div>
+    <section className="card teleop-controls"><h2>SO-101 leader/follower recording</h2><p>Stop the Dream station process before using the same arm with LeRobot. This records one local episode and does not upload it to Hugging Face.</p><div className="training-controls"><label>Follower port<input value={followerPort} onChange={(event) => setFollowerPort(event.target.value)} placeholder="/dev/ttyACM0" /></label><label>Leader port<input value={leaderPort} onChange={(event) => setLeaderPort(event.target.value)} placeholder="/dev/ttyACM1" /></label><label>Follower ID<input value={followerId} onChange={(event) => setFollowerId(event.target.value)} /></label><label>Leader ID<input value={leaderId} onChange={(event) => setLeaderId(event.target.value)} /></label><label>Camera index<input type="number" min={0} value={cameraIndex} onChange={(event) => setCameraIndex(Number(event.target.value))} /></label><button disabled={busy || !taskId || !followerPort || !leaderPort || teleop?.state === 'recording'} onClick={() => void record()}>Record one demo</button></div><p className="hint">Recorder: {teleop?.state ?? 'idle'}{teleop?.session_path ? ` · ${teleop.session_path}` : ''}. Restart the station after the recording exits, then review the new demo below.</p></section>
     {plan && <section className="card coverage">
       <div className="card-heading"><h2>What to record next</h2><span className="count">{plan.observed_failure_cells_covered ? 'Observed failure cells covered' : 'Coverage in progress'}</span></div>
       <p>{plan.reason}</p>

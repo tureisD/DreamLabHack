@@ -31,6 +31,7 @@ from teach_task_coach.preflight import PreflightResult, PreflightService
 from teach_task_coach.station import StationRejected, StationUnavailable
 from teach_task_coach.storage import EpisodeStore
 from teach_task_coach.tasks import Task, TaskInput, TaskStore, Trial, TrialInput, TrialStateError
+from teach_task_coach.teleop import SO101Recorder, TeleopRequest, TeleopStatus
 from teach_task_coach.trials import TrialError, TrialRunner
 
 
@@ -120,6 +121,7 @@ def create_app(
     runner = trial_runner or TrialRunner(tasks, episodes, preflight.station, rollouts)
     demos = demo_store or DemoStore(episodes.data_dir)
     recorder = demo_scanner or DemoScanner()
+    teleop = SO101Recorder(recorder, preflight.station)
     faas = faas_store or FaaSStore(episodes.data_dir)
     dream = dream_gateway or DreamGateway()
     evaluations = evaluation_store or EvaluationStore(episodes.data_dir)
@@ -349,6 +351,20 @@ def create_app(
             else:
                 imported += 1
         return ImportResult(imported=imported, skipped=skipped)
+
+    @app.post("/api/tasks/{task_id}/teleop/start", response_model=TeleopStatus)
+    def start_teleop(task_id: str, value: TeleopRequest) -> TeleopStatus:
+        task = tasks.get_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        try:
+            return teleop.start(task.prompt, value)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/teleop/status", response_model=TeleopStatus)
+    def teleop_status() -> TeleopStatus:
+        return teleop.status()
 
     @app.get("/api/tasks/{task_id}/demos", response_model=list[Demo])
     def list_demos(task_id: str) -> list[Demo]:
