@@ -1,3 +1,5 @@
+import pyarrow as pa
+import pyarrow.parquet as pq
 from fastapi.testclient import TestClient
 from test_faas import setup_dataset
 from test_trials import FakeStation
@@ -75,3 +77,28 @@ def test_guidance_names_uncovered_failure_cell(tmp_path):
     assert result["phase"] == "collect"
     assert "Cell 3" in result["next_action"]
     assert result["pilot_ready"] is False
+
+
+def test_diagnosis_marks_noninitiating_failed_run(tmp_path):
+    tasks, task, demos, faas = setup_dataset(tmp_path)
+    episodes = EpisodeStore(tmp_path / "data")
+    trial = tasks.create_trial(task.id, TrialInput(start_cell=1))
+    folder = tmp_path / "stalled_run"
+    (folder / "data").mkdir(parents=True)
+    pq.write_table(pa.table({"observation.state": pa.array([[0.0, 0.0]] * 10)}), folder / "data/episode.parquet")
+    episode = EpisodeSummary(
+        id="never_moved", source_path=str(folder), status="complete", task=task.prompt,
+        checkpoint="base", body=None, robot_name=None, started_at_utc=None,
+        frames=10, fps=20, duration_s=0.5, stop_reason="stopped", error=None,
+        stalls=None, clamps=None, videos={}, findings=[], events=[], success=False,
+    )
+    episodes.upsert(episode)
+    episodes.label(episode.id, False, None, None)
+    tasks.transition(trial.id, "planned", "completed", episode_id=episode.id)
+    client = TestClient(create_app(
+        PreflightService(FakeStation(), list), episodes, RolloutScanner(tmp_path), tasks,
+        demo_store=demos, faas_store=faas,
+    ))
+    run = client.get(f"/api/tasks/{task.id}/diagnosis").json()["runs"][0]
+    assert run["initiated"] is False
+    assert "never left" in run["reason"]

@@ -1,8 +1,11 @@
 """Conservative run diagnosis from station evidence and operator outcome labels."""
 
 from collections import Counter
+from pathlib import Path
 from typing import Literal
 
+import numpy as np
+import pyarrow.parquet as pq
 from pydantic import BaseModel
 
 from teach_task_coach.storage import EpisodeStore
@@ -16,6 +19,7 @@ class DiagnosedRun(BaseModel):
     category: Literal["setup", "data", "unknown"]
     reason: str
     evidence: list[str]
+    initiated: bool | None = None
 
 
 class TaskDiagnosis(BaseModel):
@@ -41,6 +45,15 @@ def diagnose(task_id: str, tasks: TaskStore, episodes: EpisodeStore) -> TaskDiag
             "unlabelled" if episode.success is None else "success" if episode.success else "failure"
         )
         evidence = [f"rollout status: {episode.status}", f"stop reason: {episode.stop_reason or 'none'}"]
+        initiated = None
+        files = sorted((Path(episode.source_path) / "data").rglob("*.parquet"))
+        if files:
+            try:
+                states = np.asarray(pq.read_table(files[0], columns=["observation.state"])["observation.state"].to_pylist(), dtype=float)
+                if states.ndim == 2 and len(states) > 1:
+                    initiated = bool(np.max(np.abs(states - states[0])) > 0.02)
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
         problems = [finding.message for finding in episode.findings if finding.severity == "problem"]
         if episode.status != "complete" or episode.stop_reason in ("SafetyStop", "ModelReady") or problems:
             category: Literal["setup", "data", "unknown"] = "setup"
@@ -48,7 +61,13 @@ def diagnose(task_id: str, tasks: TaskStore, episodes: EpisodeStore) -> TaskDiag
             evidence.extend(problems)
         elif outcome == "failure":
             category = "data"
-            reason = "Operator-confirmed failure without a logged station fault; collect targeted examples."
+            reason = (
+                "Arm never left its starting pose; check initiation before collecting more examples."
+                if initiated is False else
+                "Operator-confirmed failure without a logged station fault; collect targeted examples."
+            )
+            if initiated is False:
+                evidence.append("observation.state changed by at most 0.02 rad from its first row")
             if episode.failure_stage:
                 stages[episode.failure_stage] += 1
                 evidence.append(f"human failure stage: {episode.failure_stage}")
@@ -62,6 +81,7 @@ def diagnose(task_id: str, tasks: TaskStore, episodes: EpisodeStore) -> TaskDiag
         runs.append(DiagnosedRun(
             trial_id=trial.id, episode_id=episode.id, outcome=outcome,
             category=category, reason=reason, evidence=evidence,
+            initiated=initiated,
         ))
     setup = sum(run.category == "setup" for run in runs)
     data = sum(run.category == "data" for run in runs)
