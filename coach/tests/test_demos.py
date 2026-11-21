@@ -76,7 +76,7 @@ def test_demo_qc_flags_dark_camera_and_abrupt_action(tmp_path):
     actions[50] = [10.0, 0.0]
     pq.write_table(pa.table({"action": pa.array(actions)}), folder / "data/chunk-000/episode_000000.parquet")
     demo = read_demo(folder, "task-id")
-    assert {finding.code for finding in demo.findings} == {"possible_occlusion", "abrupt_action"}
+    assert {finding.code for finding in demo.findings} == {"possible_occlusion", "frozen_camera", "abrupt_action"}
 
 
 def test_demo_import_review_and_coverage_plan(tmp_path):
