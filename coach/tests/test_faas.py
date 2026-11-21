@@ -206,3 +206,23 @@ def test_second_worker_cannot_claim_same_data_directory(tmp_path):
         exclusive_worker_lock(lock),
     ):
         pass
+
+
+def test_resume_settings_persist_and_api_rejects_unevaluated_parent(tmp_path):
+    tasks, task, demos, store = setup_dataset(tmp_path)
+    version = store.create_dataset(task.id, "pilot/robot", [demo.id for demo in demos.list(task.id)])
+    store.update_dataset(version.id, status="validated")
+    parent = store.create_finetune(version.id, FineTuneRequest(steps=500, lr_schedule="constant"))
+    store.update_finetune(parent.id, status="succeeded", checkpoint="dream-1-ft:pilot-parent")
+    client = TestClient(create_app(
+        PreflightService(FakeStation(), list), EpisodeStore(tmp_path / "data"),
+        RolloutScanner(tmp_path), tasks, demo_store=demos, faas_store=store,
+    ))
+    request = FineTuneRequest(
+        steps=500, lr_schedule="constant", resume_from="dream-1-ft:pilot-parent"
+    )
+    response = client.post(f"/api/datasets/{version.id}/finetunes", json=request.model_dump())
+    assert response.status_code == 409
+    assert "evaluation" in response.json()["detail"]
+    saved = store.create_finetune(version.id, request)
+    assert store.get_finetune(saved.id).resume_from == "dream-1-ft:pilot-parent"

@@ -57,6 +57,7 @@ class FineTuneRequest(BaseModel):
     lr_schedule: Literal["cosine", "constant"] = "cosine"
     base_share: Literal[0.0, 0.5] = 0.5
     use_eef: bool = False
+    resume_from: str | None = None
 
 
 class FineTuneRecord(FineTuneRequest):
@@ -106,12 +107,16 @@ class FaaSStore:
                 checkpoint TEXT,
                 status TEXT NOT NULL,
                 error TEXT,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                resume_from TEXT
             );
             CREATE INDEX IF NOT EXISTS datasets_task_id ON dataset_versions(task_id);
             CREATE INDEX IF NOT EXISTS finetunes_dataset_id ON fine_tune_jobs(dataset_version_id);
             """
         )
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(fine_tune_jobs)")}
+        if "resume_from" not in columns:
+            connection.execute("ALTER TABLE fine_tune_jobs ADD COLUMN resume_from TEXT")
 
     def create_dataset(self, task_id: str, embodiment_name: str, demo_ids: list[str]) -> DatasetVersion:
         identifier = uuid.uuid4().hex
@@ -189,10 +194,14 @@ class FaaSStore:
         with self.db.connect() as connection:
             self._schema(connection)
             connection.execute(
-                "INSERT INTO fine_tune_jobs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                """INSERT INTO fine_tune_jobs
+                   (id, dataset_version_id, suffix, steps, lr_schedule, base_share, use_eef,
+                    remote_job_id, checkpoint, status, error, created_at, resume_from)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     job.id, job.dataset_version_id, job.suffix, job.steps, job.lr_schedule,
                     job.base_share, int(job.use_eef), None, None, job.status, None, job.created_at,
+                    job.resume_from,
                 ),
             )
         return job
@@ -248,7 +257,7 @@ class FaaSStore:
             steps=row["steps"], lr_schedule=row["lr_schedule"], base_share=row["base_share"],
             use_eef=bool(row["use_eef"]), remote_job_id=row["remote_job_id"],
             checkpoint=row["checkpoint"], status=row["status"], error=row["error"],
-            created_at=row["created_at"],
+            created_at=row["created_at"], resume_from=row["resume_from"],
         )
 
 
@@ -284,6 +293,7 @@ class DreamGateway:
             lr_schedule=settings.lr_schedule,
             base_share=settings.base_share,
             use_eef=settings.use_eef,
+            resume_from=settings.resume_from,
         )
 
     def finetune_status(self, job_id: str) -> dict[str, Any]:
@@ -435,6 +445,7 @@ class FaaSWorker:
                 FineTuneRequest(
                     steps=job.steps, lr_schedule=job.lr_schedule,
                     base_share=job.base_share, use_eef=job.use_eef,
+                    resume_from=job.resume_from,
                 ),
             )
         self.store.update_finetune(job.id, remote_job_id=existing["id"], status="training", error=None)

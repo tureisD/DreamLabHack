@@ -498,7 +498,31 @@ def create_app(
             raise HTTPException(status_code=404, detail="Dataset version not found.")
         if version.status != "validated":
             raise HTTPException(status_code=409, detail="Dataset must pass local validation first.")
-        if any(job.dataset_version_id == version_id for job in faas.list_finetunes()):
+        existing_jobs = faas.list_finetunes()
+        if settings.resume_from:
+            parent = next((job for job in existing_jobs if job.checkpoint == settings.resume_from), None)
+            parent_version = None if parent is None else faas.get_dataset(parent.dataset_version_id)
+            if (
+                parent is None or parent.status != "succeeded" or parent.lr_schedule != "constant"
+                or settings.lr_schedule != "constant" or parent.use_eef != settings.use_eef
+                or parent.base_share != settings.base_share or parent_version is None
+                or parent_version.embodiment_name != version.embodiment_name
+                or parent_version.task_id != version.task_id
+            ):
+                raise HTTPException(status_code=409, detail="Resume requires a completed constant-schedule model with matching training settings and embodiment.")
+            if any(job.resume_from == settings.resume_from for job in existing_jobs):
+                raise HTTPException(status_code=409, detail="This checkpoint already has a continuation job.")
+            parent_evaluations = [
+                item for item in evaluations.list(version.task_id) if item.fine_tune_job_id == parent.id
+            ]
+            if not any(
+                (report := evaluations.report(item, tasks, episodes)).usable_pairs == 30
+                and report.decision == "inconclusive"
+                and (report.paired_difference or 0) > 0
+                for item in parent_evaluations
+            ):
+                raise HTTPException(status_code=409, detail="Complete the parent checkpoint's paired evaluation before continuing; only a positive but inconclusive gain supports more steps.")
+        elif any(job.dataset_version_id == version_id for job in existing_jobs):
             raise HTTPException(status_code=409, detail="This dataset version already has a fine-tune job.")
         return faas.create_finetune(version_id, settings)
 
