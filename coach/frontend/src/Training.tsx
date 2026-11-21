@@ -1,0 +1,119 @@
+import { useEffect, useState } from 'react';
+
+type Task = { id: string; name: string };
+type Embodiment = { name: string; id: string | null; video_roles: string[] };
+type Report = { ok?: boolean; episodes?: number; frames?: number; bytes?: number; error?: string | null };
+type Dataset = {
+  id: string; task_id: string; embodiment_name: string; demo_ids: string[];
+  status: string; validation_report: Report | null; error: string | null;
+  remote_id: string | null; remote_name: string | null; created_at: string;
+};
+type Job = {
+  id: string; dataset_version_id: string; steps: number; lr_schedule: string; base_share: number;
+  use_eef: boolean; status: string; remote_job_id: string | null;
+  checkpoint: string | null; error: string | null;
+};
+
+async function json<T>(url: string, method = 'GET', body?: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method,
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const detail = (await response.json().catch(() => ({}))) as { detail?: string };
+    throw new Error(detail.detail ?? `Request failed (${response.status})`);
+  }
+  return (await response.json()) as T;
+}
+
+export default function Training() {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [taskId, setTaskId] = useState('');
+  const [bodies, setBodies] = useState<Embodiment[]>([]);
+  const [embodiment, setEmbodiment] = useState('');
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [steps, setSteps] = useState(1000);
+  const [schedule, setSchedule] = useState<'cosine' | 'constant'>('cosine');
+  const [baseShare, setBaseShare] = useState<0 | 0.5>(0.5);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void json<Task[]>('/api/tasks').then((values) => { setTasks(values); if (values.length) setTaskId(values[0].id); }).catch((caught: Error) => setError(caught.message));
+    void json<Embodiment[]>('/api/embodiments').then((values) => { setBodies(values); if (values.length) setEmbodiment(values[0].name); }).catch((caught: Error) => setError(caught.message));
+  }, []);
+
+  useEffect(() => {
+    if (!taskId) return;
+    let active = true;
+    const refresh = async () => {
+      try {
+        const [versions, work] = await Promise.all([
+          json<Dataset[]>(`/api/tasks/${taskId}/datasets`),
+          json<Job[]>(`/api/tasks/${taskId}/finetunes`),
+        ]);
+        if (active) { setDatasets(versions); setJobs(work); }
+      } catch (caught) { if (active) setError(caught instanceof Error ? caught.message : 'Could not load training jobs.'); }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 10000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [taskId]);
+
+  async function createDataset() {
+    if (!embodiment || !taskId) return;
+    setBusy(true); setError(''); setMessage('');
+    try {
+      const version = await json<Dataset>(`/api/tasks/${taskId}/datasets`, 'POST', { embodiment_name: embodiment });
+      setDatasets(await json<Dataset[]>(`/api/tasks/${taskId}/datasets`));
+      setMessage(`Dataset version ${version.id.slice(0, 8)} queued for local validation. The worker will copy kept demos.`);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not create dataset.'); }
+    finally { setBusy(false); }
+  }
+
+  async function submit(version: Dataset) {
+    if (!Number.isInteger(steps) || steps < 500 || steps > 10000 || steps % 100 !== 0) { setError('Steps must be a multiple of 100 from 500 to 10,000.'); return; }
+    if (!window.confirm(`Submit a paid Dream Labs fine-tune for ${version.demo_ids.length} demos and ${steps} training steps? FaaS charges by step. Continue?`)) return;
+    setBusy(true); setError(''); setMessage('');
+    try {
+      await json<Job>(`/api/datasets/${version.id}/finetunes`, 'POST', {
+        steps, lr_schedule: schedule, base_share: baseShare, use_eef: false,
+      });
+      setJobs(await json<Job[]>(`/api/tasks/${taskId}/finetunes`));
+      setMessage('Training request queued. The worker will upload the dataset, wait for processing, then submit FaaS.');
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not queue fine-tune.'); }
+    finally { setBusy(false); }
+  }
+
+  return <main className="page">
+    <header className="header"><div><p className="eyebrow">Dream Labs FaaS</p><h1>Dataset and training</h1><p className="subtitle">Freeze kept demos, validate locally, then explicitly submit a paid fine-tune.</p></div></header>
+    {error && <div className="alert" role="alert">{error}</div>}
+    {message && <div className="notice" role="status">{message}</div>}
+    <div className="training-controls card">
+      <label>Task<select value={taskId} onChange={(event) => setTaskId(event.target.value)}>{tasks.map((task) => <option key={task.id} value={task.id}>{task.name}</option>)}</select></label>
+      <label>Registered embodiment<select value={embodiment} onChange={(event) => setEmbodiment(event.target.value)}>{bodies.map((body) => <option key={body.name} value={body.name}>{body.name} · {body.video_roles.join(', ')}</option>)}</select></label>
+      <button disabled={busy || !taskId || !embodiment} onClick={() => void createDataset()}>Create dataset version</button>
+    </div>
+    <p className="hint">Run <code>teach-task-coach worker</code> alongside the API. Statuses update here every 10 seconds. Your Dream credentials stay in the backend.</p>
+    <div className="training-controls card">
+      <label>Steps<input type="number" min={500} max={10000} step={100} value={steps} onChange={(event) => setSteps(Number(event.target.value))} /></label>
+      <label>Learning-rate schedule<select value={schedule} onChange={(event) => setSchedule(event.target.value as 'cosine' | 'constant')}><option value="cosine">Cosine · single-task specialization</option><option value="constant">Constant · supports later resume</option></select></label>
+      <label>Training data<select value={baseShare} onChange={(event) => setBaseShare(Number(event.target.value) as 0 | 0.5)}><option value={0.5}>Mix in Dream Labs data (0.5)</option><option value={0}>My demos only (0.0)</option></select></label>
+    </div>
+    <p className="hint">Dream charges by training step; this app has no price quote API. Confirm the charge in your Dream account before submitting. The initial recipe is 1,000 steps, cosine, and a 0.5 data mix.</p>
+    <section className="card training-list"><h2>Dataset versions</h2>
+      {datasets.length === 0 && <p>No versions yet. Keep at least one valid demo, then create a version.</p>}
+      {datasets.map((version) => <div className="training-row" key={version.id}>
+        <div><strong>Version {version.id.slice(0, 8)}</strong><small>{version.demo_ids.length} demos · {version.embodiment_name}</small><small>Status: {version.status}{version.remote_id ? ` · ${version.remote_id}` : ''}</small>{version.validation_report && <small>Validation: {version.validation_report.episodes ?? '—'} episodes, {version.validation_report.frames ?? '—'} frames</small>}{version.error && <small className="trial-error">{version.error}</small>}</div>
+        {version.status === 'validated' && !jobs.some((job) => job.dataset_version_id === version.id) && <button disabled={busy} onClick={() => void submit(version)}>Submit fine-tune</button>}
+      </div>)}
+    </section>
+    <section className="card training-list"><h2>Fine-tune jobs</h2>
+      {jobs.length === 0 && <p>No jobs submitted.</p>}
+      {jobs.map((job) => <div className="training-row" key={job.id}><div><strong>Job {job.id.slice(0, 8)}</strong><small>{job.steps} steps · {job.lr_schedule} · base share {job.base_share}</small><small>Status: {job.status}{job.remote_job_id ? ` · ${job.remote_job_id}` : ''}</small>{job.checkpoint && <small className="model-ready">Checkpoint: {job.checkpoint}</small>}{job.error && <small className="trial-error">{job.error}</small>}</div></div>)}
+    </section>
+  </main>;
+}

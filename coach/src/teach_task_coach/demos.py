@@ -12,7 +12,7 @@ import numpy as np
 import pyarrow.parquet as pq
 from pydantic import BaseModel
 
-from teach_task_coach.storage import CoachDatabase
+from teach_task_coach.storage import CoachDatabase, default_data_dir
 
 
 class DemoError(ValueError):
@@ -148,7 +148,9 @@ def read_demo(folder: Path, task_id: str) -> Demo:
 
 class DemoScanner:
     def __init__(self, root: Path | None = None) -> None:
-        self.root = (root or Path(os.getenv("COACH_DEMOS_DIR", ".coach-demos"))).expanduser()
+        self.root = (
+            root or Path(os.getenv("COACH_DEMOS_DIR", str(default_data_dir() / "demos")))
+        ).expanduser()
 
     def scan(self, task_id: str, prompt: str) -> tuple[list[Demo], list[str]]:
         if not self.root.is_dir():

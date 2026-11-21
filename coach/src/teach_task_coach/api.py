@@ -3,13 +3,22 @@
 from pathlib import Path
 from typing import Literal
 
+from dream.errors import DreamError
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from teach_task_coach.coverage import CoveragePlan, plan
 from teach_task_coach.demos import Demo, DemoError, DemoScanner, DemoStore
 from teach_task_coach.episodes import EpisodeSummary, RolloutScanner
+from teach_task_coach.faas import (
+    DatasetVersion,
+    DreamGateway,
+    FaaSStore,
+    FineTuneRecord,
+    FineTuneRequest,
+)
 from teach_task_coach.preflight import PreflightResult, PreflightService
 from teach_task_coach.station import StationRejected, StationUnavailable
 from teach_task_coach.storage import EpisodeStore
@@ -54,6 +63,16 @@ class DemoDecision(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
 
 
+class DatasetRequest(BaseModel):
+    embodiment_name: str = Field(min_length=3, max_length=140)
+
+
+class EmbodimentSummary(BaseModel):
+    name: str
+    id: str | None
+    video_roles: list[str]
+
+
 def create_app(
     service: PreflightService | None = None,
     store: EpisodeStore | None = None,
@@ -62,6 +81,8 @@ def create_app(
     trial_runner: TrialRunner | None = None,
     demo_store: DemoStore | None = None,
     demo_scanner: DemoScanner | None = None,
+    faas_store: FaaSStore | None = None,
+    dream_gateway: DreamGateway | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Teach it a task", version="0.1.0")
     preflight = service or PreflightService()
@@ -71,6 +92,8 @@ def create_app(
     runner = trial_runner or TrialRunner(tasks, episodes, preflight.station, rollouts)
     demos = demo_store or DemoStore(episodes.data_dir)
     recorder = demo_scanner or DemoScanner()
+    faas = faas_store or FaaSStore(episodes.data_dir)
+    dream = dream_gateway or DreamGateway()
 
     @app.get("/api/preflight", response_model=PreflightResult)
     def get_preflight() -> PreflightResult:
@@ -79,6 +102,15 @@ def create_app(
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    frontend_dist = Path(__file__).resolve().parents[2] / "frontend/dist"
+    if (frontend_dist / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="frontend-assets")
+
+    @app.get("/", response_model=None)
+    def frontend() -> FileResponse | dict[str, str]:
+        index = frontend_dist / "index.html"
+        return FileResponse(index) if index.is_file() else {"message": "Build coach/frontend first."}
 
     @app.post("/api/rollouts/import", response_model=ImportResult)
     def import_rollouts() -> ImportResult:
@@ -279,6 +311,79 @@ def create_app(
         if tasks.get_task(task_id) is None:
             raise HTTPException(status_code=404, detail="Task not found.")
         return plan(task_id, tasks, episodes, demos)
+
+    @app.get("/api/embodiments", response_model=list[EmbodimentSummary])
+    def list_embodiments() -> list[EmbodimentSummary]:
+        try:
+            bodies = dream.embodiments()
+        except DreamError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Could not list Dream embodiments. Check credentials and connectivity.",
+            ) from exc
+        return [
+            EmbodimentSummary(
+                name=body.name,
+                id=body.id,
+                video_roles=sorted(body.embodiment_config.get("video", {})),
+            )
+            for body in bodies
+        ]
+
+    @app.post("/api/tasks/{task_id}/datasets", response_model=DatasetVersion, status_code=201)
+    def create_dataset_version(task_id: str, value: DatasetRequest) -> DatasetVersion:
+        if tasks.get_task(task_id) is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        selected = [demo for demo in demos.list(task_id) if demo.decision == "keep" and demo.valid]
+        if not selected:
+            raise HTTPException(status_code=409, detail="Keep at least one valid demonstration first.")
+        try:
+            embodiments = dream.embodiments()
+        except DreamError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Could not verify Dream embodiment. Check credentials and connectivity.",
+            ) from exc
+        if value.embodiment_name not in {body.name for body in embodiments}:
+            raise HTTPException(status_code=422, detail="Choose an embodiment in your Dream account.")
+        return faas.create_dataset(task_id, value.embodiment_name, [demo.id for demo in selected])
+
+    @app.get("/api/tasks/{task_id}/datasets", response_model=list[DatasetVersion])
+    def list_dataset_versions(task_id: str) -> list[DatasetVersion]:
+        if tasks.get_task(task_id) is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        return faas.list_datasets(task_id)
+
+    @app.get("/api/datasets/{version_id}", response_model=DatasetVersion)
+    def get_dataset_version(version_id: str) -> DatasetVersion:
+        result = faas.get_dataset(version_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Dataset version not found.")
+        return result
+
+    @app.post("/api/datasets/{version_id}/finetunes", response_model=FineTuneRecord, status_code=201)
+    def submit_finetune(version_id: str, settings: FineTuneRequest) -> FineTuneRecord:
+        version = faas.get_dataset(version_id)
+        if version is None:
+            raise HTTPException(status_code=404, detail="Dataset version not found.")
+        if version.status != "validated":
+            raise HTTPException(status_code=409, detail="Dataset must pass local validation first.")
+        if any(job.dataset_version_id == version_id for job in faas.list_finetunes()):
+            raise HTTPException(status_code=409, detail="This dataset version already has a fine-tune job.")
+        return faas.create_finetune(version_id, settings)
+
+    @app.get("/api/tasks/{task_id}/finetunes", response_model=list[FineTuneRecord])
+    def list_finetunes(task_id: str) -> list[FineTuneRecord]:
+        if tasks.get_task(task_id) is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        return faas.list_finetunes(task_id)
+
+    @app.get("/api/finetunes/{job_id}", response_model=FineTuneRecord)
+    def get_finetune(job_id: str) -> FineTuneRecord:
+        result = faas.get_finetune(job_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Fine-tune job not found.")
+        return result
 
     return app
 

@@ -12,9 +12,18 @@ from pathlib import Path
 from teach_task_coach.episodes import EpisodeSummary
 
 
+def default_data_dir() -> Path:
+    configured = os.getenv("COACH_DATA_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    if os.name == "nt":
+        return Path(os.getenv("LOCALAPPDATA", str(Path.home() / "AppData/Local"))) / "TeachTaskCoach"
+    return Path(os.getenv("XDG_DATA_HOME", "~/.local/share")).expanduser() / "teach-task-coach"
+
+
 class CoachDatabase:
     def __init__(self, data_dir: Path | None = None) -> None:
-        self.data_dir = data_dir or Path(os.getenv("COACH_DATA_DIR", ".coach-data"))
+        self.data_dir = data_dir or default_data_dir()
         self.db_path = self.data_dir / "coach.sqlite3"
 
     @contextmanager
