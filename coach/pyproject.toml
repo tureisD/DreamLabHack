@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "A guided task improvement workflow for Dream Labs robots"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "dreamlabs-client>=1.1.0,<2",
+    "dreamlabs-client[datasets]>=1.1.0,<2",
     "fastapi>=0.115,<1",
     "uvicorn>=0.30,<1",
 ]

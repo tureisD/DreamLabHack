@@ -28,6 +28,8 @@ Set `COACH_ROLLOUTS_DIR` to the station's rollout directory if it differs from `
 
 The **Tasks** screen now creates a task and supervised baseline trials. The operator sets up a marked 3×3 start grid, confirms before robot motion, stops the run, syncs its saved rollout, and labels the result. If recording failed, a stopped trial can be abandoned with a reason. Do not leave a robot run unattended.
 
+The **Demos** screen watches `COACH_DEMOS_DIR` every 15 seconds while open. An external recorder should save each completed demonstration as its own LeRobot v2.1 or v3 session folder, with task text matching the task's robot instruction exactly. The coach checks structural metadata, action rows, missing video files, and idle action at the start; the operator reviews the video, labels its grid cell, and chooses Keep or Redo. Camera occlusion and motion smoothness are not scored yet. The coverage map prioritizes cells where baseline failures are observed and accepted demos are scarce. It is a collection aid, not a guarantee of improvement.
+
 ## Checks
 
 ```bash

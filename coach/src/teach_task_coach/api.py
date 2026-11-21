@@ -7,6 +7,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from teach_task_coach.coverage import CoveragePlan, plan
+from teach_task_coach.demos import Demo, DemoError, DemoScanner, DemoStore
 from teach_task_coach.episodes import EpisodeSummary, RolloutScanner
 from teach_task_coach.preflight import PreflightResult, PreflightService
 from teach_task_coach.station import StationRejected, StationUnavailable
@@ -46,12 +48,20 @@ class AbandonReason(BaseModel):
     reason: str = Field(min_length=1, max_length=1000)
 
 
+class DemoDecision(BaseModel):
+    decision: Literal["keep", "redo"]
+    start_cell: int | None = Field(default=None, ge=0, le=8)
+    note: str | None = Field(default=None, max_length=2000)
+
+
 def create_app(
     service: PreflightService | None = None,
     store: EpisodeStore | None = None,
     scanner: RolloutScanner | None = None,
     task_store: TaskStore | None = None,
     trial_runner: TrialRunner | None = None,
+    demo_store: DemoStore | None = None,
+    demo_scanner: DemoScanner | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Teach it a task", version="0.1.0")
     preflight = service or PreflightService()
@@ -59,6 +69,8 @@ def create_app(
     rollouts = scanner or RolloutScanner()
     tasks = task_store or TaskStore(episodes.data_dir)
     runner = trial_runner or TrialRunner(tasks, episodes, preflight.station, rollouts)
+    demos = demo_store or DemoStore(episodes.data_dir)
+    recorder = demo_scanner or DemoScanner()
 
     @app.get("/api/preflight", response_model=PreflightResult)
     def get_preflight() -> PreflightResult:
@@ -207,6 +219,66 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except StationUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post("/api/tasks/{task_id}/demos/import", response_model=ImportResult)
+    def import_demos(task_id: str) -> ImportResult:
+        task = tasks.get_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        found, skipped = recorder.scan(task_id, task.prompt)
+        imported = 0
+        for demo in found:
+            try:
+                demos.upsert(demo)
+            except DemoError as exc:
+                skipped.append(f"{Path(demo.source_path).name}: {exc}")
+            else:
+                imported += 1
+        return ImportResult(imported=imported, skipped=skipped)
+
+    @app.get("/api/tasks/{task_id}/demos", response_model=list[Demo])
+    def list_demos(task_id: str) -> list[Demo]:
+        if tasks.get_task(task_id) is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        return demos.list(task_id)
+
+    @app.post("/api/demos/{demo_id}/decision", response_model=Demo)
+    def decide_demo(demo_id: str, value: DemoDecision) -> Demo:
+        demo = demos.get(demo_id)
+        if demo is None:
+            raise HTTPException(status_code=404, detail="Demo not found.")
+        if value.decision == "keep":
+            if value.start_cell is None:
+                raise HTTPException(status_code=422, detail="Choose a start cell for a kept demo.")
+            if not demo.valid:
+                raise HTTPException(status_code=409, detail="Fix hard validation issues before keeping this demo.")
+        result = demos.decide(demo_id, value.decision, value.start_cell, value.note)
+        assert result is not None
+        return result
+
+    @app.get("/api/demos/{demo_id}/video/{role}")
+    def get_demo_video(demo_id: str, role: str) -> FileResponse:
+        demo = demos.get(demo_id)
+        if demo is None:
+            raise HTTPException(status_code=404, detail="Demo not found.")
+        key = f"observation.images.{role}"
+        if key not in demo.camera_keys:
+            raise HTTPException(status_code=404, detail="Camera not found.")
+        root = Path(demo.source_path).resolve()
+        files = [
+            path
+            for path in (root / "videos").rglob("*.mp4")
+            if key in path.parts and path.resolve().is_relative_to(root)
+        ]
+        if not files:
+            raise HTTPException(status_code=404, detail="Video not found.")
+        return FileResponse(files[0], media_type="video/mp4")
+
+    @app.get("/api/tasks/{task_id}/demo-plan", response_model=CoveragePlan)
+    def get_demo_plan(task_id: str) -> CoveragePlan:
+        if tasks.get_task(task_id) is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        return plan(task_id, tasks, episodes, demos)
 
     return app
 

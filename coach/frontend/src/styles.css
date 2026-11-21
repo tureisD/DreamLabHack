@@ -91,3 +91,16 @@ h3 { font-size: 15px; margin: 28px 0 12px; }
 button.secondary { background: #e6eef2; color: #23546a; }
 .trial-label { flex-basis: 100%; background: #f5f8fa; padding: 16px; border-radius: 10px; }
 @media (max-width: 780px) { .trial-create { grid-template-columns: 1fr; } .top-nav { flex-wrap: wrap; } }
+.demo-task-select { margin: 0 0 18px; }
+.demo-task-select label { display: inline-grid; gap: 6px; font-size: 13px; font-weight: 650; }
+.demo-task-select select { min-width: 260px; border: 1px solid #cfdae0; border-radius: 8px; padding: 10px; background: white; font: inherit; }
+.coverage { margin-bottom: 18px; }
+.coverage-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 22px; max-width: 570px; }
+.coverage-cell { background: #f1f5f7; border: 2px solid transparent; border-radius: 10px; padding: 11px; }
+.coverage-cell strong, .coverage-cell span { display: block; }
+.coverage-cell strong { font-size: 13px; margin-bottom: 6px; }
+.coverage-cell span { font-size: 11px; color: #697b85; margin: 2px 0; }
+.coverage-next { border-color: #2382a0; background: #e6f4f8; }
+.decision-actions { display: flex; gap: 8px; }
+.demo-layout { margin-top: 0; }
+@media (max-width: 560px) { .coverage-grid { gap: 5px; } .coverage-cell { padding: 7px; } }

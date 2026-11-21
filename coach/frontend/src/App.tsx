@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Runs from './Runs';
 import Tasks from './Tasks';
+import Demos from './Demos';
 
 type Check = { state: 'ready' | 'blocked' | 'unavailable'; message: string };
 type Model = {
@@ -108,7 +109,7 @@ function Preflight() {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<'preflight' | 'runs' | 'tasks'>('preflight');
+  const [screen, setScreen] = useState<'preflight' | 'runs' | 'tasks' | 'demos'>('preflight');
   return (
     <>
       <nav className="top-nav" aria-label="Coach sections">
@@ -116,8 +117,9 @@ export default function App() {
         <button className={screen === 'preflight' ? 'nav-active' : ''} onClick={() => setScreen('preflight')}>Preflight</button>
         <button className={screen === 'tasks' ? 'nav-active' : ''} onClick={() => setScreen('tasks')}>Tasks</button>
         <button className={screen === 'runs' ? 'nav-active' : ''} onClick={() => setScreen('runs')}>Run review</button>
+        <button className={screen === 'demos' ? 'nav-active' : ''} onClick={() => setScreen('demos')}>Demos</button>
       </nav>
-      {screen === 'preflight' ? <Preflight /> : screen === 'tasks' ? <Tasks /> : <Runs />}
+      {screen === 'preflight' ? <Preflight /> : screen === 'tasks' ? <Tasks /> : screen === 'demos' ? <Demos /> : <Runs />}
     </>
   );
 }
