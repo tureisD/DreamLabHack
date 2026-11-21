@@ -5,7 +5,9 @@ type Job = { id: string; status: string; checkpoint: string | null };
 type Evaluation = {
   id: string; task_id: string; fine_tune_job_id: string; baseline_checkpoint: string;
   candidate_checkpoint: string; minimum_effect: number; created_at: string;
+  auto_promote: boolean;
 };
+type Deployment = { checkpoint: string; baseline_checkpoint: string };
 type Trial = {
   id: string; status: string; checkpoint: string; scene_index: number;
   sequence_index: number; start_cell: number; setup_note: string;
@@ -44,6 +46,8 @@ export default function EvaluationPage() {
   const [trials, setTrials] = useState<Trial[]>([]);
   const [report, setReport] = useState<Report | null>(null);
   const [minimumEffect, setMinimumEffect] = useState(0.15);
+  const [autoPromote, setAutoPromote] = useState(false);
+  const [deployment, setDeployment] = useState<Deployment | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -71,6 +75,7 @@ export default function EvaluationPage() {
           setJobId((current) => work.some((job) => job.id === current) ? current : (work.find((job) => job.status === 'succeeded')?.id ?? ''));
           setEvaluations(values);
           setSelectedId((current) => values.some((item) => item.id === current) ? current : (values[0]?.id ?? ''));
+          setDeployment(await json<Deployment>(`/api/tasks/${taskId}/deployment`));
         }
       } catch (caught) { if (active) setError(caught instanceof Error ? caught.message : 'Could not load evaluations.'); }
     };
@@ -110,7 +115,7 @@ export default function EvaluationPage() {
     if (!taskId || !jobId) return;
     void act(async () => {
       const result = await json<Evaluation>(`/api/tasks/${taskId}/evaluations`, 'POST', {
-        fine_tune_job_id: jobId, minimum_effect: minimumEffect,
+        fine_tune_job_id: jobId, minimum_effect: minimumEffect, auto_promote: autoPromote,
       });
       setEvaluations(await json<Evaluation[]>(`/api/tasks/${taskId}/evaluations`));
       setSelectedId(result.id);
@@ -152,6 +157,22 @@ export default function EvaluationPage() {
     });
   }
 
+  function rollback() {
+    if (!taskId || !window.confirm('Restore the baseline checkpoint for future coach task runs?')) return;
+    void act(async () => {
+      setDeployment(await json<Deployment>(`/api/tasks/${taskId}/deployment/rollback`, 'POST'));
+      setMessage('Future deployed trials will use the baseline checkpoint.');
+    });
+  }
+
+  function promote() {
+    if (!selectedId || !taskId || !window.confirm('Use this verified candidate for future coach task runs?')) return;
+    void act(async () => {
+      setDeployment(await json<Deployment>(`/api/evaluations/${selectedId}/promote`, 'POST'));
+      setMessage('Future deployed trials will use the candidate checkpoint.');
+    });
+  }
+
   const selected = evaluations.find((value) => value.id === selectedId);
   const unusable = trials.some((trial) => trial.status === 'abandoned');
   const nextTrial = unusable ? undefined : trials.find((trial) => !['completed', 'abandoned'].includes(trial.status));
@@ -167,10 +188,12 @@ export default function EvaluationPage() {
         <label>Task<select value={taskId} onChange={(event) => { setTaskId(event.target.value); setSelectedId(''); }}><option value="">Choose a task</option>{tasks.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}</select></label>
         <label>Fine-tuned checkpoint<select value={jobId} onChange={(event) => setJobId(event.target.value)}><option value="">Choose a completed job</option>{candidates.map((job) => <option key={job.id} value={job.id}>{job.checkpoint}</option>)}</select></label>
         <label>Minimum useful gain<input type="number" min="0" max="100" step="1" value={Math.round(minimumEffect * 100)} onChange={(event) => setMinimumEffect(Number(event.target.value) / 100)} />%</label>
+        <label>After a verified improvement<select value={autoPromote ? 'yes' : 'no'} onChange={(event) => setAutoPromote(event.target.value === 'yes')}><option value="no">Review before switching</option><option value="yes">Automatically use candidate for future coach runs</option></select></label>
         <button disabled={busy || !taskId || !jobId || !Number.isFinite(minimumEffect) || minimumEffect < 0 || minimumEffect > 1} onClick={create}>Plan comparison</button>
       </div>
       <p className="hint">The gain threshold is fixed when you plan the evaluation. Each setup is specified as a position on your marked table and a rotation. Use the same object, lighting, and success rule for both runs in a pair. Keep these setups out of training.</p>
       {task && <p><strong>Success rule:</strong> {task.success_rule}</p>}
+      {deployment && <p><strong>Checkpoint for future task runs:</strong> {deployment.checkpoint} {deployment.checkpoint !== deployment.baseline_checkpoint && <button className="secondary" disabled={busy} onClick={rollback}>Roll back to baseline</button>}</p>}
       {evaluations.length > 0 && <label className="evaluation-select">Comparison<select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>{evaluations.map((item) => <option key={item.id} value={item.id}>{item.candidate_checkpoint} · {item.created_at}</option>)}</select></label>}
     </section>
 
@@ -184,7 +207,9 @@ export default function EvaluationPage() {
         <div><strong>{percent(report.paired_difference)}</strong><span>paired gain</span></div>
       </div>
       <p className="hint">95% paired bootstrap interval: {percent(report.ci_low)} to {percent(report.ci_high)}. Exact paired test p={report.exact_p_value?.toFixed(4) ?? '—'}. Candidate-only wins: {report.candidate_only}; baseline-only wins: {report.baseline_only}. Safety stops: {report.baseline_safety_stops} baseline, {report.candidate_safety_stops} candidate.</p>
-      <p className="hint">The coach does not switch the deployed checkpoint automatically. Review the rollouts and safety stops before deciding.</p>
+      {report.decision === 'improved' && deployment?.checkpoint !== selected.candidate_checkpoint && <button disabled={busy} onClick={promote}>Use verified candidate</button>}
+      <p className="hint">Checkpoint changes affect future coach runs only. Review the rollouts and safety stops before any robot motion.</p>
+      <p className="hint">Auto promotion for this comparison: {selected.auto_promote ? 'on' : 'off'}. It only changes the checkpoint used by future coach runs after an improved verdict; it never starts robot motion.</p>
     </section>}
 
     {selected && nextTrial && <section className="card evaluation-next">

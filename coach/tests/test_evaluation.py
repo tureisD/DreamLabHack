@@ -136,3 +136,24 @@ def test_paired_report_distinguishes_improvement_and_inconclusive_result(tmp_pat
         episodes.label(trial.episode_id, success, None, None)
     report = client.get(f"/api/evaluations/{evaluation.id}/report").json()
     assert report["decision"] == "worse"
+
+
+def test_verified_candidate_promotes_future_runs_and_can_roll_back(tmp_path):
+    client, tasks, episodes, evaluations, task, job, _station = setup_comparison(tmp_path)
+    created = client.post(
+        f"/api/tasks/{task.id}/evaluations",
+        json={"fine_tune_job_id": job.id, "auto_promote": True},
+    ).json()
+    evaluation = evaluations.get(created["id"])
+    assert evaluation is not None
+    assert client.post(f"/api/evaluations/{evaluation.id}/promote").status_code == 409
+    populate_report(tasks, episodes, evaluation, [False] * 30, [True] * 24 + [False] * 6)
+    assert client.post(f"/api/evaluations/{evaluation.id}/promote").json()["checkpoint"] == "candidate"
+    deployed = client.post(
+        f"/api/tasks/{task.id}/deployed-trials", json={"start_cell": 2}
+    ).json()
+    assert deployed["checkpoint"] == "candidate"
+    assert deployed["purpose"] == "deployed"
+    assert client.get(f"/api/tasks/{task.id}/baseline-trials").json() == []
+    assert len(client.get(f"/api/tasks/{task.id}/deployed-trials").json()) == 1
+    assert client.post(f"/api/tasks/{task.id}/deployment/rollback").json()["checkpoint"] == "base"

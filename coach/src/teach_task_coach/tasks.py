@@ -49,6 +49,7 @@ class Trial(TrialInput):
     evaluation_id: str | None = None
     scene_index: int | None = None
     sequence_index: int | None = None
+    purpose: Literal["baseline", "evaluation", "deployed"] = "baseline"
 
 
 class HeldoutScene(BaseModel):
@@ -97,7 +98,8 @@ class TaskStore:
                 checkpoint TEXT,
                 evaluation_id TEXT,
                 scene_index INTEGER,
-                sequence_index INTEGER
+                sequence_index INTEGER,
+                purpose TEXT NOT NULL DEFAULT 'baseline'
             );
             CREATE INDEX IF NOT EXISTS trials_task_id ON trials(task_id);
             CREATE TABLE IF NOT EXISTS heldout_scenes (
@@ -115,12 +117,19 @@ class TaskStore:
                 recorded_at TEXT NOT NULL,
                 PRIMARY KEY(trial_id, episode_id)
             );
+            CREATE TABLE IF NOT EXISTS deployments (
+                task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+                checkpoint TEXT NOT NULL,
+                evaluation_id TEXT,
+                updated_at TEXT NOT NULL
+            );
             """
         )
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(trials)")}
         for name, sql_type in (
             ("checkpoint", "TEXT"), ("evaluation_id", "TEXT"),
             ("scene_index", "INTEGER"), ("sequence_index", "INTEGER"),
+            ("purpose", "TEXT NOT NULL DEFAULT 'baseline'"),
         ):
             if name not in columns:
                 connection.execute(f"ALTER TABLE trials ADD COLUMN {name} {sql_type}")
@@ -175,6 +184,29 @@ class TaskStore:
             row = connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
         return None if row is None else Task.model_validate(dict(row))
 
+    def deployed_checkpoint(self, task_id: str) -> str:
+        task = self.get_task(task_id)
+        if task is None:
+            raise KeyError(task_id)
+        with self.db.connect() as connection:
+            self._schema(connection)
+            row = connection.execute(
+                "SELECT checkpoint FROM deployments WHERE task_id = ?", (task_id,)
+            ).fetchone()
+        return task.baseline_checkpoint if row is None else row["checkpoint"]
+
+    def set_deployment(self, task_id: str, checkpoint: str, evaluation_id: str | None) -> None:
+        if self.get_task(task_id) is None:
+            raise KeyError(task_id)
+        with self.db.connect() as connection:
+            self._schema(connection)
+            connection.execute(
+                """INSERT INTO deployments VALUES (?, ?, ?, ?)
+                   ON CONFLICT(task_id) DO UPDATE SET checkpoint=excluded.checkpoint,
+                   evaluation_id=excluded.evaluation_id, updated_at=excluded.updated_at""",
+                (task_id, checkpoint, evaluation_id, _utc_now()),
+            )
+
     def create_trial(self, task_id: str, value: TrialInput) -> Trial:
         task = self.get_task(task_id)
         if task is None:
@@ -218,11 +250,30 @@ class TaskStore:
             )
         return trial
 
+    def create_deployed_trial(self, task_id: str, value: TrialInput) -> Trial:
+        trial = self.create_trial(task_id, value)
+        checkpoint = self.deployed_checkpoint(task_id)
+        with self.db.connect() as connection:
+            self._schema(connection)
+            connection.execute("UPDATE trials SET checkpoint = ?, purpose = 'deployed' WHERE id = ?", (checkpoint, trial.id))
+        result = self.get_trial(trial.id)
+        assert result is not None
+        return result
+
     def list_trials(self, task_id: str) -> list[Trial]:
         with self.db.connect() as connection:
             self._schema(connection)
             rows = connection.execute(
-                "SELECT * FROM trials WHERE task_id = ? AND evaluation_id IS NULL ORDER BY created_at, rowid", (task_id,)
+                "SELECT * FROM trials WHERE task_id = ? AND purpose = 'baseline' ORDER BY created_at, rowid", (task_id,)
+            ).fetchall()
+        return [Trial.model_validate(dict(row)) for row in rows]
+
+    def list_deployed_trials(self, task_id: str) -> list[Trial]:
+        with self.db.connect() as connection:
+            self._schema(connection)
+            rows = connection.execute(
+                "SELECT * FROM trials WHERE task_id = ? AND purpose = 'deployed' ORDER BY created_at, rowid",
+                (task_id,),
             ).fetchall()
         return [Trial.model_validate(dict(row)) for row in rows]
 

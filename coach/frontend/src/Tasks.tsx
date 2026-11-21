@@ -23,6 +23,8 @@ export default function Tasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selected, setSelected] = useState<Task | null>(null);
   const [trials, setTrials] = useState<Trial[]>([]);
+  const [mode, setMode] = useState<'baseline' | 'deployed'>('baseline');
+  const [deployedCheckpoint, setDeployedCheckpoint] = useState('');
   const [name, setName] = useState('');
   const [prompt, setPrompt] = useState('');
   const [checkpoint, setCheckpoint] = useState('');
@@ -38,7 +40,10 @@ export default function Tasks() {
   const [message, setMessage] = useState('');
 
   const loadTasks = useCallback(async () => setTasks(await requestJson<Task[]>('/api/tasks')), []);
-  const loadTrials = useCallback(async (taskId: string) => setTrials(await requestJson<Trial[]>(`/api/tasks/${taskId}/baseline-trials`)), []);
+  const loadTrials = useCallback(async (taskId: string, purpose: 'baseline' | 'deployed' = mode) => {
+    setTrials(await requestJson<Trial[]>(`/api/tasks/${taskId}/${purpose}-trials`));
+    setDeployedCheckpoint((await requestJson<{ checkpoint: string }>(`/api/tasks/${taskId}/deployment`)).checkpoint);
+  }, [mode]);
 
   useEffect(() => { void loadTasks().catch((caught: Error) => setError(caught.message)); }, [loadTasks]);
 
@@ -68,9 +73,9 @@ export default function Tasks() {
   function createTrial() {
     if (!selected) return;
     void act(async () => {
-      await requestJson<Trial>(`/api/tasks/${selected.id}/baseline-trials`, 'POST', { start_cell: cell, setup_note: setupNote.trim() || null });
+      await requestJson<Trial>(`/api/tasks/${selected.id}/${mode}-trials`, 'POST', { start_cell: cell, setup_note: setupNote.trim() || null });
       await loadTrials(selected.id);
-      setSetupNote(''); setMessage('Baseline trial planned. Prepare the scene before Start.');
+      setSetupNote(''); setMessage('Trial planned. Prepare the scene before Start.');
     });
   }
 
@@ -92,7 +97,7 @@ export default function Tasks() {
         note: labelNote.trim() || null,
       });
       await loadTrials(selected.id);
-      setLabelTrial(null); setLabelNote(''); setMessage('Baseline outcome saved.');
+      setLabelTrial(null); setLabelNote(''); setMessage('Outcome saved.');
     });
   }
 
@@ -129,7 +134,9 @@ export default function Tasks() {
           </form>
         </section>
         {selected && <section className="card">
-          <h2>{selected.name}: baseline</h2>
+          <h2>{selected.name}: {mode === 'baseline' ? 'baseline' : 'deployed checkpoint'}</h2>
+          <label>Run type <select value={mode} onChange={(event) => { const value = event.target.value as 'baseline' | 'deployed'; setMode(value); void loadTrials(selected.id, value); }}><option value="baseline">Baseline experiment</option><option value="deployed">Current deployed checkpoint</option></select></label>
+          {mode === 'deployed' && <p><strong>Checkpoint for new runs:</strong> {deployedCheckpoint}</p>}
           <p><strong>Instruction:</strong> {selected.prompt}</p>
           <p><strong>Success:</strong> {selected.success_rule}</p>
           <p className="hint">Place the object within the selected cell of a marked 3×3 grid. Confirm each setup before starting; the robot may move.</p>
@@ -139,7 +146,7 @@ export default function Tasks() {
             <button onClick={createTrial} disabled={busy}>Plan trial</button>
           </div>
           <h3>Trials</h3>
-          {trials.length === 0 && <p className="muted">No baseline trials planned yet.</p>}
+          {trials.length === 0 && <p className="muted">No trials planned yet.</p>}
           {trials.map((trial) => <div className="trial-row" key={trial.id}>
             <div><strong>Cell {trial.start_cell + 1}</strong><small>{trial.status.replaceAll('_', ' ')}{trial.setup_note ? ` · ${trial.setup_note}` : ''}</small>{trial.last_error && <small className="trial-error">{trial.last_error}</small>}</div>
             <div className="trial-actions">

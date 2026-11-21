@@ -81,6 +81,12 @@ class EmbodimentSummary(BaseModel):
     video_roles: list[str]
 
 
+class DeploymentStatus(BaseModel):
+    task_id: str
+    checkpoint: str
+    baseline_checkpoint: str
+
+
 def create_app(
     service: PreflightService | None = None,
     store: EpisodeStore | None = None,
@@ -217,6 +223,37 @@ def create_app(
             raise HTTPException(status_code=404, detail="Task not found.")
         return tasks.list_trials(task_id)
 
+    @app.get("/api/tasks/{task_id}/deployment", response_model=DeploymentStatus)
+    def get_deployment(task_id: str) -> DeploymentStatus:
+        task = tasks.get_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        return DeploymentStatus(
+            task_id=task_id, checkpoint=tasks.deployed_checkpoint(task_id),
+            baseline_checkpoint=task.baseline_checkpoint,
+        )
+
+    @app.post("/api/tasks/{task_id}/deployment/rollback", response_model=DeploymentStatus)
+    def rollback_deployment(task_id: str) -> DeploymentStatus:
+        task = tasks.get_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        tasks.set_deployment(task_id, task.baseline_checkpoint, None)
+        return get_deployment(task_id)
+
+    @app.post("/api/tasks/{task_id}/deployed-trials", response_model=Trial, status_code=201)
+    def create_deployed_trial(task_id: str, value: TrialInput) -> Trial:
+        try:
+            return tasks.create_deployed_trial(task_id, value)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Task not found.") from exc
+
+    @app.get("/api/tasks/{task_id}/deployed-trials", response_model=list[Trial])
+    def list_deployed_trials(task_id: str) -> list[Trial]:
+        if tasks.get_task(task_id) is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        return tasks.list_deployed_trials(task_id)
+
     @app.post("/api/trials/{trial_id}/start", response_model=Trial)
     def start_trial(trial_id: str) -> Trial:
         try:
@@ -273,7 +310,14 @@ def create_app(
     @app.post("/api/trials/{trial_id}/label", response_model=Trial)
     def label_trial(trial_id: str, label: TrialLabel) -> Trial:
         try:
-            return runner.label(trial_id, label.success, label.failure_stage, label.note)
+            result = runner.label(trial_id, label.success, label.failure_stage, label.note)
+            if result.evaluation_id:
+                evaluation = evaluations.get(result.evaluation_id)
+                if evaluation is not None and evaluation.auto_promote:
+                    report = evaluations.report(evaluation, tasks, episodes)
+                    if report.decision == "improved":
+                        tasks.set_deployment(evaluation.task_id, evaluation.candidate_checkpoint, evaluation.id)
+            return result
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Trial not found.") from exc
         except (TrialError, TrialStateError) as exc:
@@ -444,7 +488,7 @@ def create_app(
             ):
                 raise HTTPException(status_code=409, detail="A replacement is allowed only after an unusable trial and no active run.")
         try:
-            return evaluations.create(task_id, job.id, job.checkpoint, value.minimum_effect, tasks)
+            return evaluations.create(task_id, job.id, job.checkpoint, value.minimum_effect, tasks, value.auto_promote)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -473,6 +517,16 @@ def create_app(
         if evaluation is None:
             raise HTTPException(status_code=404, detail="Evaluation not found.")
         return evaluations.report(evaluation, tasks, episodes)
+
+    @app.post("/api/evaluations/{evaluation_id}/promote", response_model=DeploymentStatus)
+    def promote_evaluation(evaluation_id: str) -> DeploymentStatus:
+        evaluation = evaluations.get(evaluation_id)
+        if evaluation is None:
+            raise HTTPException(status_code=404, detail="Evaluation not found.")
+        if evaluations.report(evaluation, tasks, episodes).decision != "improved":
+            raise HTTPException(status_code=409, detail="The evaluation has not verified improvement.")
+        tasks.set_deployment(evaluation.task_id, evaluation.candidate_checkpoint, evaluation.id)
+        return get_deployment(evaluation.task_id)
 
     return app
 

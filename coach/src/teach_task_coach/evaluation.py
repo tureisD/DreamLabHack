@@ -19,6 +19,7 @@ from teach_task_coach.tasks import HeldoutScene, TaskStore, Trial
 class EvaluationRequest(BaseModel):
     fine_tune_job_id: str
     minimum_effect: float = Field(default=0.15, ge=0, le=1)
+    auto_promote: bool = False
 
 
 class Evaluation(BaseModel):
@@ -29,6 +30,7 @@ class Evaluation(BaseModel):
     candidate_checkpoint: str
     minimum_effect: float
     created_at: str
+    auto_promote: bool = False
 
 
 class EvaluationReport(BaseModel):
@@ -84,9 +86,13 @@ class EvaluationStore:
                 baseline_checkpoint TEXT NOT NULL,
                 candidate_checkpoint TEXT NOT NULL,
                 minimum_effect REAL NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                auto_promote INTEGER NOT NULL DEFAULT 0
             )"""
         )
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(evaluations)")}
+        if "auto_promote" not in columns:
+            connection.execute("ALTER TABLE evaluations ADD COLUMN auto_promote INTEGER NOT NULL DEFAULT 0")
 
     def create(
         self,
@@ -95,6 +101,7 @@ class EvaluationStore:
         candidate_checkpoint: str,
         minimum_effect: float,
         tasks: TaskStore,
+        auto_promote: bool = False,
     ) -> Evaluation:
         task = tasks.get_task(task_id)
         if task is None:
@@ -112,6 +119,7 @@ class EvaluationStore:
             candidate_checkpoint=candidate_checkpoint,
             minimum_effect=minimum_effect,
             created_at=_now(),
+            auto_promote=auto_promote,
         )
         rng = random.Random(int(evaluation.id[:16], 16))
         rng.shuffle(scenes)
@@ -121,11 +129,13 @@ class EvaluationStore:
             tasks._schema(connection)
             self._schema(connection)
             connection.execute(
-                "INSERT INTO evaluations VALUES (?, ?, ?, ?, ?, ?, ?)",
+                """INSERT INTO evaluations
+                   (id, task_id, fine_tune_job_id, baseline_checkpoint, candidate_checkpoint,
+                    minimum_effect, created_at, auto_promote) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     evaluation.id, task_id, fine_tune_job_id,
                     evaluation.baseline_checkpoint, candidate_checkpoint,
-                    minimum_effect, evaluation.created_at,
+                    minimum_effect, evaluation.created_at, int(auto_promote),
                 ),
             )
             sequence = 0
@@ -138,8 +148,8 @@ class EvaluationStore:
                     connection.execute(
                         """INSERT INTO trials
                            (id, task_id, start_cell, setup_note, status, created_at, checkpoint,
-                            evaluation_id, scene_index, sequence_index)
-                           VALUES (?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?)""",
+                            evaluation_id, scene_index, sequence_index, purpose)
+                           VALUES (?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?, 'evaluation')""",
                         (
                             uuid.uuid4().hex, task_id, scene.start_cell,
                             (f"Held-out scene {scene.scene_index + 1}: place object at "
