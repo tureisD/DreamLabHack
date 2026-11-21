@@ -29,6 +29,7 @@ from teach_task_coach.faas import (
 )
 from teach_task_coach.guidance import Guidance, guidance
 from teach_task_coach.preflight import PreflightResult, PreflightService
+from teach_task_coach.rollout_audit import IntentAudit, audit_rollout
 from teach_task_coach.scene import PlacementResult, SceneAdapter
 from teach_task_coach.station import StationRejected, StationUnavailable
 from teach_task_coach.storage import EpisodeStore
@@ -175,6 +176,16 @@ def create_app(
         if episode is None:
             raise HTTPException(status_code=404, detail="Episode not found.")
         return episode
+
+    @app.get("/api/episodes/{episode_id}/intent-audit", response_model=IntentAudit)
+    def get_intent_audit(episode_id: str) -> IntentAudit:
+        episode = episodes.get(episode_id)
+        if episode is None:
+            raise HTTPException(status_code=404, detail="Episode not found.")
+        try:
+            return audit_rollout(Path(episode.source_path))
+        except (OSError, ValueError, KeyError) as exc:
+            raise HTTPException(status_code=422, detail=f"Cannot audit this rollout: {exc}") from exc
 
     @app.get("/api/episodes/{episode_id}/video/{role}")
     def get_video(episode_id: str, role: str) -> FileResponse:

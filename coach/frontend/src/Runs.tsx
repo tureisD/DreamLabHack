@@ -13,6 +13,7 @@ type Episode = EpisodeItem & {
   findings: Finding[]; events: Event[]; failure_stage: string | null; note: string | null;
 };
 type ImportResult = { imported: number; skipped: string[] };
+type IntentAudit = { command_rows: number; comparable_rows: number; differing_rows: number; differing_share: number | null; median_staleness_ms: number | null; discarded_replies: number; warnings: string[] };
 
 export default function Runs() {
   const [items, setItems] = useState<EpisodeItem[]>([]);
@@ -24,6 +25,7 @@ export default function Runs() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [audit, setAudit] = useState<IntentAudit | null>(null);
 
   const loadItems = useCallback(async () => {
     const response = await fetch('/api/episodes');
@@ -42,6 +44,9 @@ export default function Runs() {
       if (!response.ok) throw new Error('Could not load this run.');
       const episode = (await response.json()) as Episode;
       setSelected(episode);
+      setAudit(null);
+      const auditResponse = await fetch(`/api/episodes/${id}/intent-audit`);
+      if (auditResponse.ok) setAudit((await auditResponse.json()) as IntentAudit);
       setRole(Object.keys(episode.videos)[0] ?? '');
       setOutcome(episode.success === null ? 'unlabelled' : episode.success ? 'success' : 'failure');
       setStage(episode.failure_stage ?? '');
@@ -136,6 +141,7 @@ export default function Runs() {
                 <div><dt>Stalls / clamps</dt><dd>{selected.stalls ?? '—'} / {selected.clamps ?? '—'}</dd></div>
                 {selected.error && <div><dt>Error</dt><dd>{selected.error}</dd></div>}
               </dl>
+              {audit && <><h3>Policy intent versus command</h3><p>{audit.comparable_rows} of {audit.command_rows} command rows aligned to raw replies. {audit.differing_share === null ? 'No comparable rows.' : `${(audit.differing_share * 100).toFixed(1)}% differed from the policy reply.`} Median execution staleness: {audit.median_staleness_ms?.toFixed(0) ?? '—'} ms. Discarded replies: {audit.discarded_replies}.</p>{audit.warnings.map((warning) => <p className="hint" key={warning}>{warning}</p>)}</>}
               <h3>Findings</h3>
               {selected.findings.length ? selected.findings.map((finding, index) => <div className={`finding finding-${finding.severity}`} key={`${finding.kind}-${index}`}><strong>{finding.message}</strong><small>Evidence: {finding.evidence}</small></div>) : <p className="muted">No metadata or inference errors found. This does not establish task success.</p>}
               <h3>Inference events</h3>
