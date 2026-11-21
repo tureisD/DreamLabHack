@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import secrets
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from uuid import uuid4
 import sys
 from pathlib import Path
 
 import av
+import mujoco
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -34,12 +39,14 @@ CONFIG = {
 
 
 class RecordingYamEnv(YamEnv):
-    episode = 0
-
-    def __init__(self):
+    def __init__(self, folder, task, seed):
         super().__init__()
-        self.folder = ROOT / f"apple-{type(self).episode:03d}"
-        type(self).episode += 1
+        self.folder = folder
+        self.task = task
+        apple = self.data.joint("apple_free").qpos
+        apple[:2] += np.random.default_rng(seed).uniform(-0.025, 0.025, size=2)
+        mujoco.mj_forward(self.model, self.data)
+        self.apple_xy = apple[:2].tolist()
         self.states: list[np.ndarray] = []
         self.actions: list[np.ndarray] = []
         self.outputs = {}
@@ -102,24 +109,63 @@ class RecordingYamEnv(YamEnv):
             | {f"observation.images.{role}": video_feature for role in ROLES.values()},
         }
         (meta / "info.json").write_text(json.dumps(info), encoding="utf-8")
-        (meta / "tasks.jsonl").write_text(json.dumps({"task_index": 0, "task": TASK}) + "\n", encoding="utf-8")
-        (meta / "episodes.jsonl").write_text(json.dumps({"episode_index": 0, "tasks": [TASK], "length": n}) + "\n", encoding="utf-8")
+        (meta / "tasks.jsonl").write_text(json.dumps({"task_index": 0, "task": self.task}) + "\n", encoding="utf-8")
+        (meta / "episodes.jsonl").write_text(json.dumps({"episode_index": 0, "tasks": [self.task], "length": n}) + "\n", encoding="utf-8")
         print(f"recorded {self.folder.name}: {n} frames, {n/FPS:.1f}s", flush=True)
+
+
+def scene_seed(value):
+    seed = int(value)
+    if seed < 0:
+        raise argparse.ArgumentTypeError("Use a nonnegative scene seed")
+    return seed
+
+
+@contextmanager
+def recording(root, task, checkpoint, seed, source):
+    root.mkdir(parents=True, exist_ok=True)
+    folder = root / f"yam-{uuid4().hex}"
+    folder.mkdir()
+    started = datetime.now(timezone.utc).isoformat()
+    env = RecordingYamEnv(folder, task, seed)
+    details = {"source": source, "seed": seed, "apple_xy_m": env.apple_xy}
+    status, reason, error = "complete", "finished", None
+    try:
+        yield env, details
+    except BaseException as exc:
+        status, reason, error = "partial", "interrupted", type(exc).__name__
+        raise
+    finally:
+        env.close()
+        frames = len(env.states)
+        info = {
+            "collection_mode": "simulation", "simulation": details,
+            "robot_name": "YAM simulator", "body": "yam", "task": task,
+            "checkpoint": checkpoint, "started_at_utc": started,
+            "frames": frames, "fps": FPS, "duration_s": frames / FPS,
+            "status": status if frames else "empty", "stop_reason": reason, "error": error,
+        }
+        pending = folder / "rollout.json.tmp"
+        pending.write_text(json.dumps(info, indent=2), encoding="utf-8")
+        pending.replace(folder / "rollout.json")
+        print(f"Review {folder} (scene seed {seed})", flush=True)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=ROOT, help="Output dataset directory")
-    parser.add_argument("--episodes", type=int, default=2, help="Number of scripted pickup episodes")
+    parser.add_argument("--output", type=Path, default=ROOT)
+    parser.add_argument("--episodes", type=int, default=2)
+    parser.add_argument("--seed", type=scene_seed, help="First scene seed; increments per episode")
     args = parser.parse_args()
     if args.episodes < 1:
         parser.error("--episodes must be positive")
-    ROOT = args.output.resolve()
-    ROOT.mkdir(exist_ok=True)
-    mock_pickups.YamEnv = RecordingYamEnv
-    for _ in range(args.episodes):
-        result = mock_pickups.run_trial("apple", yaw=0, lift=0.15)
-        if not result["passed"]:
-            raise SystemExit("Scripted pickup failed; do not train on this dataset.")
-    manifest = ROOT.with_name(ROOT.name + "-manifest.json")
-    manifest.write_text(json.dumps({"source": "Dream Labs yam_mujoco scripted pickup", "task": TASK, "embodiment": CONFIG}, indent=2), encoding="utf-8")
+    first_seed = args.seed if args.seed is not None else secrets.randbits(32)
+    failures = 0
+    for index in range(args.episodes):
+        with recording(args.output, TASK, "scripted-yam", first_seed + index, "scripted") as (env, details):
+            result = mock_pickups.run_trial("apple", env=env, snapshot_dir=env.folder)
+            details["script_result"] = result
+            failures += int(not result["passed"])
+            (env.folder / "embodiment.json").write_text(json.dumps(CONFIG), encoding="utf-8")
+    if failures:
+        raise SystemExit(f"{failures} scripted pickups failed the simulator check. Review before training.")

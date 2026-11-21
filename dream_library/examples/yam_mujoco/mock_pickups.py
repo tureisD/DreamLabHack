@@ -53,14 +53,16 @@ def solve(env, side, target, rotation, seed):
     raise ValueError(f"IK failed {side} {target}: score {best[0]:.4f}")
 
 
-def run_trial(fruit, yaw=0, lift=0.15):
+def run_trial(fruit, yaw=0, lift=0.15, *, env=None, snapshot_dir=None):
     """Run one scripted physical pickup and release trial.
     @param fruit Scene fruit name.
     @param yaw Grasp yaw in radians.
     @param lift Lift distance in metres.
     @return The trial's result: the object, whether it passed, and the heights and positions measured.
     """
-    env = YamEnv()
+    owns_env = env is None
+    if owns_env:
+        env = YamEnv()
     try:
         home = np.r_[np.zeros(6), 1.0]
         for _ in range(30):
@@ -97,7 +99,7 @@ def run_trial(fruit, yaw=0, lift=0.15):
             min_height = min(min_height, env.data.body(fruit).xpos[2] - initial_z)
             max_slip = max(max_slip, np.linalg.norm(env.data.body(fruit).xpos - env.data.site(f"{side}_tcp").xpos))
         held = env.data.body(fruit).xpos.copy()
-        out = Path("mock_results")
+        out = Path("mock_results") if snapshot_dir is None else snapshot_dir
         out.mkdir(exist_ok=True)
         from PIL import Image
 
@@ -117,7 +119,8 @@ def run_trial(fruit, yaw=0, lift=0.15):
         print(json.dumps(result), flush=True)
         return result
     finally:
-        env.close()
+        if owns_env:
+            env.close()
 
 
 if __name__ == "__main__":

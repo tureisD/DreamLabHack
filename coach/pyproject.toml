@@ -13,6 +13,9 @@ dependencies = [
     "uvicorn>=0.30,<1",
 ]
 
+[project.optional-dependencies]
+sim = ["mujoco>=3.3.5,<5", "pillow>=10"]
+
 [project.scripts]
 teach-task-coach = "teach_task_coach.cli:main"
 

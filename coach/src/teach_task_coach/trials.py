@@ -25,7 +25,7 @@ def _parse_time(value: str | None) -> dt.datetime | None:
 
 
 def _matches(trial: Trial, episode: EpisodeSummary, prompt: str, checkpoint: str) -> bool:
-    if episode.run_number != trial.station_run:
+    if episode.simulation is not None or episode.run_number != trial.station_run:
         return False
     if episode.task != prompt or episode.checkpoint != checkpoint:
         return False

@@ -50,6 +50,8 @@ The API binds to `127.0.0.1`. Browser write requests with an Origin outside loca
 
 The **Guide** screen derives the next action from labelled baseline runs, station faults, demo decisions, dataset validation, FaaS job status, and evaluation results. It recommends an initial pilot once every observed failure cell has a kept valid demonstration. This is a coverage stopping rule, not an optimal demo count or success prediction. The suggested first FaaS recipe is the documented default and remains editable.
 
+For a hardware-free run, follow the [simulator setup and one-request pilot](experiments/yam_sim_faas/PILOT.md).
+
 The [YAM simulation FaaS experiment](experiments/yam_sim_faas/README.md) includes reproducible simulated robot recordings, a locally validated LeRobot dataset, a separate Dream-1 baseline rollout, and the observed Dream dataset-processing failure. It is a format and integration test, not evidence of task improvement.
 
 The **Demos** screen can launch a single local SO-101 follower/leader recording with `lerobot-record` when LeRobot is installed on the robot computer. Configure the follower and leader serial ports and camera index in that screen. Stop the Dream station process first: the station holds the follower arms even while idle. The recorder saves one 30-second session under `COACH_DEMOS_DIR` with Hub upload disabled; after it exits, the scanner imports the result for review. This launcher has only been tested with a fake process, not physical arms. See [LeRobot's SO-101 recording guide](https://huggingface.co/docs/lerobot/main/en/il_robots) for calibration and wiring.

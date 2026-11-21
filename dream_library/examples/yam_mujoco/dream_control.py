@@ -334,10 +334,13 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
     parser.add_argument("--actions", type=int, default=48, help="Execute 1–48 rows before observing again")
     parser.add_argument("--seconds", type=float, default=120, help="Wall-clock trial duration")
     parser.add_argument("--show-side-panel", action="store_true", help="Show native MuJoCo controls")
+    parser.add_argument("--max-requests", type=int, help="Maximum get_action calls, including retries")
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Render and validate observation without calling API")
     parser.add_argument("--quiet", action="store_true", help="Compact progress and one final summary")
     args = parser.parse_args(argv)
+    if args.max_requests is not None and args.max_requests < 1:
+        parser.error("--max-requests must be positive")
     if not 1 <= args.actions <= 48 or not np.isfinite(args.seconds) or args.seconds <= 0 or not args.task.strip():
         parser.error("Use 1–48 actions, positive finite seconds, and a nonempty task.")
     config = settings()
@@ -412,7 +415,9 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
             policy = open_policy(policy_config(args.model, gateway, poses), key)
             feed(policy, env, windows, args.task, args.model, steps, every=0, station=poses)
             restarts = 0
-            while active():
+            requests_started = 0
+            while active() and (args.max_requests is None or requests_started < args.max_requests):
+                requests_started += 1
                 started = time.monotonic()
                 future = pool.submit(policy.get_action)
                 # Hold simulation time while inference is pending; keep the viewer responsive.
@@ -430,6 +435,8 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
                 try:
                     reply = future.result()
                 except Exception as error:
+                    if args.max_requests is not None and requests_started >= args.max_requests:
+                        raise
                     # The serve restarted the episode: the client already holds the new session, so ask again.
                     if type(error).__name__ == "DreamSessionExpired" and restarts < 3:
                         restarts += 1
@@ -503,6 +510,7 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
             )
         if shared_env is None:
             env.close()
+    return executed_rows
 
 
 if __name__ == "__main__":

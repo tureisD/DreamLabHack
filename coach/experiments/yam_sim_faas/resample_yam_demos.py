@@ -16,11 +16,20 @@ args = parser.parse_args()
 SOURCE = args.source.resolve()
 TARGET = args.output.resolve()
 
+if SOURCE == TARGET or TARGET.is_relative_to(SOURCE):
+    parser.error("Choose a separate output directory outside the source")
+
 for session in sorted(SOURCE.iterdir()):
     if not session.is_dir():
         continue
     output = TARGET / session.name
     info = json.loads((session / "meta/info.json").read_text(encoding="utf-8"))
+    if info["fps"] != 20:
+        parser.error(f"{session.name} is not a 20 Hz recording")
+    try:
+        output.mkdir(parents=True, exist_ok=False)
+    except FileExistsError:
+        parser.error(f"Output session already exists: {output}. Choose a fresh output directory.")
     data = pq.read_table(session / "data/chunk-000/episode_000000.parquet")
     indices = np.arange(0, data.num_rows, 2)
     sampled = data.take(pa.array(indices))

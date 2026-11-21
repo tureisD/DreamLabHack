@@ -17,6 +17,8 @@ No API credential is stored in these artifacts.
 
 ## Reproduce locally
 
+See the [PowerShell simulator and Coach review guide](PILOT.md) for setup, varied scenes, and a capped API pilot.
+
 The scripts use the adjacent Dream Labs `dream_library/examples/yam_mujoco` source. Install the coach environment plus `mujoco`, `pillow`, `av`, and `pyarrow`, then run from a scratch directory:
 
 ```bash

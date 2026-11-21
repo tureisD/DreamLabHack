@@ -7,6 +7,7 @@ type EpisodeItem = {
   started_at_utc: string | null; success: boolean | null; finding_count: number;
 };
 type Episode = EpisodeItem & {
+  simulation?: { source: string; seed: number; model_action_rows?: number } | null;
   body: string | null; robot_name: string | null; frames: number | null; fps: number | null;
   duration_s: number | null; stop_reason: string | null; error: string | null;
   stalls: number | null; clamps: number | null; videos: Record<string, string>;
@@ -104,7 +105,7 @@ export default function Runs() {
         <div>
           <p className="eyebrow">Evidence first</p>
           <h1>Run review</h1>
-          <p className="subtitle">Import saved station rollouts, inspect failures, and label the task outcome.</p>
+          <p className="subtitle">Import saved station or simulator rollouts, inspect failures, and label the task outcome.</p>
         </div>
         <button onClick={() => void scan()} disabled={busy}>{busy ? 'Working…' : 'Scan rollouts'}</button>
       </header>
@@ -135,6 +136,7 @@ export default function Runs() {
                 </>
               ) : <div className="video-empty">No finished camera video in this rollout.</div>}
               <dl className="details">
+                {selected.simulation && <div><dt>Simulation</dt><dd>{selected.simulation.source} � seed {selected.simulation.seed}{selected.simulation.model_action_rows !== undefined && ` � ${selected.simulation.model_action_rows} model action rows`}</dd></div>}
                 <div><dt>Duration</dt><dd>{selected.duration_s?.toFixed(1) ?? '—'} s</dd></div>
                 <div><dt>Frames</dt><dd>{selected.frames ?? '—'} at {selected.fps ?? '—'} fps</dd></div>
                 <div><dt>Stop reason</dt><dd>{selected.stop_reason ?? '—'}</dd></div>

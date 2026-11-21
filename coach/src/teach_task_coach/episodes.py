@@ -38,6 +38,7 @@ class EpisodeSummary(BaseModel):
     status: str
     task: str
     checkpoint: str
+    simulation: dict[str, Any] | None = None
     run_number: int | None = None
     body: str | None
     robot_name: str | None
@@ -159,6 +160,7 @@ def read_episode(folder: Path) -> EpisodeSummary:
         status=status,
         task=info["task"],
         checkpoint=info["checkpoint"],
+        simulation=info.get("simulation") if isinstance(info.get("simulation"), dict) else None,
         run_number=info.get("run"),
         body=info.get("body"),
         robot_name=info.get("robot_name"),
