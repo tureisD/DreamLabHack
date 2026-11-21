@@ -7,6 +7,7 @@ type Guidance = {
   suggested_recipe: { steps: number; lr_schedule: string; base_share: number } | null;
 };
 type Diagnosis = { setup_count: number; data_count: number; unknown_count: number; failure_stages: Record<string, number>; recommendation: string };
+type Consistency = { threshold: number | null; scored_runs: number; successful_calibration_runs: number; alerts: number; labelled_failures_alerted: number; labelled_successes_alerted: number };
 
 async function json<T>(url: string): Promise<T> {
   const response = await fetch(url);
@@ -22,6 +23,7 @@ export default function Guide() {
   const [taskId, setTaskId] = useState('');
   const [guidance, setGuidance] = useState<Guidance | null>(null);
   const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
+  const [consistency, setConsistency] = useState<Consistency | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -35,11 +37,12 @@ export default function Guide() {
     let active = true;
     const refresh = async () => {
       try {
-        const [value, causes] = await Promise.all([
+        const [value, causes, signals] = await Promise.all([
           json<Guidance>(`/api/tasks/${taskId}/guidance`),
           json<Diagnosis>(`/api/tasks/${taskId}/diagnosis`),
+          json<Consistency>(`/api/tasks/${taskId}/consistency`),
         ]);
-        if (active) { setGuidance(value); setDiagnosis(causes); setError(''); }
+        if (active) { setGuidance(value); setDiagnosis(causes); setConsistency(signals); setError(''); }
       } catch (caught) { if (active) setError(caught instanceof Error ? caught.message : 'Could not load task guidance.'); }
     };
     void refresh();
@@ -63,6 +66,7 @@ export default function Guide() {
         {guidance.suggested_recipe && <p className="hint">Suggested first recipe: {guidance.suggested_recipe.steps} steps, {guidance.suggested_recipe.lr_schedule} schedule, base share {guidance.suggested_recipe.base_share}. Review and edit it in Training before paid submission.</p>}
       </section>}
       {diagnosis && <section className="card guide-card"><h2>Why runs fail</h2><p>{diagnosis.setup_count} station or recording issues · {diagnosis.data_count} confirmed task failures without a logged station fault · {diagnosis.unknown_count} other runs.</p><p>{diagnosis.recommendation}</p>{Object.entries(diagnosis.failure_stages).length > 0 && <p><strong>Human-labelled failure stages:</strong> {Object.entries(diagnosis.failure_stages).map(([name, count]) => `${name} ${count}`).join(' · ')}</p>}<p className="hint">These are evidence categories, not a proof of root cause. Review the rollout before acting.</p></section>}
+      {consistency && <section className="card guide-card"><h2>Action consistency screen</h2><p>{consistency.scored_runs} runs scored from saved reply chunks. {consistency.threshold === null ? `Need at least 10 scored successful runs for a local threshold; ${consistency.successful_calibration_runs} available.` : `95th-percentile successful-run threshold: ${consistency.threshold.toFixed(2)}. ${consistency.alerts} alerts: ${consistency.labelled_failures_alerted} labelled failures, ${consistency.labelled_successes_alerted} labelled successes.`}</p><p className="hint">Offline screening only. The threshold is an empirical reference, not a proven 5% false-alarm bound; no robot run is stopped automatically.</p></section>}
     </>}
   </main>;
 }

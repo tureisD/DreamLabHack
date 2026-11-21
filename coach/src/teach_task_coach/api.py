@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from teach_task_coach.consistency import ConsistencyReview, review_task
 from teach_task_coach.coverage import CoveragePlan, plan
 from teach_task_coach.demos import Demo, DemoError, DemoScanner, DemoStore
 from teach_task_coach.diagnosis import TaskDiagnosis, diagnose
@@ -233,6 +234,12 @@ def create_app(
         if tasks.get_task(task_id) is None:
             raise HTTPException(status_code=404, detail="Task not found.")
         return diagnose(task_id, tasks, episodes)
+
+    @app.get("/api/tasks/{task_id}/consistency", response_model=ConsistencyReview)
+    def get_consistency(task_id: str) -> ConsistencyReview:
+        if tasks.get_task(task_id) is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        return review_task(task_id, tasks, episodes)
 
     @app.post("/api/tasks/{task_id}/baseline-trials", response_model=Trial, status_code=201)
     def create_baseline_trial(task_id: str, value: TrialInput) -> Trial:
