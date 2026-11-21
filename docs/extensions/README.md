@@ -21,7 +21,7 @@ training orchestrator is needed.
 | B5 Robustness | Complete model-call cache, frozen configs/seeds, episode/cluster bootstrap, deterministic replay | Cache-only run makes zero calls; identical numerical/decision artifacts on repeat |
 | B6 Live replay | Recompute A/B/base screens from cached outputs, replay recorded trials through STEP | Real recomputation, preserved chronology/stop, explicit provenance and missing-data behavior |
 | C1 Signal-based diagnosis | Parse relevant Dream sidecars/trace; versioned divergence/oscillation and observed initiation checks | Evidence for every flag; missing telemetry is unknown; task success requires human confirmation |
-| C2 Prompt failure groups | Group by task/prompt version, with setup/data hypotheses and mixed/unknown cases | No unsupported forced cause; counts include unclassified runs |
+| C2 Prompt failure groups | Group by task/prompt version; suggest “fix your setup” or “needs data,” with mixed/unknown cases | No unsupported forced cause; counts include unclassified runs |
 | C3 Human validation | At least 50 held-out labeled runs, frozen rubric, per-class metrics and adjudication | Publish agreement/confusion/coverage and uncertainty; no fabricated run labels |
 | C4 Handoffs | Reviewed training-eligible successful episodes to A2; human-confirmed attempts to B1 | Holdout firewall, provenance, source identity and no automatic training/upload |
 
@@ -29,7 +29,7 @@ training orchestrator is needed.
 
 - [Research audit](research.md): verified papers, changed claims, exact source revisions and integration traps.
 - [B specification](statistical-and-offline.md): STEP, metrics, probes, caching, bootstrap and stage replay.
-- [C specification](run-diagnosis.md): signal rules, grouping, human validation and A/B handoffs.
+- [C specification](run-diagnosis.md): signal rules, grouping, human validation, A/B handoffs and the FailBench-based rationale for avoiding an automatic vision judge.
 - [Implementation and validation plan](implementation-plan.md): dependencies, schema gates, files and test cases.
 
 ## Decisions that must remain visible

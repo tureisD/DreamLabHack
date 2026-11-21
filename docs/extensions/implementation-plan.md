@@ -16,7 +16,7 @@ and reproducible artifacts are ready. Synchronize the parent into this branch fi
 | X06 | Episode/cluster bootstrap and screening report | X04–X05 | Paired resampling across models, reproducible draws, explicit low-sample limitations |
 | X07 | Dream signal parser and run findings | X00 | Pinned upstream thresholds, trace provenance, missing/partial/duplicated-log tests |
 | X08 | Prompt grouping and A2/B1 exports | X07, reviewed schemas | Mixed/unknown handling; human verification and holdout firewall tests |
-| X09 | At least 50-run diagnosis validation study | X07–X08, real data/reviewers | Frozen rubric/split, class metrics, uncertainty, mistakes and limitations |
+| X09 | At least 50-run diagnosis validation study | X07–X08, real data/reviewers | Frozen rubric/split, agreement, balanced accuracy where defined, false-success/missed-failure analysis, uncertainty and limitations |
 | X10 | Cached A/B/base and STEP replay demo | X02, X06, X08 | Recompute twice identically; no paid calls; authentic chronology/provenance |
 | X11 | Integration PR into parent, or main after parent retirement | Relevant gates above | Reviewable results, exact commands, licenses, capabilities and unresolved-data limitations |
 
@@ -82,6 +82,7 @@ working. Avoid catching schema errors and silently dropping new fields.
 | Bootstrap | Episode/cluster resampling, same draws across checkpoints, no frame pseudo-replication, reproducibility and degenerate/small-sample handling |
 | Diagnosis | Divergence duration/boundary; cycles versus reversals; swing/noise thresholds; missing channels, irregular timestamps and partial logs |
 | Interpretation | Fault is not outcome; predicted initiation is not measured initiation; conditional started-run success cannot replace overall success |
+| Diagnostic evidence | Missing/ambiguous signals yield unknown and human review; no automatic success or unvalidated vision-judge fallback |
 | Exports | Human review required; all attempts retained; alias deduplication; active holdout never enters A2; later exposure transition auditable |
 | Demo | Actual cached recomputation, two identical canonical result hashes, no external calls, correct first stop and visibly authentic/synthetic data origin |
 
@@ -99,6 +100,9 @@ outside tracked source, using checksummed manifests.
 - No package or model is described as validated merely because its import succeeds.
 - Paper numbers are cited as literature results; our gripper heuristic and probe
   have their own validation status.
+- Part C explains the signal-based choice using FailBench as a September 2026
+  arXiv preprint, without a CoRL claim or an unsupported claim that our rules beat
+  its VLMs. The 50-run agreement study remains our own required robustness evidence.
 - Missing real trials or fewer than 50 suitable labeled runs remain explicit gaps.
 - Cache-only demo is ready before stage time; policy synthesis and paid acquisition
   are separate preparatory operations, not surprise background work.

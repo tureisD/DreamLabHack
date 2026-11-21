@@ -67,6 +67,21 @@ Missing logs/counters remain unknown; stop/error/stall/clamp signals do not esta
 task success. Keep sidecar origin and source hashes. Current run-report thresholds
 are compatibility defaults, not calibrated fault definitions for every robot.
 
+## FailBench rationale for signal-based diagnosis
+
+**FailBench: How Reliable are VLMs at Judging Robot Task Success?**
+(Navasardyan, Danielyan and Davtyan, arXiv:2609.03611v1, submitted 3 September 2026)
+evaluates 13 VLM-based detectors. The best reaches **0.77 mean balanced accuracy**;
+contact-intensive assembly performance falls below **0.60**, with a tendency to
+predict success under ambiguous evidence. These are benchmark results, not numbers
+measured for our system. Cite the **arXiv preprint**; a CoRL acceptance is not
+established by the cited record. [Primary source](https://arxiv.org/abs/2609.03611v1).
+
+Our design inference is to use auditable logged signals for diagnostic flags,
+human confirmation for B1 outcomes, and the independent C3 study to evaluate our
+own rules. The paper does not validate our thresholds or prove telemetry alone
+can determine task success. [Part C rationale and Q&A](run-diagnosis.md#why-logged-signals-instead-of-a-vision-judge).
+
 ## Claims permitted in a submission
 
 Say “STEP adapter based on the released RSS method” only after integration tests;

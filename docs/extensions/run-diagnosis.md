@@ -4,6 +4,35 @@ Scope: read-only analysis of existing logs and traces, evidence-linked labels,
 prompt grouping and versioned exports. This is a small package/CLI extension,
 not the cancelled local application. No robot control, upload or training occurs.
 
+Product goal: supplement “did it improve?” with inspectable evidence about failures
+and a useful next action. The primary robustness deliverable is the human-label
+study in C3.
+
+## Why logged signals instead of a vision judge
+
+Use recorded signals as the initial diagnostic evidence and require human-confirmed
+task outcomes. [FailBench](https://arxiv.org/abs/2609.03611v1) reports limitations of
+VLM success judging across sources, particularly contact-rich tasks and ambiguous
+evidence; see the [verified research summary](research.md#failbench-rationale-for-signal-based-diagnosis).
+Describe it as a **September 2026 arXiv preprint**, not a confirmed CoRL paper.
+
+This motivates our design; it does not establish that our telemetry rules outperform
+VLMs. Logs can expose controller behavior while missing a dropped object or failed
+contact. Missing evidence therefore produces `unknown` and human review, never
+an assumed success or an automatic VLM fallback. A future vision assistant could
+propose labels only after separate validation and would not verify its own output.
+
+Suggested judge-facing explanation:
+
+> We start with logged signals because they give reproducible evidence for specific
+> controller and execution faults. FailBench shows why a visual judge alone is an
+> unreliable source of task-success labels. We still require a person to confirm
+> outcomes, and we plan to measure diagnostic agreement on at least 50 labeled runs.
+
+Update this explanation with measured results only after C3 is complete.
+Do not compare our small diagnostic study directly with
+FailBench's benchmark score as if the tasks, labels and sampling were identical.
+
 ## C1 — labels from recorded signals
 
 Separate three records: **observed event**, **diagnostic hypothesis**, and
@@ -61,8 +90,8 @@ Use these recommendation categories:
 
 | Category | Evidence supporting a suggestion | Output |
 | --- | --- | --- |
-| Setup review | Explicit camera/driver errors, trace anomalies or timing faults | Inspect the linked setup evidence; list plausible causes without claiming certainty |
-| Data review | Human-confirmed repeated task failures in a scenario, with adequate setup evidence | Send the failure pattern and examples to part A for review |
+| Fix your setup | Explicit camera/driver errors, trace anomalies or timing faults | Inspect the linked camera, driver or network evidence; list plausible causes without claiming certainty |
+| Needs data | Human-confirmed repeated task failures in a scenario, with adequate setup evidence | Send the failure pattern and examples to Part A for review |
 | Mixed | Setup evidence and task-performance problems coexist | Address documented setup issues, then reassess the residual task pattern |
 | Unknown | Missing signals, ambiguous labels or insufficient examples | Request specified missing evidence/human review |
 
@@ -91,8 +120,11 @@ appropriate access, but report their origin and applicability to Dream explicitl
    independently label all runs and then adjudicate disagreements. If only one is
    available, disclose that limitation rather than invent inter-rater agreement.
 5. Report sample counts, label prevalence, raw agreement, confusion matrices,
-   per-class precision/recall, macro-F1 where defined, unknown/abstention coverage
-   and reviewer disagreement. Use suitable run/session-level uncertainty intervals.
+   balanced accuracy for binary labels where both classes are present, per-class
+   precision/recall, macro-F1 where defined, unknown/abstention coverage and reviewer
+   disagreement. Explicitly report false-success predictions and missed failures,
+   including ambiguous/contact-heavy cases when available. Use suitable
+   run/session-level uncertainty intervals.
 6. Show representative false positives/negatives and evidence. Classes absent from
    the set are unvalidated; 50 easy successes cannot establish fault-detection recall.
 
