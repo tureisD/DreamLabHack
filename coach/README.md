@@ -1,6 +1,6 @@
 # Teach it a task
 
-A local companion for the [Dream Labs public library](../dream_library/README.md). This first feature is a read-only preflight: it checks the robot station and lists checkpoints visible to the configured Dream account. It does not move the robot, upload data, or submit fine-tuning jobs.
+A local companion for the [Dream Labs public library](../dream_library/README.md). It checks the robot station and lists accessible checkpoints, then imports saved station rollouts for review and operator success labels. It does not yet move the robot, upload data, or submit fine-tuning jobs.
 
 ## Run locally
 
@@ -23,6 +23,8 @@ npm run dev
 Open the URL printed by Vite. The frontend proxies `/api` to `127.0.0.1:8765`.
 
 The coach connects to the Dream station at `http://127.0.0.1:8091` by default. Set `COACH_STATION_URL` if the station uses another local address. The Dream client uses its normal `DREAM_API_KEY`, `DREAM_CREDENTIALS`, or `~/.dreamlabs/credentials` configuration; no credential is stored in this repo.
+
+Set `COACH_ROLLOUTS_DIR` to the station's rollout directory if it differs from `~/.dreamlabs/rollouts`. Enable `rollouts: {enabled: true}` in the station configuration to save local episodes. The coach stores labels in `.coach-data/coach.sqlite3` under its working directory by default; set `COACH_DATA_DIR` to keep that database elsewhere. The rollout files themselves are read only.
 
 ## Checks
 

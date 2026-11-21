@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import Runs from './Runs';
 
 type Check = { state: 'ready' | 'blocked' | 'unavailable'; message: string };
 type Model = {
@@ -27,7 +28,7 @@ function StateBadge({ state }: { state: Check['state'] }) {
   return <span className={`state state-${state}`}>{state}</span>;
 }
 
-export default function App() {
+function Preflight() {
   const [data, setData] = useState<Preflight | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,5 +103,19 @@ export default function App() {
 
       <p className="footnote">Read-only preflight. This screen does not move the robot, upload data, or start training.</p>
     </main>
+  );
+}
+
+export default function App() {
+  const [screen, setScreen] = useState<'preflight' | 'runs'>('preflight');
+  return (
+    <>
+      <nav className="top-nav" aria-label="Coach sections">
+        <span className="brand">Teach it a task</span>
+        <button className={screen === 'preflight' ? 'nav-active' : ''} onClick={() => setScreen('preflight')}>Preflight</button>
+        <button className={screen === 'runs' ? 'nav-active' : ''} onClick={() => setScreen('runs')}>Run review</button>
+      </nav>
+      {screen === 'preflight' ? <Preflight /> : <Runs />}
+    </>
   );
 }
