@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from teach_task_coach.coverage import CoveragePlan, plan
 from teach_task_coach.demos import Demo, DemoError, DemoScanner, DemoStore
+from teach_task_coach.diagnosis import TaskDiagnosis, diagnose
 from teach_task_coach.episodes import EpisodeSummary, RolloutScanner
 from teach_task_coach.evaluation import (
     Evaluation,
@@ -226,6 +227,12 @@ def create_app(
         if tasks.get_task(task_id) is None:
             raise HTTPException(status_code=404, detail="Task not found.")
         return guidance(task_id, tasks, episodes, demos, faas, evaluations)
+
+    @app.get("/api/tasks/{task_id}/diagnosis", response_model=TaskDiagnosis)
+    def get_diagnosis(task_id: str) -> TaskDiagnosis:
+        if tasks.get_task(task_id) is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        return diagnose(task_id, tasks, episodes)
 
     @app.post("/api/tasks/{task_id}/baseline-trials", response_model=Trial, status_code=201)
     def create_baseline_trial(task_id: str, value: TrialInput) -> Trial:

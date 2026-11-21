@@ -52,6 +52,8 @@ The **Demos** screen can launch a single local SO-101 follower/leader recording 
 
 `teach-task-coach audit-rollout PATH` compares finalized `action` rows with raw chunk replies using the recorded chunk/row indices, reports the differing share, and derives execution staleness from `executed_since_obs`. It is read-only and handles discarded replies. A raw reply does not preserve the exact camera window sent at that inference; this audit does not rewrite or upload training labels.
 
+The Guide groups labelled baseline runs into station/recording issues and operator-confirmed task failures without logged station faults. It shows human-labelled failure stages and evidence for each category. These are conservative triage suggestions; they do not infer a physical root cause from a video.
+
 For automated held-out scene placement, set `COACH_SCENE_ADAPTER_URL` to a local fixture service. On `POST /place`, it receives `{task_id, scene_index, start_cell, x_fraction, y_fraction, angle_deg}` and must respond with `{placed: true, detail: "..."}` only after physically placing and checking the object. The coach calls the fixture before each evaluation Start; the Evaluation screen also exposes a separate Place scene button. This repo does not contain a driver for a specific feeder or gantry; the adapter boundary is tested, but physical placement needs that hardware and its controller.
 
 ## Checks

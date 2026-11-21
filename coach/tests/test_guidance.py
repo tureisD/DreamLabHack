@@ -37,6 +37,9 @@ def test_guidance_moves_from_baseline_to_covered_pilot(tmp_path):
     assert ready["pilot_ready"] is True
     assert ready["suggested_recipe"]["steps"] == 1000
     assert ready["suggested_recipe"]["base_share"] == 0.5
+    diagnosis = client.get(f"/api/tasks/{task.id}/diagnosis").json()
+    assert diagnosis["data_count"] == 1
+    assert diagnosis["failure_stages"] == {"grasp": 1}
 
     episode.findings = [Finding(
         kind="safety_stop", severity="problem", message="Safety stop at wrist.", evidence="rollout.json"
@@ -45,6 +48,9 @@ def test_guidance_moves_from_baseline_to_covered_pilot(tmp_path):
     blocked = client.get(route).json()
     assert blocked["phase"] == "fix"
     assert "Safety stop at wrist." in blocked["evidence"]
+    diagnosis = client.get(f"/api/tasks/{task.id}/diagnosis").json()
+    assert diagnosis["setup_count"] == 1
+    assert diagnosis["data_count"] == 0
 
 
 def test_guidance_names_uncovered_failure_cell(tmp_path):

@@ -6,6 +6,7 @@ type Guidance = {
   target_screen: string; pilot_ready: boolean;
   suggested_recipe: { steps: number; lr_schedule: string; base_share: number } | null;
 };
+type Diagnosis = { setup_count: number; data_count: number; unknown_count: number; failure_stages: Record<string, number>; recommendation: string };
 
 async function json<T>(url: string): Promise<T> {
   const response = await fetch(url);
@@ -20,6 +21,7 @@ export default function Guide() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [taskId, setTaskId] = useState('');
   const [guidance, setGuidance] = useState<Guidance | null>(null);
+  const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -33,8 +35,11 @@ export default function Guide() {
     let active = true;
     const refresh = async () => {
       try {
-        const value = await json<Guidance>(`/api/tasks/${taskId}/guidance`);
-        if (active) { setGuidance(value); setError(''); }
+        const [value, causes] = await Promise.all([
+          json<Guidance>(`/api/tasks/${taskId}/guidance`),
+          json<Diagnosis>(`/api/tasks/${taskId}/diagnosis`),
+        ]);
+        if (active) { setGuidance(value); setDiagnosis(causes); setError(''); }
       } catch (caught) { if (active) setError(caught instanceof Error ? caught.message : 'Could not load task guidance.'); }
     };
     void refresh();
@@ -57,6 +62,7 @@ export default function Guide() {
         {guidance.pilot_ready && <p className="notice">Ready to try an initial pilot, subject to Dream dataset validation. This is a coverage signal, not a predicted success rate.</p>}
         {guidance.suggested_recipe && <p className="hint">Suggested first recipe: {guidance.suggested_recipe.steps} steps, {guidance.suggested_recipe.lr_schedule} schedule, base share {guidance.suggested_recipe.base_share}. Review and edit it in Training before paid submission.</p>}
       </section>}
+      {diagnosis && <section className="card guide-card"><h2>Why runs fail</h2><p>{diagnosis.setup_count} station or recording issues · {diagnosis.data_count} confirmed task failures without a logged station fault · {diagnosis.unknown_count} other runs.</p><p>{diagnosis.recommendation}</p>{Object.entries(diagnosis.failure_stages).length > 0 && <p><strong>Human-labelled failure stages:</strong> {Object.entries(diagnosis.failure_stages).map(([name, count]) => `${name} ${count}`).join(' · ')}</p>}<p className="hint">These are evidence categories, not a proof of root cause. Review the rollout before acting.</p></section>}
     </>}
   </main>;
 }
