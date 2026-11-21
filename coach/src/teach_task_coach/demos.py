@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 
+import av
 import numpy as np
 import pyarrow.parquet as pq
 from pydantic import BaseModel
@@ -81,6 +82,26 @@ def _dim(features: dict[str, Any], key: str) -> int | None:
     return shape[0] if isinstance(shape, list) and len(shape) == 1 and isinstance(shape[0], int) else None
 
 
+def _camera_review(path: Path) -> DemoFinding | None:
+    """Flag persistently dark or textureless sampled frames as possible occlusion."""
+    try:
+        with av.open(str(path)) as container:
+            stream = container.streams.video[0]
+            samples = []
+            for index, frame in enumerate(container.decode(stream)):
+                if index >= 300:
+                    break
+                if index % 20:
+                    continue
+                gray = frame.to_ndarray(format="gray")
+                samples.append((float(np.mean(gray)), float(np.std(gray))))
+    except (OSError, ValueError, av.FFmpegError, IndexError):
+        return DemoFinding(code="video_review", severity="review", message=f"Could not inspect {path.parent.name} video frames; review it manually.")
+    if len(samples) >= 3 and sum(mean < 12 or spread < 5 for mean, spread in samples) / len(samples) >= 0.8:
+        return DemoFinding(code="possible_occlusion", severity="review", message=f"{path.parent.name} is dark or nearly textureless in most sampled frames; check camera visibility.")
+    return None
+
+
 def read_demo(folder: Path, task_id: str) -> Demo:
     folder = folder.resolve()
     info = _object(folder / "meta/info.json")
@@ -110,6 +131,10 @@ def read_demo(folder: Path, task_id: str) -> Demo:
         videos = [path for path in (folder / "videos").rglob("*.mp4") if key in path.parts]
         if not videos:
             findings.append(DemoFinding(code="missing_video", severity="error", message=f"Camera {key} has no video file."))
+        else:
+            review = _camera_review(videos[0])
+            if review:
+                findings.append(review)
     parquet_files = sorted((folder / "data").rglob("*.parquet"))
     if not parquet_files:
         findings.append(DemoFinding(code="missing_actions", severity="error", message="No action parquet file is present."))
@@ -128,6 +153,10 @@ def read_demo(folder: Path, task_id: str) -> Demo:
                     findings.append(DemoFinding(code="no_motion", severity="error", message="Actions contain no visible movement."))
                 elif moving[0] / fps > 2:
                     findings.append(DemoFinding(code="idle_start", severity="review", message=f"About {moving[0] / fps:.1f} s of idle action at the start."))
+                if len(movement) > 5:
+                    typical = float(np.median(movement[movement > 0.005])) if len(moving) else 0
+                    if typical > 0 and float(np.max(movement)) > 15 * typical:
+                        findings.append(DemoFinding(code="abrupt_action", severity="review", message="A commanded action jump is much larger than typical motion; review the video for a jerk."))
         except (OSError, ValueError, KeyError, TypeError) as exc:
             findings.append(DemoFinding(code="unreadable_actions", severity="error", message=f"Could not read actions: {type(exc).__name__}."))
 

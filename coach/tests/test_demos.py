@@ -1,5 +1,7 @@
 import json
 
+import av
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 from fastapi.testclient import TestClient
@@ -48,12 +50,33 @@ def test_demo_qc_flags_idle_start_and_missing_video(tmp_path):
     folder = make_demo(tmp_path)
     demo = read_demo(folder, "task-id")
     assert demo.valid
-    assert {finding.code for finding in demo.findings} == {"idle_start"}
+    assert {finding.code for finding in demo.findings} == {"idle_start", "video_review"}
 
     (folder / "videos/chunk-000/observation.images.overhead/episode_000000.mp4").unlink()
     demo = read_demo(folder, "task-id")
     assert not demo.valid
     assert "missing_video" in {finding.code for finding in demo.findings}
+
+
+def test_demo_qc_flags_dark_camera_and_abrupt_action(tmp_path):
+    folder = make_demo(tmp_path)
+    video = folder / "videos/chunk-000/observation.images.overhead/episode_000000.mp4"
+    with av.open(str(video), mode="w") as container:
+        stream = container.add_stream("mpeg4", rate=20)
+        stream.width = 64
+        stream.height = 48
+        stream.pix_fmt = "yuv420p"
+        for _ in range(80):
+            frame = av.VideoFrame.from_ndarray(np.zeros((48, 64, 3), dtype=np.uint8), format="rgb24")
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+    actions = [[index * 0.01, 0.0] for index in range(100)]
+    actions[50] = [10.0, 0.0]
+    pq.write_table(pa.table({"action": pa.array(actions)}), folder / "data/chunk-000/episode_000000.parquet")
+    demo = read_demo(folder, "task-id")
+    assert {finding.code for finding in demo.findings} == {"possible_occlusion", "abrupt_action"}
 
 
 def test_demo_import_review_and_coverage_plan(tmp_path):

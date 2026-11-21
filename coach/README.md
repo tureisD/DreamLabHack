@@ -42,7 +42,7 @@ Task positions are fractions of a marked tabletop, not camera-calibrated robot c
 
 If the station saves a `ModelReady` rollout while the model warms, syncing the trial preserves that rollout in its warm-up history and returns the trial to Planned. Start the same trial again once the station is idle; the warm-up does not enter the before/after result.
 
-The public station does not provide teleoperation for every driver, so this coach currently imports demonstrations from an external LeRobot recorder. Live camera-occlusion and motion-smoothness scoring, autonomous scene setup, and automatic deployment are outside the current build. The Dream API and physical station need real credentials and hardware for an end-to-end test; the automated suite uses fakes for those boundaries.
+The public station does not provide teleoperation for every driver, so this coach currently imports demonstrations from an external LeRobot recorder. Demo intake samples the first 300 video frames for possible darkness or occlusion and compares action jumps against typical motion; both are soft review findings that need operator judgment. Autonomous scene setup and automatic deployment are outside this build. The Dream API and physical station need real credentials and hardware for an end-to-end test; the automated suite uses fakes for those boundaries.
 
 The API binds to `127.0.0.1`. Browser write requests with an Origin outside local HTTP are rejected. Command-line clients without an Origin header can still use the API.
 
