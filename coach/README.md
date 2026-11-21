@@ -50,6 +50,8 @@ The **Guide** screen derives the next action from labelled baseline runs, statio
 
 The **Demos** screen can launch a single local SO-101 follower/leader recording with `lerobot-record` when LeRobot is installed on the robot computer. Configure the follower and leader serial ports and camera index in that screen. Stop the Dream station process first: the station holds the follower arms even while idle. The recorder saves one 30-second session under `COACH_DEMOS_DIR` with Hub upload disabled; after it exits, the scanner imports the result for review. This launcher has only been tested with a fake process, not physical arms. See [LeRobot's SO-101 recording guide](https://huggingface.co/docs/lerobot/main/en/il_robots) for calibration and wiring.
 
+For automated held-out scene placement, set `COACH_SCENE_ADAPTER_URL` to a local fixture service. On `POST /place`, it receives `{task_id, scene_index, start_cell, x_fraction, y_fraction, angle_deg}` and must respond with `{placed: true, detail: "..."}` only after physically placing and checking the object. The Evaluation screen exposes a Place scene button when configured. This repo does not contain a driver for a specific feeder or gantry; the adapter boundary is tested, but physical placement needs that hardware and its controller.
+
 ## Checks
 
 ```bash

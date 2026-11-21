@@ -18,6 +18,7 @@ from teach_task_coach.evaluation import (
     EvaluationReport,
     EvaluationRequest,
     EvaluationStore,
+    scene_for_trial,
 )
 from teach_task_coach.faas import (
     DatasetVersion,
@@ -28,6 +29,7 @@ from teach_task_coach.faas import (
 )
 from teach_task_coach.guidance import Guidance, guidance
 from teach_task_coach.preflight import PreflightResult, PreflightService
+from teach_task_coach.scene import PlacementResult, SceneAdapter
 from teach_task_coach.station import StationRejected, StationUnavailable
 from teach_task_coach.storage import EpisodeStore
 from teach_task_coach.tasks import Task, TaskInput, TaskStore, Trial, TrialInput, TrialStateError
@@ -99,6 +101,7 @@ def create_app(
     faas_store: FaaSStore | None = None,
     dream_gateway: DreamGateway | None = None,
     evaluation_store: EvaluationStore | None = None,
+    scene_adapter: SceneAdapter | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Teach it a task", version="0.1.0")
 
@@ -125,6 +128,7 @@ def create_app(
     faas = faas_store or FaaSStore(episodes.data_dir)
     dream = dream_gateway or DreamGateway()
     evaluations = evaluation_store or EvaluationStore(episodes.data_dir)
+    scene_fixture = scene_adapter or SceneAdapter()
 
     @app.get("/api/preflight", response_model=PreflightResult)
     def get_preflight() -> PreflightResult:
@@ -526,6 +530,29 @@ def create_app(
         if evaluations.get(evaluation_id) is None:
             raise HTTPException(status_code=404, detail="Evaluation not found.")
         return tasks.list_evaluation_trials(evaluation_id)
+
+    @app.get("/api/scene-adapter/status")
+    def scene_adapter_status() -> dict[str, bool]:
+        return {"configured": scene_fixture.configured}
+
+    @app.post("/api/trials/{trial_id}/prepare-scene", response_model=PlacementResult)
+    def prepare_scene(trial_id: str) -> PlacementResult:
+        trial = tasks.get_trial(trial_id)
+        if trial is None:
+            raise HTTPException(status_code=404, detail="Trial not found.")
+        if trial.status != "planned" or not trial.evaluation_id:
+            raise HTTPException(status_code=409, detail="Only a planned evaluation scene can be placed.")
+        scene = scene_for_trial(trial, tasks)
+        if scene is None:
+            raise HTTPException(status_code=409, detail="Scene manifest is missing.")
+        try:
+            if preflight.station.status()["state"] != "idle":
+                raise HTTPException(status_code=409, detail="Wait for the robot station to be idle.")
+            return scene_fixture.place(scene)
+        except StationUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Robot station is unavailable.") from exc
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get("/api/evaluations/{evaluation_id}/report", response_model=EvaluationReport)
     def get_evaluation_report(evaluation_id: str) -> EvaluationReport:

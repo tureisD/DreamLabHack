@@ -48,6 +48,7 @@ export default function EvaluationPage() {
   const [minimumEffect, setMinimumEffect] = useState(0.15);
   const [autoPromote, setAutoPromote] = useState(false);
   const [deployment, setDeployment] = useState<Deployment | null>(null);
+  const [sceneAdapter, setSceneAdapter] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -59,6 +60,7 @@ export default function EvaluationPage() {
     void json<Task[]>('/api/tasks').then((values) => {
       setTasks(values); if (values.length) setTaskId(values[0].id);
     }).catch((caught: Error) => setError(caught.message));
+    void json<{ configured: boolean }>('/api/scene-adapter/status').then((value) => setSceneAdapter(value.configured));
   }, []);
 
   useEffect(() => {
@@ -130,6 +132,14 @@ export default function EvaluationPage() {
       const result = await json<Trial>(`/api/trials/${trial.id}/${action}`, 'POST');
       await refreshEvaluation(selectedId);
       setMessage(`Trial is ${result.status.replaceAll('_', ' ')}.`);
+    });
+  }
+
+  function prepare(trial: Trial) {
+    if (!window.confirm(`Move the scene fixture to place object for scene ${(trial.scene_index ?? 0) + 1}? Keep the robot workspace clear.`)) return;
+    void act(async () => {
+      const result = await json<{ detail: string }>(`/api/trials/${trial.id}/prepare-scene`, 'POST');
+      setMessage(result.detail);
     });
   }
 
@@ -220,6 +230,7 @@ export default function EvaluationPage() {
       <p><strong>Status:</strong> {nextTrial.status.replaceAll('_', ' ')}</p>
       {nextTrial.last_error && <p className="trial-error">{nextTrial.last_error}</p>}
       <div className="trial-actions">
+        {nextTrial.status === 'planned' && sceneAdapter && <button className="secondary" disabled={busy} onClick={() => prepare(nextTrial)}>Place scene with fixture</button>}
         {nextTrial.status === 'planned' && <button disabled={busy} onClick={() => trialAction(nextTrial, 'start')}>Start supervised run</button>}
         {nextTrial.status === 'starting' && <button disabled={busy} onClick={() => trialAction(nextTrial, 'reconcile')}>Check station</button>}
         {nextTrial.status === 'running' && <><button disabled={busy} onClick={() => trialAction(nextTrial, 'stop')}>Stop robot</button><button className="secondary" disabled={busy} onClick={() => trialAction(nextTrial, 'sync')}>Sync if ended</button></>}
