@@ -39,12 +39,20 @@ CONFIG = {
 
 
 class RecordingYamEnv(YamEnv):
-    def __init__(self, folder, task, seed, *, defer_video=False):
+    def __init__(self, folder, task, seed, *, defer_video=False, start_pose="home"):
         super().__init__()
         self.folder = folder
         self.task = task
         apple = self.data.joint("apple_free").qpos
         apple[:2] += np.random.default_rng(seed).uniform(-0.025, 0.025, size=2)
+        if start_pose == "wrist-visible":
+            # Fixed simulator-only starting pose. The open gripper still has to approach.
+            for index, angle in enumerate((-0.4, 1.4, 1.4, -1.35, 0.0, 0.0), 1):
+                name = f"left_joint{index}"
+                self.data.joint(name).qpos[0] = angle
+                self.data.actuator(name).ctrl[0] = angle
+        elif start_pose != "home":
+            raise ValueError(f"Unknown simulator start pose: {start_pose}")
         mujoco.mj_forward(self.model, self.data)
         self.apple_xy = apple[:2].tolist()
         self.states: list[np.ndarray] = []
@@ -137,13 +145,13 @@ def scene_seed(value):
 
 
 @contextmanager
-def recording(root, task, checkpoint, seed, source):
+def recording(root, task, checkpoint, seed, source, *, start_pose="home"):
     root.mkdir(parents=True, exist_ok=True)
     folder = root / f"yam-{uuid4().hex}"
     folder.mkdir()
     started = datetime.now(timezone.utc).isoformat()
-    env = RecordingYamEnv(folder, task, seed, defer_video=source == "model")
-    details = {"source": source, "seed": seed, "apple_xy_m": env.apple_xy}
+    env = RecordingYamEnv(folder, task, seed, defer_video=source == "model", start_pose=start_pose)
+    details = {"source": source, "seed": seed, "apple_xy_m": env.apple_xy, "start_pose": start_pose}
     status, reason, error = "complete", "finished", None
     try:
         yield env, details

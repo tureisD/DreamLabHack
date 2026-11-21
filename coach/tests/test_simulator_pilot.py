@@ -65,3 +65,27 @@ def test_simulator_pilot_budget_and_review(tmp_path, monkeypatch):
     assert client.post(path + "/label", json={"success": False, "note": "Only one action"}).is_success
     client.post("/api/rollouts/import")
     assert client.get(path).json()["success"] is False
+
+
+def test_seed41_wrist_visible_pose_keeps_apple_separate_and_in_view(tmp_path, monkeypatch):
+    pytest.importorskip("mujoco")
+    pytest.importorskip("PIL")
+    import numpy as np
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "experiments/yam_sim_faas"))
+    from record_yam_demos import RecordingYamEnv
+
+    env = RecordingYamEnv(tmp_path, "pick up the apple", 41, start_pose="wrist-visible")
+    try:
+        q = env.state()
+        assert q["left"][-1] > 0.99
+        apple = env.data.body("apple")
+        assert np.linalg.norm(apple.xpos - env.data.site("left_tcp").xpos) > 0.18
+        env.images()
+        env.renderer.enable_segmentation_rendering()
+        env.renderer.update_scene(env.data, camera="left")
+        geom_ids = env.renderer.render()[60:420, :, 0]
+        apple_geoms = np.flatnonzero(env.model.geom_bodyid == env.model.body("apple").id)
+        assert np.isin(geom_ids, apple_geoms).sum() > 500
+    finally:
+        env.close()

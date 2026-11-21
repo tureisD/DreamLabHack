@@ -63,3 +63,5 @@ From the coach directory, run the launcher below after installing the sim extra.
 ```
 
 Each full 48-row response supplies 2.4 seconds of simulated control at 20 Hz. Five full responses give 12 seconds of motion plus 1.65 seconds of camera warm-up. The 600-second wall-clock ceiling leaves time for rendering and network latency. A short reply, spent retry slot, or interruption can shorten the recording. The run sidecar tracks attempted calls and executed rows even if the run is interrupted. To observe a longer attempt, explicitly choose a larger request budget.
+
+For a controlled test of wrist-camera visibility, add `-StartPose wrist-visible` (Python recorder: `--start-pose wrist-visible`). This initializes the simulated left arm at a fixed open pose before inference. The apple placement is still determined by the seed. At seed 41 the target appears in the overhead and left wrist views and starts about 21 cm from the left tool center. The original `home` pose remains the default. Compare runs within the same starting condition when scoring checkpoints. The run sidecar identifies the pose, and the first recorded state contains the starting joint angles.

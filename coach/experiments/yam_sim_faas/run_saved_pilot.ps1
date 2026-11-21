@@ -1,6 +1,7 @@
 param(
     [ValidateRange(1, 1000)][int]$MaxRequests = 1,
     [int]$Seed = 41,
+    [ValidateSet("home", "wrist-visible")][string]$StartPose = "home",
     [switch]$ReplaceKey,
     [switch]$ForgetKey
 )
@@ -66,7 +67,7 @@ try {
         Write-Output 'Saved the verified key using Windows current-user protection.'
     }
     $root = if ($env:COACH_ROLLOUTS_DIR) { $env:COACH_ROLLOUTS_DIR } else { Join-Path $vault 'sim-rollouts' }
-    & $python (Join-Path $PSScriptRoot 'record_dream_model_rollout.py') --output $root --seed $Seed --seconds 600 --max-requests $MaxRequests
+    & $python (Join-Path $PSScriptRoot 'record_dream_model_rollout.py') --output $root --seed $Seed --start-pose $StartPose --seconds 600 --max-requests $MaxRequests
     exit $LASTEXITCODE
 } finally {
     $env:DREAM_API_KEY = $previousKey

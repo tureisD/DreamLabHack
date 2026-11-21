@@ -7,7 +7,7 @@ type EpisodeItem = {
   started_at_utc: string | null; success: boolean | null; finding_count: number;
 };
 type Episode = EpisodeItem & {
-  simulation?: { source: string; seed: number; model_action_rows?: number } | null;
+  simulation?: { source: string; seed: number; start_pose?: string; model_action_rows?: number } | null;
   body: string | null; robot_name: string | null; frames: number | null; fps: number | null;
   duration_s: number | null; stop_reason: string | null; error: string | null;
   stalls: number | null; clamps: number | null; videos: Record<string, string>;
@@ -136,7 +136,7 @@ export default function Runs() {
                 </>
               ) : <div className="video-empty">No finished camera video in this rollout.</div>}
               <dl className="details">
-                {selected.simulation && <div><dt>Simulation</dt><dd>{selected.simulation.source} · seed {selected.simulation.seed}{selected.simulation.model_action_rows !== undefined && ` · ${selected.simulation.model_action_rows} model action rows`}</dd></div>}
+                {selected.simulation && <div><dt>Simulation</dt><dd>{selected.simulation.source} · seed {selected.simulation.seed}{selected.simulation.start_pose && ` · start: ${selected.simulation.start_pose}`}{selected.simulation.model_action_rows !== undefined && ` · ${selected.simulation.model_action_rows} model action rows`}</dd></div>}
                 <div><dt>Duration</dt><dd>{selected.duration_s?.toFixed(1) ?? 'â€”'} s</dd></div>
                 <div><dt>Frames</dt><dd>{selected.frames ?? 'â€”'} at {selected.fps ?? 'â€”'} fps</dd></div>
                 <div><dt>Stop reason</dt><dd>{selected.stop_reason ?? 'â€”'}</dd></div>

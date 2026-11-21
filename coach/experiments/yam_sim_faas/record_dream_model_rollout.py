@@ -20,6 +20,7 @@ def main() -> None:
     parser.add_argument("--task", default="pick up the apple")
     parser.add_argument("--model", type=dream_control.resolve_model, default=dream_control.BETA_MODEL)
     parser.add_argument("--seed", type=recorder.scene_seed, help="Repeat a recorded apple placement")
+    parser.add_argument("--start-pose", choices=("home", "wrist-visible"), default="home")
     parser.add_argument("--max-requests", type=int, default=1, help="Limit get_action calls per run")
     parser.add_argument("--dry-run", action="store_true", help="Record the observation warm-up offline")
     args = parser.parse_args()
@@ -29,7 +30,7 @@ def main() -> None:
         parser.error("--max-requests must be positive")
     seed = args.seed if args.seed is not None else secrets.randbits(32)
     source = "observation dry run" if args.dry_run else "model"
-    with recorder.recording(args.output, args.task, args.model, seed, source) as (env, details):
+    with recorder.recording(args.output, args.task, args.model, seed, source, start_pose=args.start_pose) as (env, details):
         options = ["--headless", "--quiet", "--seconds", str(args.seconds), "--task", args.task,
                    "--model", args.model, "--max-requests", str(args.max_requests)]
         if args.dry_run:
