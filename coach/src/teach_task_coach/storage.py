@@ -12,18 +12,19 @@ from pathlib import Path
 from teach_task_coach.episodes import EpisodeSummary
 
 
-class EpisodeStore:
+class CoachDatabase:
     def __init__(self, data_dir: Path | None = None) -> None:
         self.data_dir = data_dir or Path(os.getenv("COACH_DATA_DIR", ".coach-data"))
         self.db_path = self.data_dir / "coach.sqlite3"
 
     @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
+    def connect(self) -> Iterator[sqlite3.Connection]:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
         try:
             connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA foreign_keys=ON")
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS episodes (
                     id TEXT PRIMARY KEY,
@@ -39,9 +40,15 @@ class EpisodeStore:
         finally:
             connection.close()
 
+
+class EpisodeStore:
+    def __init__(self, data_dir: Path | None = None) -> None:
+        self.db = CoachDatabase(data_dir)
+        self.data_dir = self.db.data_dir
+
     def upsert(self, episode: EpisodeSummary) -> None:
         payload = episode.model_dump(exclude={"success", "failure_stage", "note"})
-        with self._connect() as connection:
+        with self.db.connect() as connection:
             connection.execute(
                 """INSERT INTO episodes (id, source_path, summary_json)
                    VALUES (?, ?, ?)
@@ -50,21 +57,21 @@ class EpisodeStore:
             )
 
     def list(self) -> list[EpisodeSummary]:
-        with self._connect() as connection:
+        with self.db.connect() as connection:
             rows = connection.execute(
                 "SELECT * FROM episodes ORDER BY json_extract(summary_json, '$.started_at_utc') DESC"
             ).fetchall()
         return [self._decode(row) for row in rows]
 
     def get(self, episode_id: str) -> EpisodeSummary | None:
-        with self._connect() as connection:
+        with self.db.connect() as connection:
             row = connection.execute("SELECT * FROM episodes WHERE id = ?", (episode_id,)).fetchone()
         return None if row is None else self._decode(row)
 
     def label(
         self, episode_id: str, success: bool | None, failure_stage: str | None, note: str | None
     ) -> EpisodeSummary | None:
-        with self._connect() as connection:
+        with self.db.connect() as connection:
             cursor = connection.execute(
                 "UPDATE episodes SET success = ?, failure_stage = ?, note = ? WHERE id = ?",
                 (None if success is None else int(success), failure_stage, note, episode_id),

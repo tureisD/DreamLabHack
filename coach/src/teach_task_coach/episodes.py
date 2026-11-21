@@ -38,6 +38,7 @@ class EpisodeSummary(BaseModel):
     status: str
     task: str
     checkpoint: str
+    run_number: int | None = None
     body: str | None
     robot_name: str | None
     started_at_utc: str | None
@@ -158,6 +159,7 @@ def read_episode(folder: Path) -> EpisodeSummary:
         status=status,
         task=info["task"],
         checkpoint=info["checkpoint"],
+        run_number=info.get("run"),
         body=info.get("body"),
         robot_name=info.get("robot_name"),
         started_at_utc=info.get("started_at_utc"),
