@@ -251,9 +251,11 @@ def validate_chunk(env, actions, action_limit=48, *, verbose=True, adjustments=N
         bounded = np.clip(rows, limits[:, 0], limits[:, 1])
         overshoot = np.abs(rows - bounded)
         # Joint policy predictions are unbounded; project finite targets onto
-        # actual URDF limits, just as the browser simulator does. Gripper
-        # normalization is still checked to catch a wrong response contract.
-        bad = np.argwhere(overshoot[:, 6] > 0.05)
+        # actual URDF limits, just as the browser simulator does. Allow small
+        # gripper prediction overshoot too: 1.052775 is physically equivalent
+        # to fully open, and rejecting its whole chunk stopped a held-out run.
+        # Keep rejecting gross violations, which suggest a wrong contract.
+        bad = np.argwhere(overshoot[:, 6] > 0.1)
         if len(bad):
             step = bad[0, 0]
             raise ValueError(

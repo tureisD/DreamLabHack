@@ -122,6 +122,9 @@ class DreamContractTests(unittest.TestCase):
         actions = {k: [[0, 0, 0, 0, 0, 0, 1]] * 48 for k in ("q_l_chunk", "q_r_chunk")}
         left, right = validate_chunk(env, actions)
         env.step(left[0], right[0])
+        actions["q_l_chunk"] = [[0, 0, 0, 0, 0, 0, 1.052775]] * 48
+        left, _ = validate_chunk(env, actions)
+        self.assertEqual(left[0, 6], 1.0)
         actions["q_r_chunk"] = [[0, 0, 0, 0, 0, 0, 99]] * 48
         with self.assertRaises(ValueError):
             validate_chunk(env, actions)
