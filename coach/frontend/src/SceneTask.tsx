@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 type Shape = 'box' | 'sphere' | 'cylinder';
 type Form = {
   prompt: string; objectLabel: string; shape: Shape; objectColor: string;
+  sizeX: number; sizeY: number; sizeZ: number; mass: number;
   startX: number; startY: number; targetLabel: string; targetColor: string;
   targetX: number; targetY: number; radius: number;
 };
@@ -11,7 +12,8 @@ type Status = { state: string; task_id?: string; result?: { frames: number; demo
 
 const initial: Form = {
   prompt: 'place the red block on the blue pad', objectLabel: 'red block', shape: 'box',
-  objectColor: '#d91a1a', startX: 0.15, startY: 0.10,
+  objectColor: '#d91a1a', sizeX: 0.025, sizeY: 0.025, sizeZ: 0.025,
+  mass: 0.07, startX: 0.15, startY: 0.10,
   targetLabel: 'blue pad', targetColor: '#1a40cc', targetX: 0.15, targetY: -0.10, radius: 0.06,
 };
 const newSeed = () => Math.floor(Math.random() * 2 ** 32);
@@ -24,8 +26,9 @@ function specification(form: Form) {
   return {
     prompt: form.prompt.trim(),
     object: { label: form.objectLabel.trim(), shape: form.shape,
-      size: form.shape === 'box' ? [0.025, 0.025, 0.025] : form.shape === 'sphere' ? [0.027] : [0.025, 0.03],
-      mass: 0.07, color: rgba(form.objectColor), start_xy: [form.startX, form.startY] },
+      size: form.shape === 'box' ? [form.sizeX, form.sizeY, form.sizeZ] :
+        form.shape === 'sphere' ? [form.sizeX] : [form.sizeX, form.sizeZ],
+      mass: form.mass, color: rgba(form.objectColor), start_xy: [form.startX, form.startY] },
     target: { label: form.targetLabel.trim(), xy: [form.targetX, form.targetY],
       radius: form.radius, color: rgba(form.targetColor) },
     goal: { type: 'place_on_target' },
@@ -98,6 +101,10 @@ export default function SceneTask({ taskId, taskPrompt, onComplete }: {
       <label>Object name<input value={form.objectLabel} onChange={(event) => update('objectLabel', event.target.value)} /></label>
       <label>Shape<select value={form.shape} onChange={(event) => update('shape', event.target.value as Shape)}><option value="box">Box</option><option value="sphere">Ball</option><option value="cylinder">Cylinder</option></select></label>
       <label>Object color<input type="color" value={form.objectColor} onChange={(event) => update('objectColor', event.target.value)} /></label>
+      <label>{form.shape === 'box' ? 'Half width (m)' : 'Radius (m)'}<input type="number" min="0.015" max="0.05" step="0.005" value={form.sizeX} onChange={(event) => update('sizeX', Number(event.target.value))} /></label>
+      {form.shape === 'box' && <label>Half depth (m)<input type="number" min="0.015" max="0.05" step="0.005" value={form.sizeY} onChange={(event) => update('sizeY', Number(event.target.value))} /></label>}
+      {form.shape !== 'sphere' && <label>Half height (m)<input type="number" min="0.015" max="0.05" step="0.005" value={form.sizeZ} onChange={(event) => update('sizeZ', Number(event.target.value))} /></label>}
+      <label>Object mass (kg)<input type="number" min="0.02" max="0.25" step="0.01" value={form.mass} onChange={(event) => update('mass', Number(event.target.value))} /></label>
       <label>Start X (m)<input type="number" step="0.01" value={form.startX} onChange={(event) => update('startX', Number(event.target.value))} /></label>
       <label>Start Y (m)<input type="number" step="0.01" value={form.startY} onChange={(event) => update('startY', Number(event.target.value))} /></label>
       <label>Target name<input value={form.targetLabel} onChange={(event) => update('targetLabel', event.target.value)} /></label>
