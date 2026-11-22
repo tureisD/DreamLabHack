@@ -161,8 +161,16 @@ def read_demo(folder: Path, task_id: str) -> Demo:
                 elif moving[0] / fps > 2:
                     findings.append(DemoFinding(code="idle_start", severity="review", message=f"About {moving[0] / fps:.1f} s of idle action at the start."))
                 if len(movement) > 5:
-                    typical = float(np.median(movement[movement > 0.005])) if len(moving) else 0
-                    if typical > 0 and float(np.max(movement)) > 15 * typical:
+                    action_feature = features.get("action")
+                    names = action_feature.get("names") if isinstance(action_feature, dict) else None
+                    if isinstance(names, list) and len(names) == actions.shape[1] and all(isinstance(name, str) for name in names):
+                        continuous = [index for index, name in enumerate(names) if "grip" not in name.lower()]
+                        motion = np.linalg.norm(np.diff(actions[:, continuous], axis=0), axis=1) if continuous else np.array([])
+                    else:
+                        motion = movement
+                    active = motion[motion > 0.005]
+                    typical = float(np.median(active)) if len(active) else 0
+                    if typical > 0 and float(np.max(motion)) > 15 * typical:
                         findings.append(DemoFinding(code="abrupt_action", severity="review", message="A commanded action jump is much larger than typical motion; review the video for a jerk."))
         except (OSError, ValueError, KeyError, TypeError) as exc:
             findings.append(DemoFinding(code="unreadable_actions", severity="error", message=f"Could not read actions: {type(exc).__name__}."))

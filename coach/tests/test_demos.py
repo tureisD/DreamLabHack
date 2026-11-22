@@ -79,6 +79,23 @@ def test_demo_qc_flags_dark_camera_and_abrupt_action(tmp_path):
     assert {finding.code for finding in demo.findings} == {"possible_occlusion", "frozen_camera", "abrupt_action"}
 
 
+def test_demo_qc_does_not_call_named_gripper_close_a_joint_jerk(tmp_path):
+    folder = make_demo(tmp_path)
+    info_path = folder / "meta/info.json"
+    info = json.loads(info_path.read_text())
+    info["features"]["action"]["names"] = ["joint_0", "left_gripper"]
+    info_path.write_text(json.dumps(info))
+    actions = [[index * 0.01, 0.0 if index < 50 else 1.0] for index in range(100)]
+    pq.write_table(pa.table({"action": pa.array(actions)}), folder / "data/chunk-000/episode_000000.parquet")
+    demo = read_demo(folder, "task-id")
+    assert "abrupt_action" not in {finding.code for finding in demo.findings}
+
+    actions[50][0] = 10.0
+    pq.write_table(pa.table({"action": pa.array(actions)}), folder / "data/chunk-000/episode_000000.parquet")
+    demo = read_demo(folder, "task-id")
+    assert "abrupt_action" in {finding.code for finding in demo.findings}
+
+
 def test_demo_import_review_and_coverage_plan(tmp_path):
     source = tmp_path / "demos"
     source.mkdir()
