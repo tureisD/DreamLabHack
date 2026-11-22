@@ -18,6 +18,43 @@ from record_yam_demos import CONFIG, TASK, YamEnv
 from resample_yam_demos import export_session
 
 
+def initialize_replay(env, scene, initial_state):
+    apple = env.data.joint("apple_free").qpos
+    expected_xy = apple[:2] + np.random.default_rng(scene["seed"]).uniform(-0.025, 0.025, 2)
+    if not np.allclose(expected_xy, scene["apple_xy_m"], atol=1e-9, rtol=0):
+        raise ValueError(f"Apple placement differs from seed {scene['seed']}")
+    apple[:2] = expected_xy
+    for side, offset in (("right", 0), ("left", 7)):
+        for joint in range(6):
+            name = f"{side}_joint{joint + 1}"
+            angle = initial_state[offset + joint]
+            env.data.joint(name).qpos[0] = angle
+            env.data.actuator(name).ctrl[0] = angle
+    mujoco.mj_forward(env.model, env.data)
+
+
+def check_training_actions(folder, scene):
+    """Replay the actual 10 Hz export at its recorded cadence before packaging it."""
+    data = pq.read_table(folder / "data/chunk-000/episode_000000.parquet")
+    env = YamEnv()
+    heights = []
+    try:
+        initialize_replay(env, scene, data["observation.state"][0].as_py())
+        for row in data["action"].to_pylist():
+            for _ in range(2):
+                env.step(row[7:], row[:7])
+                heights.append(float(env.data.body("apple").xpos[2]))
+    finally:
+        env.close()
+    # The source script settles the apple for 30 ticks before starting the approach.
+    rise = np.asarray(heights) - heights[29]
+    windows = np.lib.stride_tricks.sliding_window_view(rise, 41)  # 2 s between first and last sample
+    held = float(np.max(np.min(windows, axis=1)))
+    if held < 0.08 or np.max(rise) - rise[-1] < 0.06:
+        raise ValueError(f"{folder}: exported actions failed the lift/hold/release replay")
+    return held
+
+
 def audit(folder, info):
     scene = info["simulation"]
     if info["status"] != "complete" or not scene["script_result"]["passed"]:
@@ -30,13 +67,7 @@ def audit(folder, info):
     contact_rows = 0
     max_error = 0.0
     try:
-        env.data.joint("apple_free").qpos[:2] = scene["apple_xy_m"]
-        for side, offset in (("right", 0), ("left", 7)):
-            for joint in range(6):
-                name = f"{side}_joint{joint + 1}"
-                env.data.joint(name).qpos[0] = states[0, offset + joint]
-                env.data.actuator(name).ctrl[0] = states[0, offset + joint]
-        mujoco.mj_forward(env.model, env.data)
+        initialize_replay(env, scene, states[0])
         for index, row in enumerate(actions):
             measured = env.state()
             replay = np.r_[measured["right"], measured["left"]]
@@ -91,7 +122,9 @@ def build(batch, raw_root, output):
             sessions.extend(json.loads((ROOT / "varied.json").read_text(encoding="utf-8"))["sessions"])
         for seed, (folder, info) in sorted(selected.items()):
             row = audit(folder, info)
-            row["frames"] = export_session(folder, training / f"apple-seed-{seed}")
+            episode = training / f"apple-seed-{seed}"
+            row["frames"] = export_session(folder, episode)
+            row["export_held_lift_m"] = check_training_actions(episode, info["simulation"])
             sessions.append(row)
             print(f"Verified seed {seed}, closure at {row['first_close_s']:.2f}s", flush=True)
         report = datasets.validate_dataset(str(training), CONFIG)

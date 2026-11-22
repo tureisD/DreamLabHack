@@ -14,6 +14,8 @@
 
 On 22 November 2026 Dream confirmed **processed** for the first account's dataset `dima24kor/apple-grasp-varied-3374a5388381`, ID `ds_25be44f202eb5d8c`. It contains 24 episodes and 3,871 rows at 10 Hz. The 16 additional demonstrations closed at 15 distinct times between 5.45 and 8.90 seconds. Across all 24 episodes the gripper was 4.08–6.27 mm from the apple center at first closure. No paid job was submitted by the first PC during preparation. The second PC can fetch this exact archive now.
 
+All 24 archived action sequences also passed a separate 10 Hz physics replay. Every sequence held the apple at least 14.1 cm above the table for two continuous seconds and then released it. All 11,613 exported camera frames were checked against the corresponding frames in the original three camera streams. The pooled batch builder runs the exported-action replay on each new episode before packaging it.
+
 Each proposed job starts independently from Dream's base model. Match training settings across accounts. The comparison tests the added value of 16 examples under the same recipe. Report the actual outcomes; additional examples do not guarantee a better checkpoint. The original eight-demo control remains available as a historical reference. If someone already submitted the earlier control experiment, record that job and keep the remaining credits for evaluation before considering another purchase.
 
 The documented price is $0.20/step. Check [Billing](https://platform.dreamlabs.ai/billing) and the current quote for **500 steps** on each account. Submitting holds that job's price on the submitting account. The default 1,000-step job is about $200. Runs with the resulting models also use credits.

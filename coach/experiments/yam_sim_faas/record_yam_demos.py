@@ -121,7 +121,9 @@ class RecordingYamEnv(YamEnv):
         pq.write_table(table, data)
         meta = self.folder / "meta"
         meta.mkdir(parents=True, exist_ok=True)
-        feature = {"dtype": "float32", "shape": [dim], "names": [f"joint_{i}" for i in range(dim - 1)] + ["gripper"]}
+        parts = [f"joint_{i}" for i in range(6)] + ["gripper"]
+        names = [f"{side}_{part}" for side in ("right", "left") for part in parts]
+        feature = {"dtype": "float32", "shape": [dim], "names": names}
         video_feature = {"dtype": "video", "shape": [176, 320, 3], "names": ["height", "width", "channels"]}
         info = {
             "codebase_version": "v2.1", "total_episodes": 1, "total_frames": n,

@@ -20,9 +20,9 @@ ARM_PARTS = [f"joint_{i}" for i in range(6)] + ["gripper"]
 VECTOR_NAMES = [f"{arm}_{part}" for arm in ("right", "left") for part in ARM_PARTS]
 
 
-def export_camera(source, target, expected_frames):
+def export_camera(source, target, raw_frames):
     target.parent.mkdir(parents=True, exist_ok=True)
-    count = 0
+    decoded = 0
     with av.open(str(source)) as src, av.open(str(target), "w") as dst:
         video = src.streams.video[0]
         stream = dst.add_stream("libx264", rate=FPS)
@@ -30,14 +30,16 @@ def export_camera(source, target, expected_frames):
         stream.pix_fmt = "yuv420p"
         stream.options = {"preset": "fast", "crf": "25"}
         for index, frame in enumerate(src.decode(video)):
+            if frame.pts is None or abs(float(frame.time) - index / 20) > 0.001:
+                raise ValueError(f"{source}: unexpected source timestamp at row {index}")
+            decoded += 1
             if index % 2 == 0:
                 for packet in stream.encode(frame):
                     dst.mux(packet)
-                count += 1
         for packet in stream.encode():
             dst.mux(packet)
-    if count != expected_frames:
-        raise ValueError(f"{source}: kept {count} frames, expected {expected_frames}")
+    if decoded != raw_frames:
+        raise ValueError(f"{source}: decoded {decoded} source frames, expected {raw_frames}")
     with av.open(str(target)) as encoded:
         video = encoded.streams.video[0]
         pixels = []
@@ -64,6 +66,8 @@ def export_session(session, output):
     raw = pq.read_table(session / path)
     if not raw.num_rows or raw.num_rows != info["total_frames"]:
         raise ValueError(f"{session}: frame count differs between parquet and metadata or episode is empty")
+    if not np.allclose(raw["timestamp"].to_numpy(), np.arange(raw.num_rows) / 20, rtol=0, atol=0.001):
+        raise ValueError(f"{session}: source state/action timestamps are not on the 20 Hz video clock")
     sample = raw.take(pa.array(np.arange(0, raw.num_rows, 2)))
     n = sample.num_rows
     indices = np.arange(n, dtype=np.int64)[:, None]
@@ -79,7 +83,7 @@ def export_session(session, output):
     videos = {}
     for role in ("overhead", "wrist_l", "wrist_r"):
         relative = Path(f"videos/chunk-000/observation.images.{role}/episode_000000.mp4")
-        videos[role] = export_camera(session / relative, output / relative, n)
+        videos[role] = export_camera(session / relative, output / relative, raw.num_rows)
     task = json.loads((session / "meta/tasks.jsonl").read_text(encoding="utf-8"))["task"]
     _write_meta(output, {"frames": n, "fps": FPS, "task": task, "body": "yam"}, columns, videos, VECTOR_NAMES)
     return n

@@ -101,7 +101,7 @@ def test_training_export_preserves_gripper_slots_and_frame_times(tmp_path, monke
 
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "experiments/yam_sim_faas"))
     from record_yam_demos import RecordingYamEnv
-    from resample_yam_demos import export_session
+    from resample_yam_demos import export_camera, export_session
 
     source, target = tmp_path / "raw", tmp_path / "export"
     env = RecordingYamEnv(source, "pick up the apple", 44, start_pose="wrist-visible")
@@ -112,6 +112,11 @@ def test_training_export_preserves_gripper_slots_and_frame_times(tmp_path, monke
     finally:
         env.close()
     assert export_session(source, target) == 3
+    raw_names = json.loads((source / "meta/info.json").read_text())["features"]["action"]["names"]
+    assert [raw_names[6], raw_names[13]] == ["right_gripper", "left_gripper"]
+    # Both five and six 20 Hz rows would yield three exported frames.
+    with pytest.raises(ValueError, match="decoded 5 source frames, expected 6"):
+        export_camera(next(source.rglob("*.mp4")), tmp_path / "mismatch.mp4", 6)
     table = pq.read_table(next(target.rglob("*.parquet")))
     assert table["frame_index"].to_pylist() == [0, 1, 2]
     assert np.array(table["action"].to_pylist())[:, 13].tolist() == [1.0, 0.5, 0.0]
