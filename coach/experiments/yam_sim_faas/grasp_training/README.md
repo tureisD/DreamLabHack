@@ -1,5 +1,7 @@
 # Apple training on two Dream accounts
 
+[Full 20-second scene 901 comparison, synchronized video and paired Coach report](full-901/README.md)
+
 **Start here on the second PC.** This PC collects seeds 201–224 while the first PC owns a separate 24-demo dataset from seeds 41–48 and 101–116. Both PCs simulate locally without an API key or robot. The two training datasets stay independent. The first dataset mixes eight fixed-approach and sixteen varied-approach demonstrations; the second contains twenty-four varied-approach demonstrations at distinct seeded positions. Keep the same model and fine-tuning recipe on both accounts so the dataset composition is the main comparison.
 
 ## Assignments and budget

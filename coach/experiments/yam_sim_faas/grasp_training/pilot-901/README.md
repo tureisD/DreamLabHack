@@ -1,5 +1,7 @@
 # Scene 901 apple-grasp pilot · 22 November 2026
 
+**Follow-up:** Both checkpoints have since completed the full 20 seconds on this scene. [Full comparison and synchronized video](../full-901/README.md)
+
 The 24-demo checkpoint reached the apple, closed its left gripper and lifted the apple **1.68 cm**. Both fingertips still touched the apple when the recording ended. The success rule requires an unsupported lift of at least **8 cm for two continuous seconds**. The request cap ended this attempt after **14.4 of the planned 20 seconds** of model control. Both attempts are partial and have no human outcome label. A full-budget comparison against the base model is still open. [Checkpoint and training job](../varied-checkpoint.json) · [Frozen initial scene](../held_out/fdcaa8476c5a27b58ca25817607b96bd9426188afae21113590769764284aa57.json)
 
 ### Review the recording

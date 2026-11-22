@@ -1,0 +1,69 @@
+{
+  "evaluation_id": "apple-500step-scene-901-20s",
+  "decision": "descriptive",
+  "planned_pairs": 1,
+  "submitted_pairs": 1,
+  "usable_pairs": 1,
+  "baseline_attempted": 1,
+  "candidate_attempted": 1,
+  "baseline_successes": 0,
+  "candidate_successes": 1,
+  "baseline_only": 0,
+  "candidate_only": 1,
+  "baseline_safety_stops": 0,
+  "candidate_safety_stops": 0,
+  "observed_difference": 1.0,
+  "difference_interval": null,
+  "interval_method": null,
+  "input_sha256": "c4d060ff6fa5ad24ea4ffa44c6004e03b6af01865f9a89a8ff32edd81fd39806",
+  "problems": [],
+  "warnings": [
+    "Scene assignment, reset compliance, reviewer accuracy, and pair independence need external audit.",
+    "A task-success result alone does not establish physical safety or permission to deploy.",
+    "Simulator results are descriptive and cannot establish real-robot performance."
+  ],
+  "pairs": [
+    {
+      "pair_id": "scene-901",
+      "scenario_id": "apple-seed-901",
+      "baseline": {
+        "trial_id": "yam-fb1f4aa02bc04815ad401b9cb8a7be30",
+        "episode_id": "yam-fb1f4aa02bc04815ad401b9cb8a7be30",
+        "checkpoint_id": "dreamlabs/dream-1-beta",
+        "source_uri": "local-rollout://yam-fb1f4aa02bc04815ad401b9cb8a7be30",
+        "session_id": "yam-fb1f4aa02bc04815ad401b9cb8a7be30",
+        "recorded_at": "2026-11-22T10:30:42.792866Z",
+        "outcome": "failure",
+        "training_exposure": "held_out",
+        "human_verified": false,
+        "reviewer_id": null,
+        "safety_stops": 0,
+        "model_action_rows": 400,
+        "held_lift_m": 0.00653417692618552,
+        "peak_lift_m": 0.07913249247682841,
+        "first_close_after_warmup_s": 1.5,
+        "replay_max_state_error_m": 1.513775982575627e-05,
+        "height_source": "recorded"
+      },
+      "candidate": {
+        "trial_id": "yam-10586318725f4b34bba816d0ff2d34b4",
+        "episode_id": "yam-10586318725f4b34bba816d0ff2d34b4",
+        "checkpoint_id": "dream-1-ft:7820aef9-apple-varied24-500",
+        "source_uri": "local-rollout://yam-10586318725f4b34bba816d0ff2d34b4",
+        "session_id": "yam-10586318725f4b34bba816d0ff2d34b4",
+        "recorded_at": "2026-11-22T10:23:01.900741Z",
+        "outcome": "success",
+        "training_exposure": "held_out",
+        "human_verified": false,
+        "reviewer_id": null,
+        "safety_stops": 0,
+        "model_action_rows": 400,
+        "held_lift_m": 0.08253356294916381,
+        "peak_lift_m": 0.09686435604227939,
+        "first_close_after_warmup_s": 11.5,
+        "replay_max_state_error_m": 1.074421695146377e-05,
+        "height_source": "recorded"
+      }
+    }
+  ]
+}
