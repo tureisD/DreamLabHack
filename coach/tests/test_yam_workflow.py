@@ -12,8 +12,10 @@ from fastapi.testclient import TestClient
 
 from teach_task_coach import yam_workflow
 from teach_task_coach.api import create_app
+from teach_task_coach.demos import DemoStore
 from teach_task_coach.faas import FaaSStore, FineTuneRequest
 from teach_task_coach.preflight import PreflightService
+from teach_task_coach.sim_correction import SimCorrectionService
 from teach_task_coach.simulator_setup import SimulatorStatus
 from teach_task_coach.storage import EpisodeStore
 from teach_task_coach.yam_workflow import BASE, MIN_ACTION_ROWS, PROMPT, YamWorkflow
@@ -96,6 +98,10 @@ def test_chat_collection_and_live_paired_comparison(tmp_path, monkeypatch):
     try:
         assert first_result.wait(10)
         assert client.post("/api/simulator/collect", json={"scenes": 1}).status_code == 409
+        reset = client.post("/api/simulator/session/reset")
+        assert reset.status_code == 200
+        assert reset.json() == {"yam_active": True, "recorder_active": False}
+        assert client.get("/api/simulator/workflow").json()["state"] == "running"
         partial = client.get(url).json()["report"]
         assert (partial["baseline_attempted"], partial["candidate_attempted"]) == (1, 0)
         assert partial["decision"] == "not_evaluable"
@@ -110,6 +116,15 @@ def test_chat_collection_and_live_paired_comparison(tmp_path, monkeypatch):
         (split["heldout"][0], BASE), (split["heldout"][0], CANDIDATE),
         (split["heldout"][1], CANDIDATE), (split["heldout"][1], BASE),
     ]
+    assert client.post("/api/simulator/session/reset").json() == {
+        "yam_active": False, "recorder_active": False,
+    }
+    assert client.get("/api/simulator/workflow").json() is None
+    assert client.get(url).json()["report"] == report
+    assert client.get(f"/api/tasks/{task_id}/demos").json() == [demo]
+    reloaded = TestClient(create_app(store=EpisodeStore(tmp_path)))
+    assert reloaded.get("/api/simulator/workflow").json() is None
+    assert reloaded.get(url).json()["report"] == report
 
 
 def test_bundled_data_is_available_without_dream_access(tmp_path):
@@ -121,3 +136,15 @@ def test_bundled_data_is_available_without_dream_access(tmp_path):
     rows = client.get(f"/api/tasks/{task_id}/demos").json()
     assert len(rows) == 24
     assert all(row["decision"] == "unreviewed" for row in rows)
+
+
+def test_simulator_session_forgets_only_terminal_recorder_state(tmp_path):
+    recorder = SimCorrectionService(tmp_path / "demos", DemoStore(tmp_path))
+    recording = {"state": "recording", "task_id": "task", "result": None, "error": None}
+    recorder._state = recording
+    assert recorder.reset_session() is True
+    assert recorder.status() == recording
+
+    recorder._state = {**recording, "state": "complete", "result": {"demo_id": "demo"}}
+    assert recorder.reset_session() is False
+    assert recorder.status() == {"state": "idle", "result": None, "error": None}

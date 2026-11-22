@@ -176,6 +176,11 @@ class DeploymentStatus(BaseModel):
     baseline_checkpoint: str
 
 
+class SimulatorSessionReset(BaseModel):
+    yam_active: bool
+    recorder_active: bool
+
+
 def create_app(
     service: PreflightService | None = None,
     store: EpisodeStore | None = None,
@@ -222,9 +227,10 @@ def create_app(
     scene_fixture = scene_adapter or SceneAdapter()
     account = account_service or AccountService()
     simulator = simulator_setup or SimulatorSetup()
-    app.include_router(yam_router(YamWorkflow(
+    yam = YamWorkflow(
         episodes.data_dir / "yam-workflow", tasks, demos, faas, simulator, preflight,
-    )))
+    )
+    app.include_router(yam_router(yam))
 
     @app.get("/api/account/status", response_model=AccountStatus)
     def account_status() -> AccountStatus:
@@ -346,6 +352,13 @@ def create_app(
     @app.post("/api/simulator/prepare", response_model=SimulatorStatus)
     def prepare_simulator() -> SimulatorStatus:
         return simulator.prepare()
+
+    @app.post("/api/simulator/session/reset", response_model=SimulatorSessionReset)
+    def reset_simulator_session() -> SimulatorSessionReset:
+        return SimulatorSessionReset(
+            yam_active=yam.reset_session(),
+            recorder_active=sim_correction.reset_session(),
+        )
 
     @app.get("/api/docs/apple-training")
     def apple_training_guide() -> FileResponse:

@@ -149,6 +149,16 @@ class YamWorkflow:
         with self.lock:
             return self.job
 
+    def reset_session(self) -> bool:
+        """Forget the last run summary and report whether a run is still active."""
+        with self.lock:
+            if self.job and self.job.state in ("running", "stopping"):
+                return True
+            (self.root / "job.json").unlink(missing_ok=True)
+            self.job = None
+            self.cancel.clear()
+            return False
+
     def _check_start(self, *checkpoints: str) -> None:
         if self.job and self.job.state in ("running", "stopping"):
             raise ValueError("Finish or stop the current simulator run first.")

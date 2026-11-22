@@ -120,6 +120,14 @@ class SimCorrectionService:
         with self._lock:
             return dict(self._state)
 
+    def reset_session(self) -> bool:
+        """Forget a completed recording summary and report whether recording is active."""
+        with self._lock:
+            if self._state["state"] == "recording":
+                return True
+            self._state = {"state": "idle", "result": None, "error": None}
+            return False
+
     def preview_scene_task(self, specification: dict, seed: int) -> dict[str, Any]:
         scene = self._scene_module()
         spec = scene.TaskSpec.from_dict(specification)
