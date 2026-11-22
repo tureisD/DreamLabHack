@@ -1,0 +1,31 @@
+{
+  "collection_mode": "simulation",
+  "simulation": {
+    "source": "scripted",
+    "seed": 41,
+    "apple_xy_m": [
+      0.1727075551481002,
+      0.11839660453177997
+    ],
+    "start_pose": "wrist-visible",
+    "script_result": {
+      "object": "apple",
+      "yaw": 0.0,
+      "lift_m": 0.14407410102399698,
+      "tcp_distance_m": 0.005360323140428672,
+      "release_drop_m": 0.14602876209477045,
+      "passed": true
+    }
+  },
+  "robot_name": "YAM simulator",
+  "body": "yam",
+  "task": "pick up the apple",
+  "checkpoint": "scripted-yam",
+  "started_at_utc": "2026-11-22T08:30:21.147585+00:00",
+  "frames": 325,
+  "fps": 20,
+  "duration_s": 16.25,
+  "status": "complete",
+  "stop_reason": "finished",
+  "error": null
+}
