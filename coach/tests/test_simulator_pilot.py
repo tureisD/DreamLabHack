@@ -76,7 +76,11 @@ def test_simulator_pilot_budget_and_review(tmp_path, monkeypatch):
                         json.loads((folder / "rollout.json").read_text())["simulation"]["seed"] == 43)
     assert json.loads((score_folder / "rollout.json").read_text())["has_video"] is False
     assert not list(score_folder.glob("videos/**/*.mp4"))
-    assert (score_folder / "data/chunk-000/episode_000000.parquet").exists()
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(score_folder / "data/chunk-000/episode_000000.parquet")
+    assert "observation.apple_height_m" in table.column_names
+    assert len(table["observation.apple_height_m"]) == 2
     path = "/api/episodes/" + first["id"]
     for role in ("overhead", "wrist_l", "wrist_r"):
         assert client.get(path + "/video/" + role).content[4:8] == b"ftyp"

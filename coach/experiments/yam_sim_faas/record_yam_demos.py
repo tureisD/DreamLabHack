@@ -57,6 +57,7 @@ class RecordingYamEnv(YamEnv):
         self.apple_xy = apple[:2].tolist()
         self.states: list[np.ndarray] = []
         self.actions: list[np.ndarray] = []
+        self.apple_heights = [] if not videos else None
         self.video_poses = [] if defer_video and videos else None
         self.outputs = {}
         for role in ROLES.values() if videos else ():
@@ -79,7 +80,10 @@ class RecordingYamEnv(YamEnv):
             self.video_poses.append((self.data.time, self.data.qpos.copy()))
         elif self.outputs:
             self._write_video_frame()
-        return super().step(left, right)
+        result = super().step(left, right)
+        if self.apple_heights is not None:
+            self.apple_heights.append(float(self.data.body("apple").xpos[2]))
+        return result
 
     def _write_video_frame(self):
         images = self.images()
@@ -112,10 +116,13 @@ class RecordingYamEnv(YamEnv):
             flat = np.asarray(values, dtype=np.float32).reshape(-1)
             offsets = pa.array(np.arange(0, flat.size + 1, dim, dtype=np.int32))
             vectors[name] = pa.ListArray.from_arrays(offsets, pa.array(flat))
-        table = pa.table(vectors | {
+        columns = vectors | {
             "timestamp": np.arange(n) / FPS,
             "episode_index": np.zeros(n, dtype=np.int64),
-        })
+        }
+        if self.apple_heights is not None:
+            columns["observation.apple_height_m"] = pa.array(self.apple_heights, type=pa.float32())
+        table = pa.table(columns)
         data = self.folder / "data/chunk-000/episode_000000.parquet"
         data.parent.mkdir(parents=True, exist_ok=True)
         pq.write_table(table, data)
@@ -125,13 +132,16 @@ class RecordingYamEnv(YamEnv):
         names = [f"{side}_{part}" for side in ("right", "left") for part in parts]
         feature = {"dtype": "float32", "shape": [dim], "names": names}
         video_feature = {"dtype": "video", "shape": [176, 320, 3], "names": ["height", "width", "channels"]}
+        features = {"action": feature, "observation.state": feature}
+        features.update({f"observation.images.{role}": video_feature for role in self.outputs})
+        if self.apple_heights is not None:
+            features["observation.apple_height_m"] = {"dtype": "float32", "shape": [1]}
         info = {
             "codebase_version": "v2.1", "total_episodes": 1, "total_frames": n,
             "fps": FPS, "chunks_size": 1000,
             "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
             "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
-            "features": {"action": feature, "observation.state": feature}
-            | {f"observation.images.{role}": video_feature for role in self.outputs},
+            "features": features,
         }
         (meta / "info.json").write_text(json.dumps(info), encoding="utf-8")
         (meta / "tasks.jsonl").write_text(json.dumps({"task_index": 0, "task": self.task}) + "\n", encoding="utf-8")
