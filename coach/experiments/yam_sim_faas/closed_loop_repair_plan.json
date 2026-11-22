@@ -1,0 +1,29 @@
+{
+  "study_id": "apple-horizon-repair-2026-11-22",
+  "kind": "observed_simulator_diagnostic",
+  "question": "Does the coach's longer evaluation horizon recover the unchanged checkpoint's held-lift result compared with our original nine-request protocol?",
+  "model": "dream-1-ft:f2cc8d90-apple-independent24-500",
+  "task": "pick up the apple",
+  "start_pose": "wrist-visible",
+  "seeds": [913, 914, 915, 916, 917, 918, 919, 920],
+  "training_seeds_excluded": "41-48, 101-116, 201-224",
+  "previous_evaluation_seeds_excluded": "901-912",
+  "conditions": {
+    "original_short": {"max_requests": 9},
+    "coach_extended": {"max_requests": 12}
+  },
+  "order": {
+    "913": ["coach_extended", "original_short"],
+    "914": ["original_short", "coach_extended"],
+    "915": ["original_short", "coach_extended"],
+    "916": ["coach_extended", "original_short"],
+    "917": ["original_short", "coach_extended"],
+    "918": ["coach_extended", "original_short"],
+    "919": ["coach_extended", "original_short"],
+    "920": ["original_short", "coach_extended"]
+  },
+  "success_rule": "Apple rises at least 0.08 m above settled height for at least 2 continuous seconds; exact action replay joint-state error must be under 0.005 m.",
+  "trial_cap_wall_seconds": 600,
+  "missing_trial_rule": "A partial model run is a task failure. A process or API failure is invalid and remains in the record. Never silently rerun a trial.",
+  "interpretation": "This compares two evaluation horizons on one unchanged checkpoint in a narrow simulator scene distribution. It can measure a false-negative evaluation problem. It cannot establish that coaching saves operator time, demonstrations, or FaaS spend."
+}
