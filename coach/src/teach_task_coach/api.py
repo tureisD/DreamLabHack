@@ -1,5 +1,6 @@
 """HTTP API for the local coach UI."""
 
+from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
@@ -10,6 +11,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from dreamlab.contracts import EvaluationReport as StatisticalReport
+from dreamlab.contracts import EvaluationRequest as StatisticalRequest
+from dreamlab.evaluation.engine import StatisticalEvaluator
+from dreamlab.evaluation.methods.planning import plan_fixed_horizon
 from teach_task_coach.consistency import ConsistencyReview, review_task
 from teach_task_coach.coverage import CoveragePlan, plan
 from teach_task_coach.demos import Demo, DemoError, DemoScanner, DemoStore
@@ -43,6 +48,15 @@ from teach_task_coach.trials import TrialError, TrialRunner
 class ImportResult(BaseModel):
     imported: int
     skipped: list[str]
+
+
+class StatisticalPlanRequest(BaseModel):
+    baseline_rate: float = Field(ge=0, le=1, allow_inf_nan=False)
+    alternative_gain: float = Field(gt=0, le=1, allow_inf_nan=False)
+    minimum_improvement: float = Field(ge=0, lt=1, allow_inf_nan=False)
+    max_trials_per_arm: int = Field(ge=1, le=512)
+    target_power: float = Field(default=0.8, gt=0, lt=1, allow_inf_nan=False)
+    alpha: float = Field(default=0.05, gt=0, lt=1, allow_inf_nan=False)
 
 
 class EpisodeListItem(BaseModel):
@@ -140,6 +154,20 @@ def create_app(
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.post("/api/statistical-evaluations/analyze", response_model=StatisticalReport)
+    def analyze_independent_trials(value: StatisticalRequest) -> StatisticalReport:
+        """Audit a supplied immutable snapshot; no robot, Dream API, or deployment action."""
+        return StatisticalEvaluator().evaluate(value)
+
+    @app.post("/api/statistical-evaluations/plan")
+    def plan_independent_trials(value: StatisticalPlanRequest) -> dict:
+        """Prospective sample-size calculation for the same fixed-horizon decision rule."""
+        try:
+            result = plan_fixed_horizon(**value.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return asdict(result) | {"feasible": result.feasible}
 
     frontend_dist = Path(__file__).resolve().parents[2] / "frontend/dist"
     if (frontend_dist / "assets").is_dir():

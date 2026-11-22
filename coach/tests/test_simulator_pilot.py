@@ -67,7 +67,7 @@ def test_simulator_pilot_budget_and_review(tmp_path, monkeypatch):
     client = TestClient(create_app(store=EpisodeStore(tmp_path / "coach"), scanner=RolloutScanner(root)))
     assert client.post("/api/rollouts/import").json() == {"imported": 3, "skipped": []}
     runs = [client.get("/api/episodes/" + item["id"]).json() for item in client.get("/api/episodes").json()]
-    first, failed, score_only = sorted(runs, key=lambda r: r["simulation"]["seed"])
+    first, failed, _score_only = sorted(runs, key=lambda r: r["simulation"]["seed"])
     assert first["status"] == "complete" and first["simulation"]["model_action_rows"] == 1
     assert failed["simulation"]["requests_attempted"] == 1
     assert failed["simulation"]["model_action_rows"] == 0
