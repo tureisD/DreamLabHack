@@ -10,7 +10,11 @@
 | Training dataset | **varied**, 24 demos, seeds 41–48 and 101–116 | **independent**, 24 demos, seeds 201–224 only |
 | Proposed suffix | apple-varied24-500 | apple-independent24-500 |
 | One 500-step job at the published rate | $100, about $50 left | $100, about $60 left |
-| Current assignment | Dataset processed; first owner handles that job | 24-demo dataset processed; one 500-step job submitted on 22 November 2026 |
+| Current assignment | Training complete. Use the published checkpoint for evaluation. | 24-demo dataset processed; one 500-step job submitted on 22 November 2026 |
+
+## First account checkpoint
+
+Dream published `dream-1-ft:7820aef9-apple-varied24-500` after 500 steps on the varied apple dataset. The model runs on Dream Labs. With a Dream API key that has access, pass this exact ID to the simulator recorder’s `--model` option. The checkpoint record links the hosted model to its training job and dataset manifest. [Checkpoint record](varied-checkpoint.json) · [Simulator recorder instructions](../PILOT.md)
 
 On 22 November 2026 Dream confirmed **processed** for the first account's dataset `dima24kor/apple-grasp-varied-3374a5388381`, ID `ds_25be44f202eb5d8c`. It contains 24 episodes and 3,871 rows at 10 Hz. The 16 varied demonstrations closed at 15 distinct times between 5.45 and 8.90 seconds. Across all 24 episodes the gripper was 4.08–6.27 mm from the apple center at first closure. No paid job was submitted by the first PC during preparation. This committed archive is a comparison reference only; it is not part of the second account's training data.
 
