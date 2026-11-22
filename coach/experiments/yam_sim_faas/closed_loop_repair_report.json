@@ -1,0 +1,95 @@
+{
+  "study_id": "apple-horizon-repair-2026-11-22",
+  "kind": "observed_simulator_diagnostic",
+  "plan_sha256": "26ac95b67575e055d56ec73b20cfc753d6ae8945ba74c4d602f56be8553e2d7d",
+  "model": "dream-1-ft:f2cc8d90-apple-independent24-500",
+  "planned_pairs": 8,
+  "usable_pairs": 8,
+  "conditions": {
+    "original_short": {
+      "planned": 8,
+      "valid": 8,
+      "successes": 7,
+      "failures": 1,
+      "wall_seconds_total": 377.564,
+      "model_action_rows_total": 3456
+    },
+    "coach_extended": {
+      "planned": 8,
+      "valid": 8,
+      "successes": 8,
+      "failures": 0,
+      "wall_seconds_total": 759.842,
+      "model_action_rows_total": 4608
+    }
+  },
+  "pairs": [
+    {
+      "seed": 913,
+      "usable": true,
+      "original_short_success": true,
+      "coach_extended_success": true,
+      "original_short_run_id": "yam-32d55851f40d4ebab5c252c95dd334f0",
+      "coach_extended_run_id": "yam-dfeaf34b2d8b4653a1bc2a9386039766"
+    },
+    {
+      "seed": 914,
+      "usable": true,
+      "original_short_success": true,
+      "coach_extended_success": true,
+      "original_short_run_id": "yam-1196fad347274bc4a89b1668960af015",
+      "coach_extended_run_id": "yam-52cb3709ffd246e4a01a889362e21735"
+    },
+    {
+      "seed": 915,
+      "usable": true,
+      "original_short_success": true,
+      "coach_extended_success": true,
+      "original_short_run_id": "yam-18dce31843ba40c0aba9315b4aa2abb0",
+      "coach_extended_run_id": "yam-edbe160498c2422c86c83805041725c5"
+    },
+    {
+      "seed": 916,
+      "usable": true,
+      "original_short_success": false,
+      "coach_extended_success": true,
+      "original_short_run_id": "yam-744de6cec212471fb335bd7d854582f8",
+      "coach_extended_run_id": "yam-431a7d42a0b543e1ac626e509661e34c"
+    },
+    {
+      "seed": 917,
+      "usable": true,
+      "original_short_success": true,
+      "coach_extended_success": true,
+      "original_short_run_id": "yam-d8f22b328f3a47ba8d14890c126edbae",
+      "coach_extended_run_id": "yam-8b66b1761bd9441c98ab2fe793e0281b"
+    },
+    {
+      "seed": 918,
+      "usable": true,
+      "original_short_success": true,
+      "coach_extended_success": true,
+      "original_short_run_id": "yam-63bb7bf012c948349738760d8f795cd7",
+      "coach_extended_run_id": "yam-5056ba3d2dcf451b9828688be289a13b"
+    },
+    {
+      "seed": 919,
+      "usable": true,
+      "original_short_success": true,
+      "coach_extended_success": true,
+      "original_short_run_id": "yam-abe1f84995fb4d3e9e709da56fabe0de",
+      "coach_extended_run_id": "yam-b5ded1d59375435fb3c7e48056b6a243"
+    },
+    {
+      "seed": 920,
+      "usable": true,
+      "original_short_success": true,
+      "coach_extended_success": true,
+      "original_short_run_id": "yam-4b0d04950c9a46ecb72e3b002fe30e3e",
+      "coach_extended_run_id": "yam-0d2443f43bb649d7b7a57dc9b0120fde"
+    }
+  ],
+  "coach_only_successes": 1,
+  "original_only_successes": 0,
+  "interpretation": "This compares two evaluation horizons on one unchanged checkpoint in a narrow simulator scene distribution. It can measure a false-negative evaluation problem. It cannot establish that coaching saves operator time, demonstrations, or FaaS spend."
+}
