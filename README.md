@@ -1,7 +1,5 @@
 # DreamLabHack — standalone statistical evaluation
 
-**Active branch:** `codex/stat-eval` · **Integration target:** `main`
-
 Evaluate whether a candidate robot checkpoint improves task success over a
 baseline using a predeclared experiment plan and a complete snapshot of trial
 attempts. The evaluator returns reproducible intervals, raw attempt counts and
@@ -70,3 +68,11 @@ reproduce the synthetic statistical validation and regenerate the example report
 The [documentation index](docs/README.md) links to the versioned contracts,
 provenance guidance and branch workflow. The standalone component requires no
 robot, database, API credentials or paid training.
+
+## Planned extensions
+
+The [extension plan](docs/extensions/README.md) describes follow-on work for
+offline screening, cached replay and evidence-linked run diagnosis. See the
+[research audit](docs/extensions/research.md) and
+[implementation plan](docs/extensions/implementation-plan.md) for supporting
+references and validation requirements.

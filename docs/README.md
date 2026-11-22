@@ -1,5 +1,9 @@
 # Statistical evaluation documentation
 
+**On this child branch, read [evaluation extensions](extensions/README.md) first.**
+It plans B1–B6 and C1–C4 after the baseline engine is ready. The documents below
+retain the parent assignment and are prerequisites, not a duplicate workstream.
+
 **Active branch:** `codex/stat-eval`. **Integration target:** `main`.
 The standalone evaluation component replaces the cancelled local-app workstream.
 

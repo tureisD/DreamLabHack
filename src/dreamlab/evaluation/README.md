@@ -1,10 +1,12 @@
 # Statistical evaluation — implemented v1
 
-This package implements the `codex/stat-eval` responsibility: a deterministic,
-side-effect-free evaluator over the shared v1 input and report contracts. It
-assesses whether an observed checkpoint comparison supports a predeclared
-statistical statement. It neither operates a robot nor certifies safety,
-operational quality or permission to deploy.
+This package implements a deterministic, side-effect-free evaluator over the
+shared v1 input and report contracts. It assesses whether an observed checkpoint
+comparison supports a predeclared statistical statement. It neither operates a
+robot nor certifies safety, operational quality or permission to deploy.
+
+The [follow-on extension plan](../../../docs/extensions/README.md) covers offline
+screening, cached replay and run diagnosis.
 
 ## Supported inference, stated narrowly
 
