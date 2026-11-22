@@ -178,6 +178,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT)
     parser.add_argument("--episodes", type=int, default=2)
+    parser.add_argument("--vary-approach", action="store_true",
+                        help="Vary approach height, joint trajectory duration and descent duration by scene seed")
     parser.add_argument("--start-pose", choices=("home", "wrist-visible"), default="home")
     parser.add_argument("--seed", type=scene_seed, help="First scene seed; increments per episode")
     args = parser.parse_args()
@@ -187,7 +189,14 @@ if __name__ == "__main__":
     failures = 0
     for index in range(args.episodes):
         with recording(args.output, TASK, "scripted-yam", first_seed + index, "scripted", start_pose=args.start_pose) as (env, details):
-            result = mock_pickups.run_trial("apple", env=env, snapshot_dir=env.folder)
+            approach = {}
+            if args.vary_approach:
+                rng = np.random.default_rng([first_seed + index, 73])
+                approach = dict(approach_steps=int(rng.integers(35, 91)),
+                                descent_steps=int(rng.integers(38, 86)),
+                                approach_height=float(rng.uniform(0.09, 0.155)))
+                details["approach"] = approach
+            result = mock_pickups.run_trial("apple", env=env, snapshot_dir=env.folder, **approach)
             details["script_result"] = result
             failures += int(not result["passed"])
             (env.folder / "embodiment.json").write_text(json.dumps(CONFIG), encoding="utf-8")

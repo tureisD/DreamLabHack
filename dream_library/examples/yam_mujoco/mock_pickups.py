@@ -53,7 +53,8 @@ def solve(env, side, target, rotation, seed):
     raise ValueError(f"IK failed {side} {target}: score {best[0]:.4f}")
 
 
-def run_trial(fruit, yaw=0, lift=0.15, *, env=None, snapshot_dir=None):
+def run_trial(fruit, yaw=0, lift=0.15, *, env=None, snapshot_dir=None,
+              approach_steps=60, descent_steps=60, approach_height=None):
     """Run one scripted physical pickup and release trial.
     @param fruit Scene fruit name.
     @param yaw Grasp yaw in radians.
@@ -86,8 +87,9 @@ def run_trial(fruit, yaw=0, lift=0.15, *, env=None, snapshot_dir=None):
                 env.step(command, home) if side == "left" else env.step(home, command)
             q = end
 
-        move(p + [0, 0, lift - 0.01], 1, 60)
-        move(p + [0, 0, -0.009 if fruit == "orange" else 0.003], 1, 60)
+        height = lift - 0.01 if approach_height is None else approach_height
+        move(p + [0, 0, height], 1, approach_steps)
+        move(p + [0, 0, -0.009 if fruit == "orange" else 0.003], 1, descent_steps)
         for opening in np.linspace(1, 0, 30):
             cmd = np.r_[q, opening]
             env.step(cmd, home) if side == "left" else env.step(home, cmd)
