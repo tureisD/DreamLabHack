@@ -450,7 +450,10 @@ class FaaSWorker:
         if remote is None or remote.status in ("failed", "uploading"):
             remote = self.gateway.upload(version.local_path, version.remote_slug, version.embodiment_name)
         self.store.update_dataset(version.id, remote_id=remote.id, remote_name=remote.name)
-        self.store.update_finetune(job.id, status="processing", failure_phase=None, error=None)
+        self.store.update_finetune(
+            job.id, status="processing", remote_status=remote.status,
+            failure_phase=None, error=None,
+        )
 
     def _processing(self, job: FineTuneRecord, version: DatasetVersion) -> None:
         if version.remote_id is None:
@@ -459,12 +462,22 @@ class FaaSWorker:
         remote = self.gateway.dataset_status(version.remote_id)
         if remote.status == "processed":
             self.store.update_finetune(
-                job.id, status="pending_training", failure_phase=None, error=None
+                job.id, status="pending_training", remote_status=remote.status,
+                failure_phase=None, error=None,
             )
         elif remote.status == "failed":
             self.store.update_finetune(
-                job.id, status="failed", failure_phase="dataset_processing",
+                job.id, status="failed", remote_status=remote.status,
+                failure_phase="dataset_processing",
                 error=remote.error or "Dataset processing failed.",
+            )
+        elif remote.status in ("uploading", "ready_to_process", "processing"):
+            self.store.update_finetune(job.id, remote_status=remote.status, error=None)
+        else:
+            self.store.update_finetune(
+                job.id, status="failed", remote_status=remote.status,
+                failure_phase="dataset_processing",
+                error=f"Unexpected Dream dataset status: {remote.status}. Create a new dataset version.",
             )
 
     def _start_training(self, job: FineTuneRecord, version: DatasetVersion) -> None:

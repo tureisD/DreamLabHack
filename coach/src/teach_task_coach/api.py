@@ -575,7 +575,7 @@ def create_app(
             raise HTTPException(status_code=503, detail="Could not retry Dream dataset processing.") from exc
         return faas.update_finetune(
             job.id, status="pending_training" if remote.status == "processed" else "processing",
-            failure_phase=None, error=None,
+            remote_status=remote.status, failure_phase=None, error=None,
         )
 
     @app.post("/api/tasks/{task_id}/evaluations", response_model=Evaluation, status_code=201)

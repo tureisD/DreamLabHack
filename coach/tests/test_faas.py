@@ -107,8 +107,10 @@ def test_worker_validates_uploads_and_publishes_checkpoint(tmp_path):
 
     worker.tick()
     assert store.get_finetune(job_id).status == "processing"
+    assert store.get_finetune(job_id).remote_status == "ready_to_process"
     worker.tick()
     assert store.get_finetune(job_id).status == "pending_training"
+    assert store.get_finetune(job_id).remote_status == "processed"
     worker.tick()
     assert store.get_finetune(job_id).status == "training"
     assert store.get_finetune(job_id).remote_status == "queued"
@@ -165,14 +167,15 @@ def test_failed_remote_processing_can_retry_without_duplicate_training(tmp_path)
     worker.tick()
     assert store.get_finetune(job["id"]).status == "failed"
     assert store.get_finetune(job["id"]).failure_phase == "dataset_processing"
+    assert store.get_finetune(job["id"]).remote_status == "failed"
     dream.retry_dataset = Mock(return_value=SimpleNamespace(status="ready_to_process", error=None))
     response = client.post(f"/api/finetunes/{job['id']}/retry-processing")
     assert response.status_code == 200
     assert response.json()["status"] == "processing"
     assert response.json()["failure_phase"] is None
+    assert response.json()["remote_status"] == "ready_to_process"
     dream.retry_dataset.assert_called_once_with("ds_1")
     assert client.post(f"/api/finetunes/{job['id']}/retry-processing").status_code == 409
-
     dream.dataset_status = lambda _: SimpleNamespace(status="processed", error=None)
     worker.tick()
     assert store.get_finetune(job["id"]).status == "pending_training"
@@ -180,6 +183,23 @@ def test_failed_remote_processing_can_retry_without_duplicate_training(tmp_path)
     assert store.get_finetune(job["id"]).status == "training"
     assert dream.submit_calls == 1
     assert client.post(f"/api/finetunes/{job['id']}/retry-processing").status_code == 409
+
+
+def test_unexpected_remote_dataset_status_fails_with_explanation(tmp_path):
+    tasks, task, demos, store = setup_dataset(tmp_path)
+    dream = FakeDream()
+    version = store.create_dataset(task.id, "pilot/robot", [demo.id for demo in demos.list(task.id)])
+    worker = FaaSWorker(store, tasks, demos, dream)
+    worker.tick()
+    job = store.create_finetune(version.id, FineTuneRequest())
+    worker.tick()
+    dream.dataset_status = lambda _: SimpleNamespace(status="deleted", error=None)
+    worker.tick()
+    result = store.get_finetune(job.id)
+    assert result.status == "failed"
+    assert result.remote_status == "deleted"
+    assert "Create a new dataset version" in result.error
+    assert dream.submit_calls == 0
 
 
 def test_existing_finetune_table_gains_recovery_columns(tmp_path):
