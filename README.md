@@ -79,8 +79,8 @@ identifiers alone. Review the assumptions and warnings before interpreting any r
 ### Checks and development
 
 ```sh
-uv run --locked --extra eval ruff check .
-uv run --locked --extra eval ruff format --check .
+uv run --locked --extra eval ruff check src tests
+uv run --locked --extra eval ruff format --check src tests
 uv run --locked --extra eval pytest
 uv build
 uv run --locked --extra eval python tests/evaluation/wheel_smoke.py
