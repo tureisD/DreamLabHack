@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import LiveEvaluation from './LiveEvaluation';
 import ChatDemoReview, { type DemoKeepReceipt } from './ChatDemoReview';
 import ChatTraining from './ChatTraining';
+import ChatCheckpointPicker from './ChatCheckpointPicker';
 import ChatToolPanel, { type ChatTool } from './ChatToolPanel';
 import SceneTask, { type ScenePreset } from './SceneTask';
 import SimCorrect from './SimCorrect';
@@ -20,6 +21,7 @@ type WorkSurface =
   | { kind: 'training'; taskId: string }
   | { kind: 'scene'; preset?: ScenePreset }
   | { kind: 'fruit' }
+  | { kind: 'checkpoints' }
   | { kind: 'tool'; tool: ChatTool };
 const hosted = Boolean(document.querySelector('meta[name="dreamcoach-mode"][content="hosted"]'));
 
@@ -59,16 +61,14 @@ export default function CoachChat({
   const [reply, setReply] = useState<Reply | null>(null);
   const [ai, setAi] = useState<Status | null>(null);
   const [account, setAccount] = useState<Account | null>(null);
-  const [servableModels, setServableModels] = useState<string[]>([]);
   const [simulator, setSimulator] = useState<Simulator | null>(null);
   const [yamJob, setYamJob] = useState<YamJob | null>(null);
   const [pipeline, setPipeline] = useState<(TaskPipeline & { taskId: string }) | null>(null);
   const [workflowTask, setWorkflowTask] = useState<Task>();
   const [workSurface, setWorkSurface] = useState<WorkSurface | null>(null);
   const [comparisonReady, setComparisonReady] = useState<{ taskId: string; jobId: string; yam: boolean | null } | null>(null);
-  const [comparisonStarting, setComparisonStarting] = useState(false);
+  const [yamActionPending, setYamActionPending] = useState(false);
   const [showSimulator, setShowSimulator] = useState(showSimulatorOnOpen);
-  const [exampleCheckpoints, setExampleCheckpoints] = useState<string[]>([]);
   const [dreamAccess, setDreamAccess] = useState('unknown');
   const [text, setText] = useState('');
   const [secret, setSecret] = useState('');
@@ -76,11 +76,13 @@ export default function CoachChat({
   const [copiedAddress, setCopiedAddress] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [simulatorNotice, setSimulatorNotice] = useState('');
   const [begun, setBegun] = useState(sessionStorage.getItem('coach-begun-v3') === 'yes');
   const thread = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const started = useRef(false);
   const sessionVersion = useRef(0);
+  const yamActionVersion = useRef(0);
 
   useEffect(() => {
     sessionStorage.setItem('coach-chat-v3', JSON.stringify(messages.slice(-24)));
@@ -103,7 +105,6 @@ export default function CoachChat({
       .then(([aiStatus, dreamStatus]) => { setAi(aiStatus); setAccount(dreamStatus); })
       .catch((caught: Error) => setError(caught.message));
     void api<Simulator>('/api/simulator/status').then(setSimulator).catch(() => undefined);
-    void api<string[]>('/api/simulator/example-checkpoints').then(setExampleCheckpoints).catch(() => undefined);
   }, []);
   useEffect(() => {
     if (simulator?.state !== 'preparing') return;
@@ -115,6 +116,7 @@ export default function CoachChat({
     let cancelled = false;
     let timer: number;
     async function poll() {
+      const startingActionVersion = yamActionVersion.current;
       try {
         const root = `/api/tasks/${activeTaskId}`;
         const [next, demos, datasets, jobs] = await Promise.all([
@@ -124,7 +126,9 @@ export default function CoachChat({
           api<NonNullable<TaskPipeline['job']>[]>(`${root}/finetunes`),
         ]);
         if (cancelled) return;
-        setYamJob(next?.task_id === activeTaskId ? next : null);
+        if (startingActionVersion === yamActionVersion.current) {
+          setYamJob(next?.task_id === activeTaskId ? next : null);
+        }
         setPipeline({
           taskId: activeTaskId,
           kept: demos.filter((demo) => demo.decision === 'keep').length,
@@ -171,7 +175,6 @@ export default function CoachChat({
       setSimulator(sim);
       setDreamAccess(preflight.dream.state);
       setWorkflowTask(current ?? undefined);
-      setServableModels(models);
     }
     const taskData = current ? await Promise.all([
       api<{ phase: string; next_action: string; evidence: string[] }>(`/api/tasks/${current.id}/guidance`),
@@ -280,11 +283,15 @@ export default function CoachChat({
   }
 
   async function runYamAction(path: string, body?: unknown) {
+    if (yamActionPending) return false;
     const version = sessionVersion.current;
+    yamActionVersion.current += 1;
+    setYamActionPending(true);
     setError('');
+    setSimulatorNotice('');
     try {
       const job = await api<YamJob | null>(path, 'POST', body);
-      if (version !== sessionVersion.current) return;
+      if (version !== sessionVersion.current) return false;
       setYamJob(job);
       if (job) {
         clearDemoApproval();
@@ -292,9 +299,18 @@ export default function CoachChat({
         chooseSimulatorMode('apple');
         selectTask(job.task_id);
       }
+      return true;
     } catch (caught) {
       if (version === sessionVersion.current) setError(caught instanceof Error ? caught.message : 'Could not run the simulator action.');
+      return false;
+    } finally {
+      yamActionVersion.current += 1;
+      if (version === sessionVersion.current) setYamActionPending(false);
     }
+  }
+
+  async function quitYam() {
+    if (await runYamAction('/api/simulator/workflow/quit')) setSimulatorNotice('Simulator run stopped.');
   }
 
   function showWork(surface: WorkSurface) {
@@ -319,7 +335,9 @@ export default function CoachChat({
   }
 
   async function saveSimulatorTask(draft: TaskDraft) {
+    const version = sessionVersion.current;
     const task = await api<Task>('/api/tasks', 'POST', { ...draft, baseline_checkpoint: 'dreamlabs/dream-1-beta' });
+    if (version !== sessionVersion.current) return;
     selectTask(task.id);
     setWorkflowTask(task);
   }
@@ -369,16 +387,6 @@ export default function CoachChat({
     }
   }
 
-  async function compareReadyCheckpoint(taskId: string, jobId: string) {
-    if (comparisonStarting) return;
-    setComparisonStarting(true);
-    try {
-      await runYamAction('/api/simulator/compare', { task_id: taskId, job_id: jobId, pairs: 4 });
-    } finally {
-      setComparisonStarting(false);
-    }
-  }
-
   function resetConversation() {
     sessionVersion.current += 1;
     resetSession();
@@ -394,9 +402,9 @@ export default function CoachChat({
     setPipeline(null);
     setWorkflowTask(undefined);
     setComparisonReady(null);
-    setComparisonStarting(false);
+    setYamActionPending(false);
     setDreamAccess('unknown');
-    setServableModels([]);
+    setSimulatorNotice('');
     for (const key of ['coach-chat-v2', 'coach-begun-v2', 'coach-active-task', 'coach-simulator-mode']) {
       sessionStorage.removeItem(key);
     }
@@ -433,6 +441,7 @@ export default function CoachChat({
   }
 
   function startOver() {
+    if (yamActionPending) return;
     started.current = true;
     resetConversation();
     setBegun(false);
@@ -467,7 +476,6 @@ export default function CoachChat({
   const currentPipeline = pipeline?.taskId === activeTaskId ? pipeline : null;
   const simulatorRequested = begun && (hostedGuide || showSimulator || currentYamJob || simulatorMode !== 'apple'
     || reply?.setup_help === 'simulator' || simulatorHelpPattern.test(reply?.message ?? ''));
-  const existingCheckpoint = exampleCheckpoints.find((checkpoint) => servableModels.includes(checkpoint));
   const needsDreamKey = begun && account && (!account.configured || dreamAccess === 'blocked' || dreamAccess === 'unavailable');
   const latestMessage = messages[messages.length - 1];
   const replySuggestions = begun && ai?.configured && !busy && !simulatorRequested && !needsDreamKey
@@ -486,6 +494,12 @@ export default function CoachChat({
           onCheckpointReady={(jobId) => void finishTraining(surface.taskId, jobId)} />;
       case 'tool':
         return <ChatToolPanel tool={surface.tool} onClose={closeWork} />;
+      case 'checkpoints':
+        return <ChatCheckpointPicker onClose={closeWork} onCompare={async (checkpoint) => {
+          const started = await runYamAction('/api/simulator/compare-existing', { checkpoint });
+          if (started) closeWork();
+          return started;
+        }} />;
       case 'scene':
       case 'fruit': {
         const props = {
@@ -517,7 +531,7 @@ export default function CoachChat({
       <div className={`chat-landscape${hosted ? ' hosted-landscape' : ''}`} aria-hidden="true">{!hosted && <video autoPlay loop muted playsInline poster="/dream/sunrise-hd-poster.webp"><source src="/dream/sunrise-hd.mp4" type="video/mp4" /></video>}<span className="chat-spark chat-spark-one">✦</span><span className="chat-spark chat-spark-two">✦</span></div>
       <div className="chat-panel-top">
         <span className="chat-landscape-title">Conversation</span>
-        {begun && !workSurface && <button type="button" className="chat-reset" disabled={busy} onClick={startOver}>Start over</button>}
+        {begun && !workSurface && <button type="button" className="chat-reset" disabled={busy || yamActionPending} onClick={startOver}>Start over</button>}
       </div>
       <div className={`chat-thread${workSurface ? ' chat-thread-workspace' : ''}`} ref={thread}
         aria-live={workSurface ? undefined : 'polite'} tabIndex={workSurface ? -1 : undefined}>
@@ -525,7 +539,9 @@ export default function CoachChat({
         {hostedGuide && !begun && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>I’ll guide you from YAM demos to a fine-tune and a measured comparison. Press Begin to choose a simulator workflow.</p></div>}
         {!hosted && ai && !ai.configured && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>The AI coach is unavailable on this server. Ask the operator to configure its AI credential, then refresh this page.</p></div>}
         {messages.map((item, index) => <div key={index} className={`chat-bubble chat-${item.role}`}><span>{item.role === 'assistant' ? 'DreamCoach' : 'You'}</span><p>{item.content}</p></div>)}
-        {busy && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>Thinking through your next step…</p></div>}
+        {busy && <div className="chat-bubble chat-assistant"><span>DreamCoach</span>
+          <p>{!begun && messages.length ? 'Resetting the YAM simulator…' : 'Thinking through your next step…'}</p>
+        </div>}
       {needsDreamKey && <div className="chat-action">
         <p>Create a key in your Dream Labs account at <code>{account.dashboard_url}</code>. Paste it into the private field below. The key stays out of your conversation.</p>
         <button type="button" className="secondary" onClick={() => void copyAddress(account.dashboard_url)}>
@@ -542,10 +558,11 @@ export default function CoachChat({
         <p>Connect the arms and cameras, then check for fresh camera frames before a baseline trial.</p>
         <button className="secondary" onClick={() => showWork({ kind: 'tool', tool: { kind: 'preflight' } })}>Check arms and cameras</button>
       </div>}
+      {simulatorNotice && <p className="notice" role="status">{simulatorNotice}</p>}
       {simulatorRequested && <YamChatWorkflow
         setup={simulator} dreamReady={dreamAccess === 'ready'} job={currentYamJob}
         pipeline={currentYamJob || simulatorMode !== 'apple' ? currentPipeline : null}
-        existingCheckpoint={existingCheckpoint}
+        openExistingCheckpoints={() => showWork({ kind: 'checkpoints' })}
         mode={simulatorMode}
         setMode={chooseSimulatorMode}
         openRecorder={openRecorder}
@@ -553,8 +570,7 @@ export default function CoachChat({
         collect={(scenes) => runYamAction('/api/simulator/collect', { scenes })}
         reuseDemos={() => runYamAction('/api/simulator/collect', { source: 'bundled' })}
         compare={(jobId) => runYamAction('/api/simulator/compare', { task_id: activeTaskId, job_id: jobId, pairs: 4 })}
-        compareExisting={(checkpoint) => runYamAction('/api/simulator/compare-existing', { checkpoint })}
-        stop={() => runYamAction('/api/simulator/workflow/stop')}
+        stop={quitYam}
         review={() => openWork('demos')}
         training={() => openWork('training')}
         explainComparison={hostedGuide ? undefined : () => {
@@ -598,8 +614,10 @@ export default function CoachChat({
           ? 'Compare the base and fine-tuned models on the same four simulator scenes. This may use Dream credits.'
           : 'Compare your new checkpoint with the base model on held-out scenes.'}</p></div>
         {comparisonReady.yam !== null && (comparisonReady.yam
-          ? <button type="button" disabled={comparisonStarting} onClick={() => void compareReadyCheckpoint(comparisonReady.taskId, comparisonReady.jobId)}>
-            {comparisonStarting ? 'Starting comparison…' : 'Run simulator comparison'}
+          ? <button type="button" disabled={yamActionPending} onClick={() => void runYamAction('/api/simulator/compare', {
+            task_id: comparisonReady.taskId, job_id: comparisonReady.jobId, pairs: 4,
+          })}>
+            {yamActionPending ? 'Starting comparison…' : 'Run simulator comparison'}
           </button>
           : <button type="button" onClick={() => openEvaluation(comparisonReady.taskId)}>Plan evaluation</button>)}
       </section>}

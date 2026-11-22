@@ -229,6 +229,7 @@ def create_app(
     simulator = simulator_setup or SimulatorSetup()
     yam = YamWorkflow(
         episodes.data_dir / "yam-workflow", tasks, demos, faas, simulator, preflight,
+        list_finetunes=dream.finetunes,
     )
     app.include_router(yam_router(yam))
 
@@ -355,10 +356,15 @@ def create_app(
 
     @app.post("/api/simulator/session/reset", response_model=SimulatorSessionReset)
     def reset_simulator_session() -> SimulatorSessionReset:
-        return SimulatorSessionReset(
-            yam_active=yam.reset_session(),
-            recorder_active=sim_correction.reset_session(),
-        )
+        try:
+            yam.reset_session()
+            sim_correction.reset_session()
+        except TimeoutError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="The previous simulator run is still stopping. Press Begin again in a moment.",
+            ) from exc
+        return SimulatorSessionReset(yam_active=False, recorder_active=False)
 
     @app.get("/api/docs/apple-training")
     def apple_training_guide() -> FileResponse:
@@ -438,7 +444,9 @@ def create_app(
     @app.get("/", response_model=None)
     def frontend() -> FileResponse | dict[str, str]:
         index = frontend_dist / "index.html"
-        return FileResponse(index) if index.is_file() else {"message": "Build coach/frontend first."}
+        if index.is_file():
+            return FileResponse(index, headers={"Cache-Control": "no-store"})
+        return {"message": "Build coach/frontend first."}
 
     @app.post("/api/rollouts/import", response_model=ImportResult)
     def import_rollouts() -> ImportResult:

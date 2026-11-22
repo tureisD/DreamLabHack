@@ -8,6 +8,7 @@ import json
 import random
 import subprocess
 import sys
+from collections.abc import Callable
 from importlib.resources import files
 from pathlib import Path
 from threading import Event, Lock, Thread
@@ -15,6 +16,7 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 from zipfile import ZipFile
 
+from dream.errors import DreamError
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -28,7 +30,8 @@ from teach_task_coach.paired_audit import (
     PairPlan,
     evaluate_paired,
 )
-from teach_task_coach.preflight import PreflightService
+from teach_task_coach.preflight import ModelSummary, PreflightService
+from teach_task_coach.simulator_process import SimulatorProcessCancelled, run_simulator_process
 from teach_task_coach.simulator_setup import SimulatorSetup
 from teach_task_coach.tasks import TaskInput, TaskStore
 
@@ -39,7 +42,11 @@ REQUESTS_PER_TRIAL = 12
 MIN_ACTION_ROWS = REQUESTS_PER_TRIAL * 48
 SCRIPTS = Path(__file__).resolve().parents[2] / "experiments/yam_sim_faas"
 BUNDLED_DATASET_HASH = "779f088ac959f21dcd4b50d3947912442b7e9ef950efe862d18808bdd2c64212"
-BUNDLED_EVIDENCE = ("apple_paired_confirmation.json", "second_account_paired_confirmation.json")
+BUNDLED_EVIDENCE = (
+    ("apple_paired_confirmation.json", "dima24kor/apple-grasp-varied-3374a5388381"),
+    ("second_account_paired_confirmation.json", "mary.m.koryakina/apple-grasp-independent-779f088ac959"),
+)
+RESET_TIMEOUT = 10
 
 
 class CollectionRequest(BaseModel):
@@ -55,6 +62,12 @@ class ComparisonRequest(BaseModel):
 
 class ExistingComparisonRequest(BaseModel):
     checkpoint: str = Field(min_length=1, max_length=200)
+
+
+class ExistingCheckpoint(BaseModel):
+    checkpoint: str
+    dataset: str
+    steps: int | None
 
 
 class YamJob(BaseModel):
@@ -85,16 +98,13 @@ def write_json(path: Path, data: str) -> None:
     next_path.replace(path)
 
 
-def command(script: str, *args: str, timeout: int) -> str:
+def command(script: str, *args: str, timeout: int, cancel: Event | None = None) -> str:
     try:
-        result = subprocess.run(
+        result = run_simulator_process(
             [sys.executable, str(SCRIPTS / script), *args],
             cwd=SCRIPTS,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            check=False,
             timeout=timeout,
+            cancel=cancel,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.TimeoutExpired as exc:
@@ -107,8 +117,8 @@ def command(script: str, *args: str, timeout: int) -> str:
     return result.stdout
 
 
-def workflow_result(*args: str, timeout: int = 90) -> dict[str, Any]:
-    output = command("score_workflow_rollout.py", *args, timeout=timeout)
+def workflow_result(*args: str, timeout: int = 90, cancel: Event | None = None) -> dict[str, Any]:
+    output = command("score_workflow_rollout.py", *args, timeout=timeout, cancel=cancel)
     for line in reversed(output.splitlines()):
         if line.startswith("WORKFLOW_RESULT="):
             return json.loads(line.removeprefix("WORKFLOW_RESULT="))
@@ -117,15 +127,20 @@ def workflow_result(*args: str, timeout: int = 90) -> dict[str, Any]:
 
 class YamWorkflow:
     def __init__(self, root: Path, tasks: TaskStore, demos: DemoStore, faas: FaaSStore,
-                 setup: SimulatorSetup, preflight: PreflightService) -> None:
+                 setup: SimulatorSetup, preflight: PreflightService,
+                 list_finetunes: Callable[[], list[dict[str, Any]]] | None = None) -> None:
         self.root = root
         self.tasks = tasks
         self.demos = demos
         self.faas = faas
         self.setup = setup
         self.preflight = preflight
+        self.list_finetunes = list_finetunes
         self.lock = Lock()
         self.cancel = Event()
+        self._reset_lock = Lock()
+        self._reset_requested = Event()
+        self._thread: Thread | None = None
         self.job: YamJob | None = None
         self.root.mkdir(parents=True, exist_ok=True)
         saved = self.root / "job.json"
@@ -142,6 +157,8 @@ class YamWorkflow:
 
     def _update(self, **changes: Any) -> None:
         with self.lock:
+            if self._reset_requested.is_set():
+                return
             assert self.job is not None
             self._save(self.job.model_copy(update=changes))
 
@@ -149,21 +166,34 @@ class YamWorkflow:
         with self.lock:
             return self.job
 
-    def reset_session(self) -> bool:
-        """Forget the last run summary and report whether a run is still active."""
-        with self.lock:
-            if self.job and self.job.state in ("running", "stopping"):
-                return True
-            (self.root / "job.json").unlink(missing_ok=True)
-            self.job = None
-            self.cancel.clear()
-            return False
+    def reset_session(self) -> None:
+        """Stop simulator work and clear the last run summary after the worker exits."""
+        with self._reset_lock:
+            with self.lock:
+                self._reset_requested.set()
+                thread = self._thread
+                if self.job and self.job.state in ("running", "stopping"):
+                    self._save(self.job.model_copy(update={
+                        "state": "stopping", "message": "Resetting the simulator for a fresh session."
+                    }))
+            if thread is not None:
+                thread.join(timeout=RESET_TIMEOUT)
+                if thread.is_alive():
+                    raise TimeoutError("The simulator is still stopping. Try Begin again.")
+            with self.lock:
+                (self.root / "job.json").unlink(missing_ok=True)
+                self.job = None
+                self._thread = None
+                self.cancel.clear()
+                self._reset_requested.clear()
 
-    def _check_start(self, *checkpoints: str) -> None:
+    def _check_start(self, *checkpoints: str) -> list[ModelSummary]:
+        if self._reset_requested.is_set():
+            raise ValueError("The simulator is resetting. Try again after it stops.")
         if self.job and self.job.state in ("running", "stopping"):
             raise ValueError("Finish or stop the current simulator run first.")
         if not checkpoints:
-            return
+            return []
         if self.setup.status().state != "ready":
             raise ValueError("Prepare the YAM simulator before recording.")
         check, models = self.preflight.check_dream()
@@ -172,16 +202,22 @@ class YamWorkflow:
         ready = {model.id for model in models if model.servable}
         if not ready.issuperset(checkpoints):
             raise ValueError("The requested checkpoints are not all available in this Dream account.")
+        return models
 
     def _launch(self, job: YamJob, worker, *args: Any) -> YamJob:
         self.cancel.clear()
         self._save(job)
-        Thread(target=self._work, args=(worker, *args), daemon=True, name="dreamcoach-yam").start()
+        self._thread = Thread(
+            target=self._work, args=(worker, *args), daemon=True, name="dreamcoach-yam"
+        )
+        self._thread.start()
         return job
 
     def _work(self, worker, *args: Any) -> None:
         try:
             worker(*args)
+        except SimulatorProcessCancelled:
+            return
         except SimulatorRunError as exc:
             self._update(state="failed", message=str(exc))
         except Exception:  # noqa: BLE001 - deliver an error state even on unexpected worker failures
@@ -216,6 +252,8 @@ class YamWorkflow:
             return self._launch(job, self._collect, job, folder, training)
 
     def _import_bundled(self, job: YamJob, folder: Path) -> None:
+        if self._stopped():
+            return
         archive = SCRIPTS / "grasp_training/independent.zip"
         with archive.open("rb") as source:
             if hashlib.file_digest(source, "sha256").hexdigest() != BUNDLED_DATASET_HASH:
@@ -223,6 +261,8 @@ class YamWorkflow:
         output = folder / "demos"
         with ZipFile(archive) as zipped:
             zipped.extractall(output)
+        if self._stopped():
+            return
         demos = [read_demo(path.parent.parent, job.task_id) for path in output.glob("*/meta/info.json")]
         if len(demos) != 24 or any(not demo.valid or demo.task_text != PROMPT for demo in demos):
             raise SimulatorRunError("The bundled archive did not contain 24 valid apple pickup demos.")
@@ -232,17 +272,72 @@ class YamWorkflow:
                      message="The bundled apple pickup demos are ready to review.")
 
     def existing_checkpoints(self) -> list[str]:
+        return [item.checkpoint for item in self._bundled_choices()]
+
+    def _bundled_choices(self) -> list[ExistingCheckpoint]:
         resources = files("teach_task_coach").joinpath("examples")
-        return [
-            PairedRequest.model_validate_json(resources.joinpath(name).read_text(encoding="utf-8"))
-            .plan.candidate_checkpoint for name in BUNDLED_EVIDENCE
-        ]
+        choices = []
+        for name, dataset in BUNDLED_EVIDENCE:
+            example = PairedRequest.model_validate_json(resources.joinpath(name).read_text(encoding="utf-8"))
+            choices.append(ExistingCheckpoint(checkpoint=example.plan.candidate_checkpoint, dataset=dataset, steps=500))
+        return choices
+
+    def list_existing_checkpoints(self) -> list[ExistingCheckpoint]:
+        check, models = self.preflight.check_dream()
+        return self._eligible_choices(models) if check.state == "ready" else []
+
+    def _eligible_choices(self, models: list[ModelSummary]) -> list[ExistingCheckpoint]:
+        ready = {model.id for model in models if model.servable}
+        if BASE not in ready:
+            return []
+        choices = {item.checkpoint: item for item in self._bundled_choices() if item.checkpoint in ready}
+        if self.list_finetunes is None:
+            return list(choices.values())
+        try:
+            jobs = self.list_finetunes()
+        except DreamError:
+            return list(choices.values())
+
+        remote = {
+            job["fine_tuned_model"]: job for job in jobs
+            if job.get("status") == "succeeded" and isinstance(job.get("fine_tuned_model"), str)
+            and job["fine_tuned_model"] in ready
+        }
+        for checkpoint, item in choices.items():
+            job = remote.get(checkpoint)
+            if job and isinstance(job.get("dataset"), str) and job["dataset"].strip():
+                choices[checkpoint] = item.model_copy(update={"dataset": job["dataset"]})
+
+        # The remote catalogue identifies the training dataset, but does not attest its
+        # task or joint conventions. For other models require a proven local YAM workflow.
+        for job in self.faas.list_finetunes():
+            checkpoint = job.checkpoint
+            if not checkpoint or checkpoint in choices or checkpoint == BASE or job.status != "succeeded" or job.use_eef:
+                continue
+            account_job = remote.get(checkpoint)
+            if not account_job or not job.remote_job_id or account_job.get("id") != job.remote_job_id:
+                continue
+            dataset = self.faas.get_dataset(job.dataset_version_id)
+            if dataset is None or dataset.status != "validated" or not dataset.remote_name:
+                continue
+            if account_job.get("dataset") != dataset.remote_name or account_job.get("base_model") != BASE:
+                continue
+            parameters = account_job.get("hyperparameters")
+            if isinstance(parameters, dict) and parameters.get("use_eef") is True:
+                continue
+            task = self.tasks.get_task(dataset.task_id)
+            if task is None or task.prompt != PROMPT or task.success_rule != SUCCESS_RULE or task.baseline_checkpoint != BASE:
+                continue
+            if not (self.root / task.id / "scenes.json").is_file():
+                continue
+            choices[checkpoint] = ExistingCheckpoint(checkpoint=checkpoint, dataset=dataset.remote_name, steps=job.steps)
+        return list(choices.values())
 
     def start_existing_comparison(self, value: ExistingComparisonRequest) -> YamJob:
         with self.lock:
-            if value.checkpoint not in self.existing_checkpoints():
-                raise ValueError("Only a checkpoint from the verified apple pickup examples can be reused here.")
-            self._check_start(BASE, value.checkpoint)
+            models = self._check_start(BASE, value.checkpoint)
+            if not any(item.checkpoint == value.checkpoint for item in self._eligible_choices(models)):
+                raise ValueError("Choose an available checkpoint verified for the joint-space YAM apple task.")
             folder, _, heldout = self._new_task(0)
             job = YamJob(id=uuid4().hex, kind="comparison", task_id=folder.name, total=4,
                          message="Starting fresh held-out trials with the existing checkpoint.")
@@ -275,6 +370,8 @@ class YamWorkflow:
             return self.job
 
     def _stopped(self) -> bool:
+        if self._reset_requested.is_set():
+            return True
         if not self.cancel.is_set():
             return False
         self._update(state="cancelled", message="Stopped. Completed trials remain available.")
@@ -284,10 +381,10 @@ class YamWorkflow:
         command(
             "record_dream_model_rollout.py", "--output", str(folder), "--model", checkpoint,
             "--seed", str(seed), "--start-pose", "wrist-visible", "--max-requests",
-            str(REQUESTS_PER_TRIAL), "--score-only", timeout=660,
+            str(REQUESTS_PER_TRIAL), "--score-only", timeout=660, cancel=self._reset_requested,
         )
         args = ("--held-out-seed", str(seed)) if heldout else ()
-        score = workflow_result(str(folder), *args)
+        score = workflow_result(str(folder), *args, cancel=self._reset_requested)
         if (
             score["seed"] != seed or score["checkpoint"] != checkpoint
             or score["model_action_rows"] < MIN_ACTION_ROWS or score["height_source"] != "recorded"
@@ -317,7 +414,8 @@ class YamWorkflow:
         self._update(message=f"Generating and validating corrections for {failures} failed scenes.")
         output = folder / "demos"
         manifest = workflow_result(
-            str(eligible), "--collect-into", str(output), "--max-demos", str(job.total), timeout=1200,
+            str(eligible), "--collect-into", str(output), "--max-demos", str(job.total),
+            timeout=1200, cancel=self._reset_requested,
         )
         if self._stopped():
             return
@@ -366,6 +464,8 @@ class YamWorkflow:
                 try:
                     score = self._record(folder / trial, checkpoint, seed, heldout=True)
                 except SimulatorRunError:
+                    if self._reset_requested.is_set():
+                        return
                     attempts[role] = PairAttempt(
                         trial_id=trial, episode_id=trial, checkpoint_id=checkpoint,
                         source_uri=f"local-rollout://{trial}", session_id=trial,
@@ -417,6 +517,10 @@ def yam_router(workflow: YamWorkflow) -> APIRouter:
     def example_checkpoints() -> list[str]:
         return workflow.existing_checkpoints()
 
+    @router.get("/existing-checkpoints", response_model=list[ExistingCheckpoint])
+    def existing_checkpoints() -> list[ExistingCheckpoint]:
+        return workflow.list_existing_checkpoints()
+
     @router.post("/compare-existing", response_model=YamJob, status_code=202)
     def compare_existing(value: ExistingComparisonRequest) -> YamJob:
         try:
@@ -427,6 +531,13 @@ def yam_router(workflow: YamWorkflow) -> APIRouter:
     @router.post("/workflow/stop", response_model=YamJob | None)
     def stop() -> YamJob | None:
         return workflow.stop()
+
+    @router.post("/workflow/quit")
+    def quit_run() -> None:
+        try:
+            workflow.reset_session()
+        except TimeoutError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @router.get("/comparisons/{task_id}", response_model=YamComparison | None)
     def comparison(task_id: str) -> YamComparison | None:

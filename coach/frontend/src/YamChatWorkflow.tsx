@@ -34,23 +34,22 @@ const sceneChoices: { id: ScenePreset; title: string; target: string }[] = [
 ];
 
 export default function YamChatWorkflow({
-  setup, dreamReady, job, pipeline, existingCheckpoint, mode, setMode, openRecorder,
-  prepare, collect, reuseDemos, compare, compareExisting, stop, review, training, explainComparison,
+  setup, dreamReady, job, pipeline, mode, setMode, openRecorder, openExistingCheckpoints,
+  prepare, collect, reuseDemos, compare, stop, review, training, explainComparison,
 }: {
   setup: { state: string; message: string } | null;
   dreamReady: boolean;
   job: YamJob | null;
   pipeline: TaskPipeline | null;
-  existingCheckpoint: string | undefined;
   mode: SimulatorMode;
   setMode: (mode: SimulatorMode) => void;
   openRecorder: (mode: 'fruit' | 'scene', preset?: ScenePreset) => void;
-  prepare: () => Promise<void>;
-  collect: (scenes: number) => Promise<void>;
-  reuseDemos: () => Promise<void>;
-  compare: (jobId: string) => Promise<void>;
-  compareExisting: (checkpoint: string) => Promise<void>;
-  stop: () => Promise<void>;
+  openExistingCheckpoints: () => void;
+  prepare: () => Promise<unknown>;
+  collect: (scenes: number) => Promise<unknown>;
+  reuseDemos: () => Promise<unknown>;
+  compare: (jobId: string) => Promise<unknown>;
+  stop: () => Promise<unknown>;
   review: () => void;
   training: () => void;
   explainComparison?: () => void;
@@ -69,7 +68,7 @@ export default function YamChatWorkflow({
     panel.current?.scrollIntoView({ block: 'nearest' });
   }, []);
 
-  async function act(action: () => Promise<void>) {
+  async function act(action: () => Promise<unknown>) {
     setBusy(true);
     try { await action(); }
     finally { setBusy(false); }
@@ -108,7 +107,7 @@ export default function YamChatWorkflow({
           <small>{job.completed}/{job.total} {job.kind === 'collection' ? 'scenes' : 'pairs'}</small>
         </div>}
       </div>
-      {running && <button type="button" className="yam-secondary" disabled={busy || job.state === 'stopping'} onClick={() => void act(stop)}>Stop after this rollout</button>}
+      {running && <button type="button" className="yam-secondary" disabled={busy} onClick={() => void act(stop)}>Quit run</button>}
     </div>}
 
     {mode === 'scene' && <div className="yam-panel">
@@ -143,11 +142,11 @@ export default function YamChatWorkflow({
 
     {mode === 'apple' && <div className="yam-panel">
       <div className="yam-panel-heading"><h3>Teach apple pickup</h3><p>Lift the apple at least 8 cm and hold it for two seconds.</p></div>
-      {!running && ready && dreamReady && existingCheckpoint && <div className="yam-next">
-        <button type="button" className="yam-secondary" disabled={busy} onClick={() => void act(() => compareExisting(existingCheckpoint))}>
+      {!running && ready && dreamReady && <div className="yam-next">
+        <button type="button" className="yam-secondary" disabled={busy} onClick={openExistingCheckpoints}>
           Evaluate existing checkpoint
         </button>
-        <small>Compare the 500-step model with Dream-1 on four fresh scenes. Inference may use Dream credits.</small>
+        <small>Choose a completed fine-tune by its training dataset.</small>
       </div>}
       {canStart && <>
         <button type="button" className="yam-primary" disabled={busy} onClick={() => void act(reuseDemos)}>Use 24 bundled demos</button>

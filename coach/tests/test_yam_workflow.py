@@ -2,25 +2,27 @@
 
 import datetime as dt
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
 from time import monotonic, sleep
 from types import SimpleNamespace
 from zipfile import ZipFile
 
+import pytest
 from fastapi.testclient import TestClient
 
 from teach_task_coach import yam_workflow
 from teach_task_coach.api import create_app
-from teach_task_coach.demos import DemoStore
 from teach_task_coach.faas import FaaSStore, FineTuneRequest
 from teach_task_coach.preflight import PreflightService
-from teach_task_coach.sim_correction import SimCorrectionService
+from teach_task_coach.simulator_process import SimulatorProcessCancelled
 from teach_task_coach.simulator_setup import SimulatorStatus
 from teach_task_coach.storage import EpisodeStore
-from teach_task_coach.yam_workflow import BASE, MIN_ACTION_ROWS, PROMPT, YamWorkflow
+from teach_task_coach.yam_workflow import BASE, MIN_ACTION_ROWS, PROMPT, SUCCESS_RULE, YamWorkflow
 
 CANDIDATE = "test/apple-checkpoint"
+VERIFIED_CANDIDATE = "dream-1-ft:7820aef9-apple-varied24-500"
 
 
 def wait_for_job(client: TestClient, timeout: int = 15) -> dict:
@@ -62,7 +64,7 @@ def test_chat_collection_and_live_paired_comparison(tmp_path, monkeypatch):
         source.mkdir(parents=True)
         return {"folder": str(source), "success": False}
 
-    def export(rollouts, collect_flag, output, max_demos_flag, count, *, timeout):
+    def export(rollouts, collect_flag, output, max_demos_flag, count, *, timeout, cancel):
         # A separate collector test renders the real correction. Here, exercise
         # the API handoff with an audited LeRobot episode from the bundle.
         assert len(list(Path(rollouts).iterdir())) == 1
@@ -98,9 +100,6 @@ def test_chat_collection_and_live_paired_comparison(tmp_path, monkeypatch):
     try:
         assert first_result.wait(10)
         assert client.post("/api/simulator/collect", json={"scenes": 1}).status_code == 409
-        reset = client.post("/api/simulator/session/reset")
-        assert reset.status_code == 200
-        assert reset.json() == {"yam_active": True, "recorder_active": False}
         assert client.get("/api/simulator/workflow").json()["state"] == "running"
         partial = client.get(url).json()["report"]
         assert (partial["baseline_attempted"], partial["candidate_attempted"]) == (1, 0)
@@ -138,13 +137,119 @@ def test_bundled_data_is_available_without_dream_access(tmp_path):
     assert all(row["decision"] == "unreviewed" for row in rows)
 
 
-def test_simulator_session_forgets_only_terminal_recorder_state(tmp_path):
-    recorder = SimCorrectionService(tmp_path / "demos", DemoStore(tmp_path))
-    recording = {"state": "recording", "task_id": "task", "result": None, "error": None}
-    recorder._state = recording
-    assert recorder.reset_session() is True
-    assert recorder.status() == recording
+@pytest.mark.parametrize("reset_route", ["/api/simulator/session/reset", "/api/simulator/workflow/quit"])
+def test_session_reset_stops_live_rollout_and_retains_completed_pairs(tmp_path, monkeypatch, reset_route):
+    ready = SimpleNamespace(status=lambda: SimulatorStatus(state="ready", message="Offline fixture"))
+    preflight = PreflightService(model_loader=lambda: [
+        SimpleNamespace(id=id_, owner="test", embodiment="yam", servable=True, cameras=None)
+        for id_ in (BASE, VERIFIED_CANDIDATE)
+    ])
+    client = TestClient(create_app(
+        preflight, EpisodeStore(tmp_path), simulator_setup=ready, dream_gateway=SimpleNamespace(finetunes=list)
+    ))
+    third_recording = Event()
+    reset_requested = Event()
+    allow_worker_exit = Event()
+    scores = {}
 
-    recorder._state = {**recording, "state": "complete", "result": {"demo_id": "demo"}}
-    assert recorder.reset_session() is False
-    assert recorder.status() == {"state": "idle", "result": None, "error": None}
+    def run(args, *, cancel, **kwargs):
+        assert cancel is not None
+        if Path(args[1]).name == "score_workflow_rollout.py":
+            return SimpleNamespace(returncode=0, stdout="WORKFLOW_RESULT=" + json.dumps(scores[args[2]]))
+        assert Path(args[1]).name == "record_dream_model_rollout.py"
+        if len(scores) == 2:
+            third_recording.set()
+            assert cancel.wait(10)
+            reset_requested.set()
+            assert allow_worker_exit.wait(10)
+            raise SimulatorProcessCancelled()
+        checkpoint = args[args.index("--model") + 1]
+        score = {
+            "started_at": dt.datetime.now(dt.UTC).isoformat(),
+            "seed": int(args[args.index("--seed") + 1]),
+            "checkpoint": checkpoint, "success": checkpoint == VERIFIED_CANDIDATE,
+            "held_lift_m": 0.11 if checkpoint == VERIFIED_CANDIDATE else 0,
+            "peak_lift_m": 0.12 if checkpoint == VERIFIED_CANDIDATE else 0,
+            "duration_s": 32, "model_action_rows": MIN_ACTION_ROWS, "height_source": "recorded",
+            "replay_max_state_error": 0.001, "first_close_after_warmup_s": 2,
+        }
+        scores[args[args.index("--output") + 1]] = score
+        return SimpleNamespace(returncode=0, stdout="")
+
+    monkeypatch.setattr(yam_workflow, "run_simulator_process", run)
+    started = client.post("/api/simulator/compare-existing", json={"checkpoint": VERIFIED_CANDIDATE})
+    assert started.status_code == 202
+    task_id = started.json()["task_id"]
+    assert third_recording.wait(10)
+    url = f"/api/simulator/comparisons/{task_id}"
+    before = client.get(url).json()
+    assert before["report"]["usable_pairs"] == 1
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        reset = executor.submit(client.post, reset_route)
+        try:
+            assert reset_requested.wait(10)
+            assert not reset.done()
+            assert client.post("/api/simulator/collect", json={"source": "bundled"}).status_code == 409
+        finally:
+            allow_worker_exit.set()
+        response = reset.result(timeout=10)
+        assert response.status_code == 200
+        if reset_route.endswith("/quit"):
+            assert response.json() is None
+
+    assert client.get("/api/simulator/workflow").json() is None
+    assert client.get(url).json() == before
+    assert client.post("/api/simulator/collect", json={"source": "bundled"}).status_code == 202
+    assert wait_for_job(client)["demos"] == 24
+
+
+def test_existing_checkpoint_choices_join_accessible_models_and_verified_training(tmp_path, monkeypatch):
+    unsupported = "dream-1-ft:beef1234-apples"
+    eligible = "dream-1-ft:abcd1234-coach-apple"
+    ready = SimpleNamespace(status=lambda: SimulatorStatus(state="ready", message="Offline fixture"))
+    preflight = PreflightService(model_loader=lambda: [
+        SimpleNamespace(id=id_, owner="test", embodiment="yam", servable=True, cameras=None)
+        for id_ in (BASE, VERIFIED_CANDIDATE, eligible, unsupported)
+    ])
+    remote = [
+        {"id": "remote-eligible", "status": "succeeded", "fine_tuned_model": eligible,
+         "dataset": "fixture/coach-apples", "base_model": BASE, "hyperparameters": {"use_eef": False}},
+        {"id": "remote-unsupported", "status": "succeeded", "fine_tuned_model": unsupported,
+         "dataset": "fixture/apples-other", "base_model": BASE},
+    ]
+    client = TestClient(create_app(
+        preflight, EpisodeStore(tmp_path), simulator_setup=ready,
+        dream_gateway=SimpleNamespace(finetunes=lambda: remote),
+    ))
+    task_response = client.post("/api/tasks", json={
+        "name": "Apple pickup · YAM simulator", "prompt": PROMPT,
+        "baseline_checkpoint": BASE, "success_rule": SUCCESS_RULE,
+    })
+    assert task_response.status_code == 201
+    task_id = task_response.json()["id"]
+    folder = tmp_path / "yam-workflow" / task_id
+    folder.mkdir()
+    (folder / "scenes.json").write_text('{"training":[],"heldout":[]}', encoding="utf-8")
+
+    faas = FaaSStore(tmp_path)
+    dataset = faas.create_dataset(task_id, "fixture/yam", [])
+    faas.update_dataset(dataset.id, status="validated", remote_name="fixture/coach-apples")
+    job = faas.create_finetune(dataset.id, FineTuneRequest(steps=700))
+    faas.update_finetune(job.id, remote_job_id="remote-eligible", status="succeeded", checkpoint=eligible)
+
+    assert client.get("/api/simulator/existing-checkpoints").json() == [
+        {"checkpoint": VERIFIED_CANDIDATE, "dataset": "dima24kor/apple-grasp-varied-3374a5388381", "steps": 500},
+        {"checkpoint": eligible, "dataset": "fixture/coach-apples", "steps": 700},
+    ]
+    assert client.post("/api/simulator/compare-existing", json={"checkpoint": unsupported}).status_code == 409
+    compared = []
+
+    def record_comparison(self, job, folder, seeds, checkpoint):
+        compared.append(checkpoint)
+        self._update(state="completed")
+
+    monkeypatch.setattr(YamWorkflow, "_compare", record_comparison)
+    assert client.post("/api/simulator/compare-existing", json={"checkpoint": eligible}).status_code == 202
+    assert wait_for_job(client)["state"] == "completed"
+    assert compared == [eligible]
