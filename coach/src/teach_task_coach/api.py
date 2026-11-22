@@ -46,6 +46,7 @@ from teach_task_coach.faas import (
     DatasetVersion,
     DreamGateway,
     FaaSStore,
+    LiveEvaluation,
     FineTuneRecord,
     FineTuneRequest,
 )
@@ -939,6 +940,20 @@ def create_app(
                 "difference_interval": None, "interval_method": None,
                 "problems": (*current.problems, "Evidence changed since the saved audit; run it again."),
             })
+    @app.get("/api/evaluations/latest", response_model=LiveEvaluation | None)
+    def latest_evaluation() -> LiveEvaluation | None:
+        evaluation = evaluations.latest()
+        if evaluation is None:
+            return None
+        task = tasks.get_task(evaluation.task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Evaluation task not found.")
+        return LiveEvaluation(
+            task_name=task.name,
+            evaluation=evaluation,
+            report=evaluations.report(evaluation, tasks, episodes),
+        )
+
         return stored
 
     @app.get("/api/scene-adapter/status")

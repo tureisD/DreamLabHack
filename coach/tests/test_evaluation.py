@@ -128,6 +128,8 @@ def populate_report(tasks, episodes, evaluation, base_results, candidate_results
     started = (dt.datetime.fromisoformat(evaluation.created_at) + dt.timedelta(seconds=1)).isoformat()
     for trial in tasks.list_evaluation_trials(evaluation.id):
         success = (candidate_results if trial.checkpoint == "candidate" else base_results)[trial.scene_index]
+        if success is None:
+            continue
         folder = tasks.db.data_dir / "rollouts" / trial.id
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "rollout.json").write_text(json.dumps({
@@ -180,6 +182,36 @@ def test_paired_snapshot_preserves_incomplete_and_requires_review_provenance(tmp
     assert report["decision"] == "improved"
     assert report["usable_pairs"] == 30
     assert report["difference_interval"][0] > 0.15
+
+
+def test_latest_evaluation_reflects_new_reviewed_trials_across_tasks(tmp_path):
+    client, tasks, episodes, evaluations, task, job, _station = setup_comparison(tmp_path)
+    url = "/api/evaluations/latest"
+    assert client.get(url).json() is None
+
+    evaluations.create(task.id, job.id, "candidate", 0.15, tasks, planned_pairs=1)
+    other = tasks.create_task(TaskInput(
+        name="Other block task", prompt=task.prompt, baseline_checkpoint="base", success_rule="in bin"
+    ))
+    latest = evaluations.create(other.id, "other-job", "candidate", 0.15, tasks, planned_pairs=1)
+    pending = client.get(url).json()
+    assert pending["task_name"] == other.name
+    assert pending["evaluation"]["id"] == latest.id
+    assert pending["report"]["baseline_reviewed"] == pending["report"]["candidate_reviewed"] == 0
+
+    populate_report(tasks, episodes, latest, [None], [True], reviewed=True)
+    partial = client.get(url).json()["report"]
+    assert partial["baseline_reviewed"] == 0
+    assert partial["candidate_reviewed"] == partial["candidate_successes"] == 1
+    assert partial["usable_pairs"] == 0
+
+    populate_report(tasks, episodes, latest, [False], [None], reviewed=True)
+    updated = client.get(url).json()["report"]
+    assert updated["baseline_reviewed"] == updated["candidate_reviewed"] == 1
+    assert updated["usable_pairs"] == 1
+    assert updated["baseline_successes"] == 0
+    assert updated["candidate_successes"] == 1
+    assert updated["decision"] == "not_evaluable"
 
 
 def test_variable_scene_budget_and_paired_planner(tmp_path):

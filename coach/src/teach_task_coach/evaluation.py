@@ -40,6 +40,8 @@ class EvaluationReport(BaseModel):
     usable_pairs: int
     baseline_successes: int
     candidate_successes: int
+    baseline_reviewed: int = 0
+    candidate_reviewed: int = 0
     baseline_only: int
     candidate_only: int
     paired_difference: float | None
@@ -59,6 +61,12 @@ class EvaluationReport(BaseModel):
     candidate_mean_duration_s: float | None = None
     baseline_mean_first_response_s: float | None = None
     candidate_mean_first_response_s: float | None = None
+
+
+class LiveEvaluation(BaseModel):
+    task_name: str
+    evaluation: Evaluation
+    report: EvaluationReport
 
 
 def _now() -> str:
@@ -183,6 +191,14 @@ class EvaluationStore:
             ).fetchall()
         return [Evaluation.model_validate(dict(row)) for row in rows]
 
+    def latest(self) -> Evaluation | None:
+        with self.db.connect() as connection:
+            self._schema(connection)
+            row = connection.execute(
+                "SELECT * FROM evaluations ORDER BY created_at DESC, rowid DESC LIMIT 1"
+            ).fetchone()
+        return None if row is None else Evaluation.model_validate(dict(row))
+
     def audit(
         self, evaluation: Evaluation, tasks: TaskStore, episodes: EpisodeStore,
         *, heldout_attested: bool, resets_attested: bool,
@@ -254,6 +270,14 @@ class EvaluationStore:
             usable_pairs=audit.usable_pairs,
             baseline_successes=audit.baseline_successes,
             candidate_successes=audit.candidate_successes,
+            baseline_reviewed=sum(
+                pair.baseline is not None and pair.baseline.outcome in {"success", "failure"}
+                for pair in snapshot.pairs
+            ),
+            candidate_reviewed=sum(
+                pair.candidate is not None and pair.candidate.outcome in {"success", "failure"}
+                for pair in snapshot.pairs
+            ),
             baseline_only=audit.baseline_only,
             candidate_only=audit.candidate_only,
             paired_difference=audit.observed_difference if interval else None,
