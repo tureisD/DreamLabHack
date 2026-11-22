@@ -444,7 +444,10 @@ class YamWorkflow:
             if isinstance(parameters, dict) and parameters.get("use_eef") is True:
                 continue
             task = self.tasks.get_task(dataset.task_id)
-            if task is None or task.prompt != PROMPT or task.success_rule != SUCCESS_RULE or task.baseline_checkpoint != BASE:
+            if (
+                task is None or task.offline_mode or task.prompt != PROMPT
+                or task.success_rule != SUCCESS_RULE or task.baseline_checkpoint != BASE
+            ):
                 continue
             if not (self.root / task.id / "scenes.json").is_file():
                 continue
@@ -468,7 +471,7 @@ class YamWorkflow:
             task = self.tasks.get_task(value.task_id)
             job = self.faas.get_finetune(value.job_id)
             dataset = self.faas.get_dataset(job.dataset_version_id) if job else None
-            if not task or not split.is_file() or not job or not dataset or dataset.task_id != task.id:
+            if not task or task.offline_mode or not split.is_file() or not job or not dataset or dataset.task_id != task.id:
                 raise ValueError("Choose a completed fine-tune from this guided YAM task.")
             if job.status != "succeeded" or not job.checkpoint or job.checkpoint == BASE:
                 raise ValueError("Wait until Dream publishes the fine-tuned checkpoint.")

@@ -184,6 +184,29 @@ def test_paired_snapshot_preserves_incomplete_and_requires_review_provenance(tmp
     assert report["difference_interval"][0] > 0.15
 
 
+def test_physical_audit_excludes_simulator_and_model_warmup_attempts(tmp_path):
+    client, tasks, episodes, evaluations, task, job, _station = setup_comparison(tmp_path)
+    evaluation = evaluations.create(task.id, job.id, "candidate", 0.15, tasks, planned_pairs=3)
+    populate_report(tasks, episodes, evaluation, [False] * 3, [True] * 3, reviewed=True)
+    changes = [{"collection_mode": "simulation"}, {"stop_reason": "ModelReady"}]
+    for trial in tasks.list_evaluation_trials(evaluation.id):
+        if trial.checkpoint == "base" and trial.scene_index in (0, 1):
+            episode = episodes.get(trial.episode_id)
+            assert episode is not None
+            episodes.upsert(episode.model_copy(update=changes[trial.scene_index]))
+
+    snapshot = client.post(
+        f"/api/evaluations/{evaluation.id}/paired-snapshot",
+        json={"heldout_attested": True, "resets_attested": True},
+    ).json()
+    assert [pair["baseline"]["outcome"] for pair in snapshot["pairs"]] == ["invalid", "invalid", "failure"]
+    assert [pair["candidate"]["outcome"] for pair in snapshot["pairs"]] == ["success"] * 3
+    report = client.get(f"/api/evaluations/{evaluation.id}/report").json()
+    assert report["decision"] == "not_evaluable"
+    assert report["usable_pairs"] == 1
+    assert report["missing_pairs"] == 2
+
+
 def test_latest_evaluation_reflects_new_reviewed_trials_across_tasks(tmp_path):
     client, tasks, episodes, evaluations, task, job, _station = setup_comparison(tmp_path)
     url = "/api/evaluations/latest"
