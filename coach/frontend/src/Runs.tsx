@@ -8,6 +8,7 @@ type EpisodeItem = {
 };
 type Episode = EpisodeItem & {
   simulation?: { source: string; seed: number; start_pose?: string; model_action_rows?: number } | null;
+  pickup_evidence?: { detail: string; peak_lift_m: number | null; longest_hold_s: number | null } | null;
   body: string | null; robot_name: string | null; frames: number | null; fps: number | null;
   duration_s: number | null; stop_reason: string | null; error: string | null;
   stalls: number | null; clamps: number | null; videos: Record<string, string>;
@@ -138,6 +139,11 @@ export default function Runs() {
               <dl className="details">
                 {selected.simulation && <div><dt>Simulation</dt><dd>{selected.simulation.source} � seed {selected.simulation.seed}{selected.simulation.start_pose && ` � start: ${selected.simulation.start_pose}`}{selected.simulation.model_action_rows !== undefined && ` � ${selected.simulation.model_action_rows} model action rows`}</dd></div>}
                 <div><dt>Duration</dt><dd>{selected.duration_s?.toFixed(1) ?? '—'} s</dd></div>
+                {selected.pickup_evidence && <div><dt>Simulator pickup evidence</dt><dd>
+                  {selected.pickup_evidence.detail}
+                  {selected.pickup_evidence.peak_lift_m != null && selected.pickup_evidence.longest_hold_s != null &&
+                    ` Peak lift ${(selected.pickup_evidence.peak_lift_m * 100).toFixed(1)} cm. Longest hold ${selected.pickup_evidence.longest_hold_s.toFixed(2)} s.`}
+                </dd></div>}
                 <div><dt>Frames</dt><dd>{selected.frames ?? '—'} at {selected.fps ?? '—'} fps</dd></div>
                 <div><dt>Stop reason</dt><dd>{selected.stop_reason ?? '—'}</dd></div>
                 <div><dt>Stalls / clamps</dt><dd>{selected.stalls ?? '—'} / {selected.clamps ?? '—'}</dd></div>

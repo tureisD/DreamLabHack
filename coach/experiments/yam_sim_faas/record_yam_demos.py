@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import secrets
 from contextlib import contextmanager
@@ -22,6 +23,8 @@ SIM = Path(__file__).resolve().parents[3] / "dream_library/examples/yam_mujoco"
 sys.path.insert(0, str(SIM))
 import mock_pickups
 from yam_env import YamEnv
+
+from teach_task_coach.pickup_evidence import COLUMNS, TRACE
 
 ROOT = Path.cwd() / "yam_sim_dataset_20hz"
 TASK = "pick up the apple"
@@ -58,6 +61,13 @@ class RecordingYamEnv(YamEnv):
         self.states: list[np.ndarray] = []
         self.actions: list[np.ndarray] = []
         self.video_poses = [] if defer_video else None
+        self.apple_trace = []
+        self.apple_body = self.model.body("apple").id
+        self.tip_bodies = {
+            self.model.body(f"{side}_tip_{tip}").id: (hand, 1 << index)
+            for hand, side in enumerate(("left", "right"))
+            for index, tip in enumerate(("left", "right"))
+        }
         self.outputs = {}
         for role in ROLES.values():
             video = self.folder / f"videos/chunk-000/observation.images.{role}/episode_000000.mp4"
@@ -70,6 +80,25 @@ class RecordingYamEnv(YamEnv):
             self.outputs[role] = (container, stream)
 
     def step(self, left, right):
+        # Sample before step, like the review video. Deferred rendering rewinds qpos in close().
+        if self.task.strip().casefold() == TASK:
+            fingers = [0, 0]
+            other = False
+            for c in self.data.contact:
+                if c.dist > 0 or c.efc_address < 0 or min(c.geom1, c.geom2) < 0:
+                    continue
+                a, b = self.model.geom_bodyid[[c.geom1, c.geom2]]
+                if self.apple_body not in (a, b):
+                    continue
+                tip = self.tip_bodies.get(b if a == self.apple_body else a)
+                if tip is None:
+                    other = True
+                else:
+                    hand, bit = tip
+                    fingers[hand] |= bit
+            self.apple_trace.append(
+                (len(self.states), self.data.body("apple").xpos[2].item(), *fingers, int(other))
+            )
         state = self.state()
         self.states.append(np.r_[state["right"], state["left"]].astype(np.float32))
         self.actions.append(np.r_[right, left].astype(np.float32))
@@ -102,6 +131,11 @@ class RecordingYamEnv(YamEnv):
                 container.mux(packet)
             container.close()
         self._write_metadata()
+        if self.apple_trace:
+            with (self.folder / TRACE).open("w", newline="", encoding="ascii") as stream:
+                writer = csv.writer(stream, lineterminator="\n")
+                writer.writerow(COLUMNS)
+                writer.writerows(self.apple_trace)
         super().close()
 
     def _write_metadata(self):

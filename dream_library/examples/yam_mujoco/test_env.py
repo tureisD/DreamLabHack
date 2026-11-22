@@ -294,7 +294,8 @@ class DreamContractTests(unittest.TestCase):
         kept = []
 
         def fake_capture(env, windows, keep=True):
-            kept.append(keep)
+            if keep:
+                kept.append(env.data.time)
             for window in windows.values():
                 if keep:
                     window.append("jpeg")
@@ -304,9 +305,8 @@ class DreamContractTests(unittest.TestCase):
             patch("dream_control.capture", side_effect=fake_capture),
         ):
             main(["--dry-run", "--headless"], shared_env=env)
-        indices = [i for i, k in enumerate(kept) if k]
-        self.assertEqual(len(indices), FRAMES)
-        self.assertEqual({b - a for a, b in zip(indices, indices[1:])}, {FRAME_EVERY_STEPS}, "one frame every 0.2 s")
+        self.assertEqual(len(kept), FRAMES)
+        np.testing.assert_allclose(np.diff(kept), FRAME_EVERY_STEPS * 0.05, rtol=0, atol=1e-9)
 
     def test_reference_camera_calibration(self):
         from yam_env import CALIBRATION, TOP_CAMERA_LOWER_M, WORLD_OFFSET, WORLD_ROTATION
