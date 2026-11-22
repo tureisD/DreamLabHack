@@ -1,6 +1,8 @@
 import json
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import numpy as np
 import pyarrow as pa
@@ -109,9 +111,16 @@ def test_worker_validates_uploads_and_publishes_checkpoint(tmp_path):
     assert store.get_finetune(job_id).status == "pending_training"
     worker.tick()
     assert store.get_finetune(job_id).status == "training"
+    assert store.get_finetune(job_id).remote_status == "queued"
+    dream.finetune_status = lambda _: {"status": "running", "fine_tuned_model": None}
+    worker.tick()
+    assert store.get_finetune(job_id).status == "training"
+    assert store.get_finetune(job_id).remote_status == "running"
+    dream.finetune_status = lambda _: {"status": "succeeded", "fine_tuned_model": "dream-1-ft:pilot-test"}
     worker.tick()
     assert store.get_finetune(job_id).checkpoint == "dream-1-ft:pilot-test"
     assert store.get_finetune(job_id).status == "succeeded"
+    assert store.get_finetune(job_id).remote_status == "succeeded"
     assert dream.upload_calls == 1
     assert dream.submit_calls == 1
 
@@ -134,6 +143,60 @@ def test_worker_reconciles_existing_remote_dataset_and_job(tmp_path):
     assert dream.submit_calls == 0
     assert store.get_finetune(job.id).remote_job_id == "ftj_existing"
 
+
+def test_failed_remote_processing_can_retry_without_duplicate_training(tmp_path):
+    tasks, task, demos, store = setup_dataset(tmp_path)
+    dream = FakeDream()
+    client = TestClient(create_app(
+        PreflightService(FakeStation(), list), EpisodeStore(tmp_path / "data"),
+        RolloutScanner(tmp_path), tasks, demo_store=demos, faas_store=store,
+        dream_gateway=dream,
+    ))
+    version = client.post(
+        f"/api/tasks/{task.id}/datasets", json={"embodiment_name": "pilot/robot"}
+    ).json()
+    worker = FaaSWorker(store, tasks, demos, dream)
+    worker.tick()
+    job = client.post(f"/api/datasets/{version['id']}/finetunes", json={}).json()
+    worker.tick()
+    assert store.get_finetune(job["id"]).status == "processing"
+
+    dream.dataset_status = lambda _: SimpleNamespace(status="failed", error="processor unavailable")
+    worker.tick()
+    assert store.get_finetune(job["id"]).status == "failed"
+    assert store.get_finetune(job["id"]).failure_phase == "dataset_processing"
+    dream.retry_dataset = Mock(return_value=SimpleNamespace(status="ready_to_process", error=None))
+    response = client.post(f"/api/finetunes/{job['id']}/retry-processing")
+    assert response.status_code == 200
+    assert response.json()["status"] == "processing"
+    assert response.json()["failure_phase"] is None
+    dream.retry_dataset.assert_called_once_with("ds_1")
+    assert client.post(f"/api/finetunes/{job['id']}/retry-processing").status_code == 409
+
+    dream.dataset_status = lambda _: SimpleNamespace(status="processed", error=None)
+    worker.tick()
+    assert store.get_finetune(job["id"]).status == "pending_training"
+    worker.tick()
+    assert store.get_finetune(job["id"]).status == "training"
+    assert dream.submit_calls == 1
+    assert client.post(f"/api/finetunes/{job['id']}/retry-processing").status_code == 409
+
+
+def test_existing_finetune_table_gains_recovery_columns(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    with sqlite3.connect(data_dir / "coach.sqlite3") as connection:
+        connection.execute("""CREATE TABLE fine_tune_jobs (
+            id TEXT PRIMARY KEY, dataset_version_id TEXT NOT NULL, suffix TEXT NOT NULL UNIQUE,
+            steps INTEGER NOT NULL, lr_schedule TEXT NOT NULL, base_share REAL NOT NULL,
+            use_eef INTEGER NOT NULL, remote_job_id TEXT, checkpoint TEXT,
+            status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, resume_from TEXT
+        )""")
+    store = FaaSStore(data_dir)
+    assert store.list_finetunes() == []
+    with sqlite3.connect(data_dir / "coach.sqlite3") as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(fine_tune_jobs)")}
+    assert {"remote_status", "failure_phase"} <= columns
 
 def test_copied_dataset_passes_real_dream_client_validation(tmp_path):
     """The worker's directory layout is accepted by the SDK used for the real upload."""

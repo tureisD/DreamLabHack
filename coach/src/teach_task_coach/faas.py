@@ -65,8 +65,10 @@ class FineTuneRecord(FineTuneRequest):
     dataset_version_id: str
     suffix: str
     remote_job_id: str | None
+    remote_status: str | None = None
     checkpoint: str | None
     status: TrainingStatus
+    failure_phase: str | None = None
     error: str | None
     created_at: str
 
@@ -104,8 +106,10 @@ class FaaSStore:
                 base_share REAL NOT NULL,
                 use_eef INTEGER NOT NULL,
                 remote_job_id TEXT,
+                remote_status TEXT,
                 checkpoint TEXT,
                 status TEXT NOT NULL,
+                failure_phase TEXT,
                 error TEXT,
                 created_at TEXT NOT NULL,
                 resume_from TEXT
@@ -117,6 +121,10 @@ class FaaSStore:
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(fine_tune_jobs)")}
         if "resume_from" not in columns:
             connection.execute("ALTER TABLE fine_tune_jobs ADD COLUMN resume_from TEXT")
+        if "remote_status" not in columns:
+            connection.execute("ALTER TABLE fine_tune_jobs ADD COLUMN remote_status TEXT")
+        if "failure_phase" not in columns:
+            connection.execute("ALTER TABLE fine_tune_jobs ADD COLUMN failure_phase TEXT")
 
     def create_dataset(self, task_id: str, embodiment_name: str, demo_ids: list[str]) -> DatasetVersion:
         identifier = uuid.uuid4().hex
@@ -185,8 +193,10 @@ class FaaSStore:
             dataset_version_id=version_id,
             suffix=f"ttc-{identifier[:20]}",
             remote_job_id=None,
+            remote_status=None,
             checkpoint=None,
             status="pending_upload",
+            failure_phase=None,
             error=None,
             created_at=_now(),
             **settings.model_dump(),
@@ -196,11 +206,12 @@ class FaaSStore:
             connection.execute(
                 """INSERT INTO fine_tune_jobs
                    (id, dataset_version_id, suffix, steps, lr_schedule, base_share, use_eef,
-                    remote_job_id, checkpoint, status, error, created_at, resume_from)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    remote_job_id, remote_status, checkpoint, status, failure_phase, error, created_at, resume_from)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     job.id, job.dataset_version_id, job.suffix, job.steps, job.lr_schedule,
-                    job.base_share, int(job.use_eef), None, None, job.status, None, job.created_at,
+                    job.base_share, int(job.use_eef), None, None, None, job.status, None, None,
+                    job.created_at,
                     job.resume_from,
                 ),
             )
@@ -225,7 +236,7 @@ class FaaSStore:
         return [self._finetune(row) for row in rows]
 
     def update_finetune(self, job_id: str, **changes: Any) -> FineTuneRecord:
-        allowed = {"remote_job_id", "checkpoint", "status", "error"}
+        allowed = {"remote_job_id", "remote_status", "checkpoint", "status", "failure_phase", "error"}
         if not changes.keys() <= allowed:
             raise ValueError("Unsupported fine-tune field update.")
         with self.db.connect() as connection:
@@ -256,7 +267,9 @@ class FaaSStore:
             id=row["id"], dataset_version_id=row["dataset_version_id"], suffix=row["suffix"],
             steps=row["steps"], lr_schedule=row["lr_schedule"], base_share=row["base_share"],
             use_eef=bool(row["use_eef"]), remote_job_id=row["remote_job_id"],
-            checkpoint=row["checkpoint"], status=row["status"], error=row["error"],
+            remote_status=row["remote_status"],
+            checkpoint=row["checkpoint"], status=row["status"],
+            failure_phase=row["failure_phase"], error=row["error"],
             created_at=row["created_at"], resume_from=row["resume_from"],
         )
 
@@ -281,6 +294,9 @@ class DreamGateway:
 
     def dataset_status(self, dataset_id: str) -> Any:
         return self.client.get_dataset_status(dataset_id)
+
+    def retry_dataset(self, dataset_id: str) -> Any:
+        return self.client.retry_dataset(dataset_id)
 
     def finetunes(self) -> list[dict[str, Any]]:
         return fine_tuning.list()
@@ -387,6 +403,10 @@ class FaaSWorker:
     def _advance(self, job: FineTuneRecord) -> None:
         version = self.store.get_dataset(job.dataset_version_id)
         assert version is not None
+        phase = {
+            "pending_upload": "upload", "processing": "dataset_processing",
+            "pending_training": "training_submission", "training": "training",
+        }[job.status]
         try:
             if job.status == "pending_upload":
                 self._upload(job, version)
@@ -402,15 +422,22 @@ class FaaSWorker:
             if getattr(exc, "retryable", False):
                 self.store.update_finetune(job.id, error=f"{type(exc).__name__}: service unavailable; retrying.")
             else:
-                self.store.update_finetune(job.id, status="failed", error=str(exc))
+                self.store.update_finetune(
+                    job.id, status="failed", failure_phase=phase, error=str(exc)
+                )
         except (DreamConfigError, DreamDatasetError, OSError, ValueError) as exc:
-            self.store.update_finetune(job.id, status="failed", error=str(exc))
+            self.store.update_finetune(
+                job.id, status="failed", failure_phase=phase, error=str(exc)
+            )
 
     def _upload(self, job: FineTuneRecord, version: DatasetVersion) -> None:
         manifest_path = Path(version.local_path) / ".coach-manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if manifest["files"] != _files_manifest(Path(version.local_path)):
-            self.store.update_finetune(job.id, status="failed", error="Dataset files changed after validation.")
+            self.store.update_finetune(
+                job.id, status="failed", failure_phase="upload",
+                error="Dataset files changed after validation.",
+            )
             return
         remote = next(
             (
@@ -423,7 +450,7 @@ class FaaSWorker:
         if remote is None or remote.status in ("failed", "uploading"):
             remote = self.gateway.upload(version.local_path, version.remote_slug, version.embodiment_name)
         self.store.update_dataset(version.id, remote_id=remote.id, remote_name=remote.name)
-        self.store.update_finetune(job.id, status="processing", error=None)
+        self.store.update_finetune(job.id, status="processing", failure_phase=None, error=None)
 
     def _processing(self, job: FineTuneRecord, version: DatasetVersion) -> None:
         if version.remote_id is None:
@@ -431,9 +458,14 @@ class FaaSWorker:
             return
         remote = self.gateway.dataset_status(version.remote_id)
         if remote.status == "processed":
-            self.store.update_finetune(job.id, status="pending_training", error=None)
+            self.store.update_finetune(
+                job.id, status="pending_training", failure_phase=None, error=None
+            )
         elif remote.status == "failed":
-            self.store.update_finetune(job.id, status="failed", error=remote.error or "Dataset processing failed.")
+            self.store.update_finetune(
+                job.id, status="failed", failure_phase="dataset_processing",
+                error=remote.error or "Dataset processing failed.",
+            )
 
     def _start_training(self, job: FineTuneRecord, version: DatasetVersion) -> None:
         existing = next((item for item in self.gateway.finetunes() if item.get("suffix") == job.suffix), None)
@@ -448,7 +480,10 @@ class FaaSWorker:
                     resume_from=job.resume_from,
                 ),
             )
-        self.store.update_finetune(job.id, remote_job_id=existing["id"], status="training", error=None)
+        self.store.update_finetune(
+            job.id, remote_job_id=existing["id"], remote_status=existing.get("status"),
+            status="training", failure_phase=None, error=None,
+        )
 
     def _training(self, job: FineTuneRecord) -> None:
         if job.remote_job_id is None:
@@ -457,10 +492,16 @@ class FaaSWorker:
         remote = self.gateway.finetune_status(job.remote_job_id)
         if remote.get("fine_tuned_model"):
             self.store.update_finetune(
-                job.id, status="succeeded", checkpoint=remote["fine_tuned_model"], error=None
+                job.id, status="succeeded", remote_status=remote.get("status"), failure_phase=None,
+                checkpoint=remote["fine_tuned_model"], error=None
             )
         elif remote.get("status") in ("failed", "cancelled"):
-            self.store.update_finetune(job.id, status="failed", error=remote.get("error") or remote["status"])
+            self.store.update_finetune(
+                job.id, status="failed", remote_status=remote["status"], failure_phase="training",
+                error=remote.get("error") or remote["status"],
+            )
+        elif remote.get("status"):
+            self.store.update_finetune(job.id, remote_status=remote["status"])
 
 
 def run_worker(store: FaaSStore, tasks: TaskStore, demos: DemoStore, interval_s: float = 30) -> None:

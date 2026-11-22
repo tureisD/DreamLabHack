@@ -546,6 +546,31 @@ def create_app(
             raise HTTPException(status_code=404, detail="Fine-tune job not found.")
         return result
 
+    @app.post("/api/finetunes/{job_id}/retry-processing", response_model=FineTuneRecord)
+    def retry_dataset_processing(job_id: str) -> FineTuneRecord:
+        job = faas.get_finetune(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Fine-tune job not found.")
+        version = faas.get_dataset(job.dataset_version_id)
+        if (
+            job.status != "failed" or job.failure_phase != "dataset_processing"
+            or job.remote_job_id is not None
+            or version is None or version.remote_id is None
+        ):
+            raise HTTPException(status_code=409, detail="Only a failed dataset-processing job can be retried.")
+        try:
+            remote = dream.dataset_status(version.remote_id)
+            if remote.status == "failed":
+                remote = dream.retry_dataset(version.remote_id)
+            if remote.status not in ("ready_to_process", "processing", "processed"):
+                raise HTTPException(status_code=409, detail="Remote dataset is not ready for a processing retry.")
+        except DreamError as exc:
+            raise HTTPException(status_code=503, detail="Could not retry Dream dataset processing.") from exc
+        return faas.update_finetune(
+            job.id, status="pending_training" if remote.status == "processed" else "processing",
+            failure_phase=None, error=None,
+        )
+
     @app.post("/api/tasks/{task_id}/evaluations", response_model=Evaluation, status_code=201)
     def create_evaluation(task_id: str, value: EvaluationRequest) -> Evaluation:
         if tasks.get_task(task_id) is None:

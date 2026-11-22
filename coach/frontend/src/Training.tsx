@@ -11,6 +11,8 @@ type Dataset = {
 type Job = {
   id: string; dataset_version_id: string; steps: number; lr_schedule: string; base_share: number;
   use_eef: boolean; status: string; remote_job_id: string | null;
+  remote_status: string | null;
+  failure_phase: string | null;
   checkpoint: string | null; error: string | null;
   resume_from: string | null;
 };
@@ -103,6 +105,16 @@ export default function Training() {
     finally { setBusy(false); }
   }
 
+  async function retryProcessing(job: Job) {
+    setBusy(true); setError(''); setMessage('');
+    try {
+      await json<Job>(`/api/finetunes/${job.id}/retry-processing`, 'POST');
+      setJobs(await json<Job[]>(`/api/tasks/${taskId}/finetunes`));
+      setMessage('Dream dataset processing is retrying. The worker will continue when it is processed.');
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not retry processing.'); }
+    finally { setBusy(false); }
+  }
+
   return <main className="page">
     <header className="header"><div><p className="eyebrow">Dream Labs FaaS</p><h1>Dataset and training</h1><p className="subtitle">Freeze kept demos, validate locally, then explicitly submit a paid fine-tune.</p></div></header>
     {error && <div className="alert" role="alert">{error}</div>}
@@ -128,7 +140,7 @@ export default function Training() {
     </section>
     <section className="card training-list"><h2>Fine-tune jobs</h2>
       {jobs.length === 0 && <p>No jobs submitted.</p>}
-      {jobs.map((job) => <div className="training-row" key={job.id}><div><strong>Job {job.id.slice(0, 8)}</strong><small>{job.steps} steps · {job.lr_schedule} · base share {job.base_share}{job.resume_from ? ` · resumed from ${job.resume_from}` : ''}</small><small>Status: {job.status}{job.remote_job_id ? ` · ${job.remote_job_id}` : ''}</small>{job.checkpoint && <small className="model-ready">Checkpoint: {job.checkpoint}</small>}{job.error && <small className="trial-error">{job.error}</small>}</div>{job.status === 'succeeded' && job.lr_schedule === 'constant' && job.checkpoint && !jobs.some((other) => other.resume_from === job.checkpoint) && <button className="secondary" disabled={busy} onClick={() => void continueJob(job)}>Continue 500 steps</button>}</div>)}
+      {jobs.map((job) => <div className="training-row" key={job.id}><div><strong>Job {job.id.slice(0, 8)}</strong><small>{job.steps} steps · {job.lr_schedule} · base share {job.base_share}{job.resume_from ? ` · resumed from ${job.resume_from}` : ''}</small><small>Status: {job.status === 'training' ? (job.remote_status ?? 'submitted to Dream') : job.status}{job.remote_job_id ? ` · ${job.remote_job_id}` : ''}</small>{job.checkpoint && <small className="model-ready">Checkpoint: {job.checkpoint}</small>}{job.error && <small className="trial-error">{job.error}</small>}</div>{job.status === 'failed' && job.failure_phase === 'dataset_processing' && !job.remote_job_id && datasets.some((version) => version.id === job.dataset_version_id && version.remote_id) && <button className="secondary" disabled={busy} onClick={() => void retryProcessing(job)}>Retry dataset processing</button>}{job.status === 'succeeded' && job.lr_schedule === 'constant' && job.checkpoint && !jobs.some((other) => other.resume_from === job.checkpoint) && <button className="secondary" disabled={busy} onClick={() => void continueJob(job)}>Continue 500 steps</button>}</div>)}
     </section>
   </main>;
 }
