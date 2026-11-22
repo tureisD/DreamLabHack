@@ -13,4 +13,6 @@ The `frozen_camera` warnings are on the right wrist view. In seed 41, sampled fr
 
 The first lint run also reported `abrupt_action` on all 24 episodes because the binary gripper close looked large beside small joint steps. The linter now excludes action dimensions named `grip` from the joint jerk check. Rerunning the same archive leaves only the camera review findings.
 
-No remote dataset or job status was queried. This machine has no dima24kor Dream credential configured, and the repo has no first-account job or checkpoint ID. No dataset was uploaded, paid fine-tune submitted, model queried, or robot run started during this audit. The remaining live pipeline requires read-only access to that account's job and checkpoint, then held-out evaluations under the protocol in `README.md`.
+The owner's later GitHub checkpoint record reports job `ftj_0b80885351caf8f7` succeeded after 500 steps and published `dream-1-ft:7820aef9-apple-varied24-500`; see `varied-checkpoint.json`. On held-out seed 901, the local simulator dry run accepted that checkpoint ID and recorded nine observation frames from each of three cameras. It made no Dream API call and executed zero model actions.
+
+No remote status was independently queried. This machine has no dima24kor Dream credential configured. No dataset was uploaded, paid fine-tune submitted, or model queried during this audit. The remaining live pipeline requires API access to that checkpoint, then held-out model rollouts under the protocol in `README.md`.
