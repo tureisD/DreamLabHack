@@ -1,0 +1,482 @@
+{
+  "sha256": "3374a5388381b2e67d810a6692228370f8ca27124df1ee1342c8a572df4f08af",
+  "embodiment": {
+    "state": {
+      "right_arm": [
+        0,
+        6
+      ],
+      "right_gripper": [
+        6,
+        7
+      ],
+      "left_arm": [
+        7,
+        13
+      ],
+      "left_gripper": [
+        13,
+        14
+      ]
+    },
+    "action": {
+      "right_arm": [
+        0,
+        6
+      ],
+      "right_gripper": [
+        6,
+        7
+      ],
+      "left_arm": [
+        7,
+        13
+      ],
+      "left_gripper": [
+        13,
+        14
+      ]
+    },
+    "video": {
+      "overhead": "observation.images.overhead",
+      "wrist_l": "observation.images.wrist_l",
+      "wrist_r": "observation.images.wrist_r"
+    }
+  },
+  "task": "pick up the apple",
+  "start_pose": "wrist-visible",
+  "sessions": [
+    {
+      "seed": 41,
+      "source": "yam-e1ae5b6b253149b8aa43d2afbef175a6",
+      "apple_xy_m": [
+        0.1727075551481002,
+        0.11839660453177997
+      ],
+      "approach": null,
+      "first_close_s": 7.55,
+      "closing_gap_mm": 5.2785816981163975,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14407410102399698,
+      "replay_max_state_error": 1.0736301314651087e-07,
+      "frames": 163
+    },
+    {
+      "seed": 42,
+      "source": "yam-f2012dc42be942ab907ff5aa4822addf",
+      "apple_xy_m": [
+        0.16369780242779816,
+        0.1019439219876026
+      ],
+      "approach": null,
+      "first_close_s": 7.55,
+      "closing_gap_mm": 5.304114765316157,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14416860639806361,
+      "replay_max_state_error": 1.0777049763710522e-07,
+      "frames": 163
+    },
+    {
+      "seed": 43,
+      "source": "yam-3aa6ae08ff1941d19029fe6d66894ba7",
+      "apple_xy_m": [
+        0.15761496313504553,
+        0.08218876618194983
+      ],
+      "approach": null,
+      "first_close_s": 7.55,
+      "closing_gap_mm": 5.356917355547828,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14417961944416713,
+      "replay_max_state_error": 3.900935821476992e-06,
+      "frames": 163
+    },
+    {
+      "seed": 44,
+      "source": "yam-6c44b01a5f8d40809b50123799053519",
+      "apple_xy_m": [
+        0.13112827548369357,
+        0.09290565373863864
+      ],
+      "approach": null,
+      "first_close_s": 7.55,
+      "closing_gap_mm": 5.388803118405376,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14415681033526806,
+      "replay_max_state_error": 1.1029479507485007e-07,
+      "frames": 163
+    },
+    {
+      "seed": 45,
+      "source": "yam-c202880027444940a29f34a52395e8b3",
+      "apple_xy_m": [
+        0.15365653284737527,
+        0.10642455725851013
+      ],
+      "approach": null,
+      "first_close_s": 7.55,
+      "closing_gap_mm": 5.315714346106526,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14417780928649726,
+      "replay_max_state_error": 1.0717649234770477e-07,
+      "frames": 163
+    },
+    {
+      "seed": 46,
+      "source": "yam-d72b8f9d3f374ab2a72741cbcd6481d5",
+      "apple_xy_m": [
+        0.1702802138345156,
+        0.08386133966058715
+      ],
+      "approach": null,
+      "first_close_s": 7.55,
+      "closing_gap_mm": 5.328228463446765,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14418255618972486,
+      "replay_max_state_error": 1.1043029179980124e-07,
+      "frames": 163
+    },
+    {
+      "seed": 47,
+      "source": "yam-5ffba86336354a6c822ba2e6e220f126",
+      "apple_xy_m": [
+        0.162090099732128,
+        0.1176834408559804
+      ],
+      "approach": null,
+      "first_close_s": 7.55,
+      "closing_gap_mm": 5.284742700290486,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.144131850815869,
+      "replay_max_state_error": 9.969825587319292e-08,
+      "frames": 163
+    },
+    {
+      "seed": 48,
+      "source": "yam-98640076042148cb879cb10acb63340e",
+      "apple_xy_m": [
+        0.14438499361427973,
+        0.109788674501467
+      ],
+      "approach": null,
+      "first_close_s": 7.55,
+      "closing_gap_mm": 5.329961283216112,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14418338090674176,
+      "replay_max_state_error": 1.1849692871379602e-07,
+      "frames": 163
+    },
+    {
+      "seed": 101,
+      "source": "yam-32f8af236dcd425e85147578b1f7a6e8",
+      "apple_xy_m": [
+        0.17217662528052768,
+        0.09797105166707865
+      ],
+      "approach": {
+        "approach_steps": 86,
+        "descent_steps": 60,
+        "approach_height": 0.09545789100640331
+      },
+      "first_close_s": 8.85,
+      "closing_gap_mm": 4.541290273925987,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14428812768169785,
+      "replay_max_state_error": 1.0791476134919264e-07,
+      "frames": 176
+    },
+    {
+      "seed": 102,
+      "source": "yam-d366bafd4dcf466eb2c4cfee8a4ec2c2",
+      "apple_xy_m": [
+        0.13299955725021517,
+        0.10929717574201137
+      ],
+      "approach": {
+        "approach_steps": 75,
+        "descent_steps": 72,
+        "approach_height": 0.15447107756218964
+      },
+      "first_close_s": 8.9,
+      "closing_gap_mm": 4.939881805835702,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14446558630435824,
+      "replay_max_state_error": 1.0579512865760421e-07,
+      "frames": 176
+    },
+    {
+      "seed": 103,
+      "source": "yam-8ba8e31f5ee4443ba80d0f43043775da",
+      "apple_xy_m": [
+        0.14063416163614736,
+        0.09121591113130237
+      ],
+      "approach": {
+        "approach_steps": 42,
+        "descent_steps": 58,
+        "approach_height": 0.11451884407337176
+      },
+      "first_close_s": 6.55,
+      "closing_gap_mm": 5.218048440538447,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14399533700891542,
+      "replay_max_state_error": 9.29845209718394e-08,
+      "frames": 153
+    },
+    {
+      "seed": 104,
+      "source": "yam-f0c6b735ee44490b96ec9ec11125b336",
+      "apple_xy_m": [
+        0.16692824061847678,
+        0.11460740743136735
+      ],
+      "approach": {
+        "approach_steps": 87,
+        "descent_steps": 46,
+        "approach_height": 0.13253778183226006
+      },
+      "first_close_s": 8.2,
+      "closing_gap_mm": 5.798692949141902,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.1441506870897018,
+      "replay_max_state_error": 3.2807902402565148e-06,
+      "frames": 169
+    },
+    {
+      "seed": 105,
+      "source": "yam-d9cb0acc08bf431f942f20abe9eb7133",
+      "apple_xy_m": [
+        0.15690976668007722,
+        0.1295729887740629
+      ],
+      "approach": {
+        "approach_steps": 50,
+        "descent_steps": 83,
+        "approach_height": 0.11811739751743629
+      },
+      "first_close_s": 8.2,
+      "closing_gap_mm": 4.8061605275652015,
+      "both_fingers_contact_rows_20hz": 130,
+      "held_lift_m": 0.143776611187574,
+      "replay_max_state_error": 8.497804757501282e-05,
+      "frames": 169
+    },
+    {
+      "seed": 106,
+      "source": "yam-ae60e20405ee4fa0816b7c711636c6a8",
+      "apple_xy_m": [
+        0.17412039277316677,
+        0.08202000764468285
+      ],
+      "approach": {
+        "approach_steps": 41,
+        "descent_steps": 65,
+        "approach_height": 0.12985280659204892
+      },
+      "first_close_s": 6.85,
+      "closing_gap_mm": 5.001331930148848,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14423552806537498,
+      "replay_max_state_error": 1.0118557214333634e-07,
+      "frames": 156
+    },
+    {
+      "seed": 107,
+      "source": "yam-965dfb771e0c4a9d8d3871772d6ef635",
+      "apple_xy_m": [
+        0.15742679597001288,
+        0.10388442846609319
+      ],
+      "approach": {
+        "approach_steps": 42,
+        "descent_steps": 55,
+        "approach_height": 0.13909836189412267
+      },
+      "first_close_s": 6.4,
+      "closing_gap_mm": 5.490867700778068,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14418078640960652,
+      "replay_max_state_error": 1.1009236611236872e-07,
+      "frames": 151
+    },
+    {
+      "seed": 108,
+      "source": "yam-32da2461bbc84f0fa627e47b950eb740",
+      "apple_xy_m": [
+        0.16779969086642973,
+        0.1116137577634783
+      ],
+      "approach": {
+        "approach_steps": 70,
+        "descent_steps": 47,
+        "approach_height": 0.1542055604447147
+      },
+      "first_close_s": 7.4,
+      "closing_gap_mm": 5.9922428303751465,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.1443569771036033,
+      "replay_max_state_error": 1.1482776707261166e-07,
+      "frames": 161
+    },
+    {
+      "seed": 109,
+      "source": "yam-c8f68003ebab4634bb2b677285bf07b1",
+      "apple_xy_m": [
+        0.15218711244588895,
+        0.12207044227898739
+      ],
+      "approach": {
+        "approach_steps": 46,
+        "descent_steps": 81,
+        "approach_height": 0.12352217452116152
+      },
+      "first_close_s": 7.9,
+      "closing_gap_mm": 4.412596067439382,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14434840535961768,
+      "replay_max_state_error": 1.1204362748706842e-07,
+      "frames": 166
+    },
+    {
+      "seed": 110,
+      "source": "yam-eb7a30a62f4941bbbb0b7022816e81a9",
+      "apple_xy_m": [
+        0.171524640575515,
+        0.10562188906170314
+      ],
+      "approach": {
+        "approach_steps": 84,
+        "descent_steps": 45,
+        "approach_height": 0.1526293528980924
+      },
+      "first_close_s": 8.0,
+      "closing_gap_mm": 6.092170980607192,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14436511822263187,
+      "replay_max_state_error": 1.1024692381234047e-07,
+      "frames": 167
+    },
+    {
+      "seed": 111,
+      "source": "yam-e77a0be76f9149b89defff115972ca99",
+      "apple_xy_m": [
+        0.13268306779761663,
+        0.08846516504794838
+      ],
+      "approach": {
+        "approach_steps": 48,
+        "descent_steps": 44,
+        "approach_height": 0.09644540330577481
+      },
+      "first_close_s": 6.15,
+      "closing_gap_mm": 5.040830154865975,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14441178301203306,
+      "replay_max_state_error": 9.110952636781633e-08,
+      "frames": 149
+    },
+    {
+      "seed": 112,
+      "source": "yam-c58052cdf31345eb9a212515d3a72bef",
+      "apple_xy_m": [
+        0.13082295065038277,
+        0.12220767864928687
+      ],
+      "approach": {
+        "approach_steps": 52,
+        "descent_steps": 41,
+        "approach_height": 0.13304600827267044
+      },
+      "first_close_s": 6.2,
+      "closing_gap_mm": 6.270213662165188,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14410537449026795,
+      "replay_max_state_error": 1.0623561053080266e-07,
+      "frames": 149
+    },
+    {
+      "seed": 113,
+      "source": "yam-cba9b1cf5c5148d7aecb2051b7587e51",
+      "apple_xy_m": [
+        0.1285289053140279,
+        0.08754344749448773
+      ],
+      "approach": {
+        "approach_steps": 40,
+        "descent_steps": 38,
+        "approach_height": 0.10917287459689919
+      },
+      "first_close_s": 5.45,
+      "closing_gap_mm": 6.084813493671496,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14394314515342266,
+      "replay_max_state_error": 1.0667872629710473e-07,
+      "frames": 142
+    },
+    {
+      "seed": 114,
+      "source": "yam-ca7390a67f86489499dd4fba9a4b6d0e",
+      "apple_xy_m": [
+        0.16139441372548424,
+        0.08710795585641136
+      ],
+      "approach": {
+        "approach_steps": 48,
+        "descent_steps": 80,
+        "approach_height": 0.09323492210291279
+      },
+      "first_close_s": 7.95,
+      "closing_gap_mm": 4.084501725655961,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14443491123071162,
+      "replay_max_state_error": 1.0128116478824722e-07,
+      "frames": 167
+    },
+    {
+      "seed": 115,
+      "source": "yam-08ae7298cd454a15bccfa484846eb726",
+      "apple_xy_m": [
+        0.160116901209439,
+        0.11018545357326745
+      ],
+      "approach": {
+        "approach_steps": 83,
+        "descent_steps": 58,
+        "approach_height": 0.12101314249439146
+      },
+      "first_close_s": 8.6,
+      "closing_gap_mm": 4.883647970037017,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.1443941172576636,
+      "replay_max_state_error": 5.8233195734391785e-06,
+      "frames": 173
+    },
+    {
+      "seed": 116,
+      "source": "yam-d2fd05603292458ab3697734533ccbf1",
+      "apple_xy_m": [
+        0.133618488293568,
+        0.12384610573183255
+      ],
+      "approach": {
+        "approach_steps": 40,
+        "descent_steps": 41,
+        "approach_height": 0.10519875938985385
+      },
+      "first_close_s": 5.6,
+      "closing_gap_mm": 5.8275477677779906,
+      "both_fingers_contact_rows_20hz": 131,
+      "held_lift_m": 0.14392040372766057,
+      "replay_max_state_error": 1.054632898789265e-07,
+      "frames": 143
+    }
+  ],
+  "frames": 3871,
+  "fps": 10,
+  "held_out_seeds": [
+    901,
+    902,
+    903,
+    904
+  ]
+}
