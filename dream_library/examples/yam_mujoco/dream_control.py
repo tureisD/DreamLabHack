@@ -47,7 +47,7 @@ def settings():
 
 ## The model the terminal names, and its shortcuts for it; any other model id is used as typed.
 BETA_MODEL = "dreamlabs/dream-1-beta"
-MODEL_SHORTCUTS = {"1": BETA_MODEL, "beta": BETA_MODEL}
+MODEL_SHORTCUTS = {"1": BETA_MODEL, "beta": BETA_MODEL, "dream-1-beta": BETA_MODEL}
 
 
 def resolve_model(text):

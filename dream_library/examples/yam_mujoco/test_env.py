@@ -284,6 +284,7 @@ class DreamContractTests(unittest.TestCase):
 
         self.assertEqual(resolve_model(" Beta "), BETA_MODEL)
         self.assertEqual(resolve_model("1"), BETA_MODEL)
+        self.assertEqual(resolve_model("dream-1-beta"), BETA_MODEL)
         self.assertEqual(resolve_model("dream-1-ft:0a1b2c3d-towels"), "dream-1-ft:0a1b2c3d-towels")
         self.assertEqual(resolve_model("run-7/checkpoint-12000"), "run-7/checkpoint-12000")
         for bad in ("", "  ", "my model"):
