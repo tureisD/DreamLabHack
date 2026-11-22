@@ -54,6 +54,8 @@ This samples the apple's initial X and Y positions within 2.5 cm of the original
 
 Add `--start-pose wrist-visible` to collect scripted reach, close, lift and release examples from the same initial arm posture as a wrist-visible model pilot. Use a common seed to compare grasps at the same apple location. Reserve separate seeds for evaluating a trained checkpoint.
 
+For the first wrist-visible grasp dataset, training uses scene seeds 41 through 48. Seeds 901 through 904 are reserved for matched base and fine-tuned simulator trials. Use the same prompt, start pose and simulated time allowance for both checkpoints. Check how each checkpoint's action rows map to simulated time before running the comparison. Score a pickup when the unassisted apple rises at least 8 cm above its settled height and stays there for 2 continuous seconds. Confirm each outcome in the video and report any incomplete runs. The scripted training examples also include a release after the hold.
+
 Review and label the original 20 Hz recordings. For training, select reviewed scripted successes in a separate source directory before using the 10 Hz conversion in the [experiment notes](README.md). The standalone statistical evaluator requires eligible physical trials for its real-world verdict.
 
 ## Save your key on Windows

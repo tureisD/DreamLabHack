@@ -89,3 +89,38 @@ def test_seed41_wrist_visible_pose_keeps_apple_separate_and_in_view(tmp_path, mo
         assert np.isin(geom_ids, apple_geoms).sum() > 500
     finally:
         env.close()
+
+
+def test_training_export_preserves_gripper_slots_and_frame_times(tmp_path, monkeypatch):
+    pytest.importorskip("mujoco")
+    pytest.importorskip("PIL")
+    import av
+    import json
+    import numpy as np
+    import pyarrow.parquet as pq
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "experiments/yam_sim_faas"))
+    from record_yam_demos import RecordingYamEnv
+    from resample_yam_demos import export_session
+
+    source, target = tmp_path / "raw", tmp_path / "export"
+    env = RecordingYamEnv(source, "pick up the apple", 44, start_pose="wrist-visible")
+    try:
+        arms = env.state()
+        for grip in (1.0, 0.75, 0.5, 0.25, 0.0):
+            env.step(np.r_[arms["left"][:6], grip], arms["right"])
+    finally:
+        env.close()
+    assert export_session(source, target) == 3
+    table = pq.read_table(next(target.rglob("*.parquet")))
+    assert table["frame_index"].to_pylist() == [0, 1, 2]
+    assert np.array(table["action"].to_pylist())[:, 13].tolist() == [1.0, 0.5, 0.0]
+    info = json.loads((target / "meta/info.json").read_text())
+    names = info["features"]["action"]["names"]
+    assert [names[6], names[13]] == ["right_gripper", "left_gripper"]
+    stats = json.loads((target / "meta/episodes_stats.jsonl").read_text())
+    assert stats["stats"]["action"]["count"] == [3]
+    for video in target.rglob("*.mp4"):
+        with av.open(str(video)) as container:
+            times = [float(frame.time) for frame in container.decode(video=0)]
+        np.testing.assert_allclose(times, table["timestamp"].to_pylist(), atol=1e-6)
