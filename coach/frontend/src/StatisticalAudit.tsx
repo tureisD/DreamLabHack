@@ -15,6 +15,19 @@ type SamplePlan = {
   feasible: boolean; trials_per_arm: number | null; power_at_recommendation: number | null;
   power_at_budget: number; max_trials_per_arm: number;
 };
+type PairAttempt = {
+  outcome: string; held_lift_m: number | null; first_close_after_warmup_s: number | null;
+  model_action_rows: number | null; replay_max_state_error_m: number | null;
+};
+type Pair = { pair_id: string; baseline: PairAttempt | null; candidate: PairAttempt | null };
+type PairedReport = {
+  decision: 'descriptive' | 'improved' | 'regressed' | 'inconclusive' | 'not_evaluable';
+  planned_pairs: number; submitted_pairs: number; usable_pairs: number;
+  baseline_attempted: number; candidate_attempted: number;
+  baseline_successes: number; candidate_successes: number; observed_difference: number | null;
+  difference_interval: [number, number] | null; interval_method: string | null;
+  input_sha256: string; problems: string[]; warnings: string[]; pairs: Pair[];
+};
 
 function percent(value: number | null) {
   return value === null ? '—' : `${(value * 100).toFixed(1)}%`;
@@ -32,6 +45,10 @@ export default function StatisticalAudit() {
   const [assumedGain, setAssumedGain] = useState(0.25);
   const [margin, setMargin] = useState(0.125);
   const [budget, setBudget] = useState(80);
+  const [pairedSnapshot, setPairedSnapshot] = useState('');
+  const [pairedReport, setPairedReport] = useState<PairedReport | null>(null);
+  const [pairedError, setPairedError] = useState('');
+  const [pairedBusy, setPairedBusy] = useState(false);
 
   async function analyze() {
     setError(''); setReport(null);
@@ -80,14 +97,107 @@ export default function StatisticalAudit() {
     } finally { setPlanning(false); }
   }
 
+  async function analyzePaired(value?: unknown) {
+    setPairedError(''); setPairedReport(null);
+    let parsed = value;
+    if (parsed === undefined) {
+      try { parsed = JSON.parse(pairedSnapshot); }
+      catch { setPairedError('The paired snapshot is not valid JSON.'); return; }
+    }
+    setPairedBusy(true);
+    try {
+      const response = await fetch('/api/paired-evaluations/analyze', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parsed),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail));
+      setPairedReport(body as PairedReport);
+    } catch (caught) {
+      setPairedError(caught instanceof Error ? caught.message : 'Could not analyze paired evidence.');
+    } finally { setPairedBusy(false); }
+  }
+
+  async function loadAppleDemo() {
+    setPairedError(''); setPairedBusy(true);
+    try {
+      const response = await fetch('/api/paired-evaluations/demo');
+      if (!response.ok) throw new Error(`Could not load the demo (${response.status}).`);
+      const value: unknown = await response.json();
+      setPairedSnapshot(JSON.stringify(value, null, 2));
+      setPairedBusy(false);
+      await analyzePaired(value);
+    } catch (caught) {
+      setPairedError(caught instanceof Error ? caught.message : 'Could not load the demo.');
+      setPairedBusy(false);
+    }
+  }
+
+  function downloadPaired() {
+    if (!pairedReport) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(pairedReport, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'paired-evaluation-report.json';
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return <main className="page">
     <header className="header"><div>
-      <p className="eyebrow">Independent trial audit</p>
+      <p className="eyebrow">Checkpoint evidence</p>
       <h1>Statistical evaluation</h1>
-      <p className="subtitle">Analyze a frozen, human-verified comparison without starting a robot or FaaS job.</p>
+      <p className="subtitle">Compare fine-tuned and base models with the method appropriate to how the trials were collected.</p>
     </div></header>
     <section className="card">
-      <h2>Plan independent trials</h2>
+      <h2>Matched fine-tune comparison</h2>
+      <p>Analyze predeclared scene pairs. Physical pairs with reviewed outcomes can receive a conservative interval. Simulator pairs show measured task outcomes without a real-robot or deployment claim.</p>
+      <button type="button" className="secondary" disabled={pairedBusy} onClick={() => void loadAppleDemo()}>
+        Load and analyze our 500-step apple demo
+      </button>
+      <label className="audit-file">Or load a paired JSON snapshot
+        <input type="file" accept=".json,application/json" onChange={async (event) => {
+          const file = event.target.files?.[0];
+          if (file) { setPairedSnapshot(await file.text()); setPairedReport(null); setPairedError(''); }
+        }} />
+      </label>
+      <label className="audit-file">Paired evidence JSON
+        <textarea value={pairedSnapshot} onChange={(event) => { setPairedSnapshot(event.target.value); setPairedReport(null); }}
+          placeholder='{"plan": { ... }, "pairs": [ ... ]}' spellCheck={false} />
+      </label>
+      <button type="button" disabled={pairedBusy || !pairedSnapshot.trim()} onClick={() => void analyzePaired()}>
+        {pairedBusy ? 'Analyzing…' : 'Analyze matched scenes'}
+      </button>
+    </section>
+    {pairedError && <div className="alert" role="alert">{pairedError}</div>}
+    {pairedReport && <section className="card evaluation-report" aria-live="polite">
+      <h2>Matched result: {pairedReport.decision.replace('_', ' ')}</h2>
+      <div className="evaluation-metrics">
+        <div><strong>{pairedReport.baseline_successes}/{pairedReport.baseline_attempted}</strong><span>Base successes</span></div>
+        <div><strong>{pairedReport.candidate_successes}/{pairedReport.candidate_attempted}</strong><span>Fine-tune successes</span></div>
+        <div><strong>{percent(pairedReport.observed_difference)}</strong><span>Observed paired gain</span></div>
+        <div><strong>{pairedReport.difference_interval ? `${percent(pairedReport.difference_interval[0])} to ${percent(pairedReport.difference_interval[1])}` : '—'}</strong><span>Physical-trial interval</span></div>
+      </div>
+      <p>{pairedReport.decision === 'descriptive'
+        ? 'These simulator outcomes show task performance on the submitted scenes. They do not establish physical-robot success or statistical improvement.'
+        : pairedReport.decision === 'not_evaluable' ? 'The evidence is incomplete or inconsistent; review the problems below.'
+          : `Method: ${pairedReport.interval_method}. This result still needs independent verification of scene resets, labels, and safety.`}</p>
+      {pairedReport.problems.length > 0 && <><h3>Problems</h3><ul>{pairedReport.problems.map((item) => <li key={item}>{item}</li>)}</ul></>}
+      <div className="audit-table-wrap"><table className="audit-table">
+        <thead><tr><th>Scene</th><th>Base held lift</th><th>Fine-tune held lift</th><th>Base close</th><th>Fine-tune close</th><th>Base</th><th>Fine-tune</th></tr></thead>
+        <tbody>{pairedReport.pairs.map((pair) => <tr key={pair.pair_id}>
+          <td>{pair.pair_id}</td><td>{pair.baseline?.held_lift_m == null ? '—' : `${(pair.baseline.held_lift_m * 100).toFixed(1)} cm`}</td>
+          <td>{pair.candidate?.held_lift_m == null ? '—' : `${(pair.candidate.held_lift_m * 100).toFixed(1)} cm`}</td>
+          <td>{pair.baseline?.first_close_after_warmup_s == null ? '—' : `${pair.baseline.first_close_after_warmup_s.toFixed(1)} s`}</td>
+          <td>{pair.candidate?.first_close_after_warmup_s == null ? '—' : `${pair.candidate.first_close_after_warmup_s.toFixed(1)} s`}</td>
+          <td>{pair.baseline?.outcome ?? 'missing'}</td><td>{pair.candidate?.outcome ?? 'missing'}</td>
+        </tr>)}</tbody>
+      </table></div>
+      <p className="hint">All {pairedReport.submitted_pairs} submitted pairs are retained. Snapshot SHA-256: <code>{pairedReport.input_sha256}</code>.</p>
+      <h3>Limits</h3><ul>{pairedReport.warnings.map((item) => <li key={item}>{item}</li>)}</ul>
+      <button type="button" className="secondary" onClick={downloadPaired}>Download paired report JSON</button>
+    </section>}
+    <section className="card">
+      <h2>Plan independent real-world trials</h2>
       <p>Estimate the equal-arm sample size for a fixed-horizon comparison with 80% target power. Enter assumed true rates before collecting evaluation outcomes. This calculation does not estimate those rates or account for paired scenes, repeated sessions, missing labels, or safety outcomes.</p>
       <div className="audit-plan-grid">
         <label>Assumed base success rate<input type="number" min="0" max="1" step="0.01" value={baselineRate} onChange={(event) => setBaselineRate(Number(event.target.value))} /></label>
