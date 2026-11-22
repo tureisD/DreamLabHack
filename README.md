@@ -8,9 +8,10 @@ A failed pickup can mean the gripper closed too early, the camera feed stalled, 
 
 | I want to… | Start here |
 | --- | --- |
+| Try DreamCoach online | [Open the live app](https://dreamcoach-live.onrender.com/), click **Begin**, and connect with your own Dream Labs API key. |
 | See a real simulator comparison | [Watch the matched apple pickup and inspect its traces](coach/experiments/yam_sim_faas/grasp_training/full-901/README.md). |
 | Review runs without keys or hardware | [Try the isolated offline walkthrough](coach/README.md#offline-apple-pickup-walkthrough) with scripted fixtures. |
-| Teach a task without a robot | [Run DreamCoach locally](#run-dreamcoach-locally) and choose a simulator Quick start. |
+| Run DreamCoach on my computer | [Follow the local setup](#run-dreamcoach-locally) and choose a simulator Quick start. |
 | Test a checkpoint I already trained | Choose **Apple pickup → Evaluate existing checkpoint**, pick the checkpoint by its training dataset, and start a matched comparison. Dream may charge for inference. |
 | Audit independent physical trials | Use the [standalone statistical evaluator](#standalone-statistical-evaluator). |
 
