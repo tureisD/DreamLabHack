@@ -174,15 +174,16 @@ def test_saved_comparison_diagnostics_replay_verified_trace_once(tmp_path, monke
     }
     scored = []
 
-    def replay(trial, *options, **_kwargs):
-        assert Path(trial).name == baseline["trial_id"]
-        assert options == ("--held-out-seed", str(seed), "--diagnose")
+    def replay(mode, trials_json, **_kwargs):
+        assert mode == "--diagnose-batch"
+        [trial] = json.loads(trials_json)
+        assert trial == {"folder": str(folder / baseline["trial_id"]), "seed": seed}
         scored.append(trial)
-        return {
+        return {"scores": {trial["folder"]: {
             "seed": seed, "checkpoint": BASE, "model_action_rows": MIN_ACTION_ROWS,
             "height_source": "recorded", "success": False, "held_lift_m": 0.02,
             "diagnosis": diagnosis,
-        }
+        }}}
 
     monkeypatch.setattr(yam_workflow, "workflow_result", replay)
     response = client.get(f"{url}/diagnostics")

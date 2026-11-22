@@ -139,6 +139,7 @@ export default function App() {
           setNeedsHostedConnection(false);
         }}
         resetSession={resetChatSession}
+        onEvidence={() => setScreen('effect')}
         activeTaskId={activeTaskId}
         selectTask={selectTask}
         demoApproval={demoApproval}

@@ -1,0 +1,41 @@
+.horizon-explorer { border-color: #e9d2bd; background: #fffdfa; }
+.horizon-explorer h2 { max-width: 37rem; }
+.horizon-explorer-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 20px 0; }
+.horizon-explorer-stats div { padding: 16px; background: #fff0e0; border-radius: 12px; }
+.horizon-explorer-stats strong, .horizon-explorer-stats span { display: block; }
+.horizon-explorer-stats strong { font-size: clamp(22px, 2.5vw, 30px); font-variant-numeric: tabular-nums; }
+.horizon-explorer-stats span { margin-top: 4px; color: #6b5548; font-size: 13px; }
+.horizon-explorer-picker { display: grid; grid-template-columns: 1fr auto; gap: 12px 20px; align-items: end; }
+.horizon-explorer-picker p { margin: 4px 0 0; font-size: 13px; }
+.horizon-explorer-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.horizon-explorer-presets button { padding: 7px 11px; background: #fbe8d7; color: #563c2c; }
+.horizon-explorer-presets button.selected { background: #b75523; color: white; }
+.horizon-explorer-presets button:focus-visible, .horizon-explorer-picker select:focus-visible { outline: 2px solid #b75523; outline-offset: 2px; }
+.horizon-explorer-picker label { grid-column: 1 / -1; display: grid; gap: 5px; max-width: 300px; color: #654c3d; font-size: 13px; }
+.horizon-explorer-picker select { padding: 9px; border: 1px solid #d9bdab; border-radius: 9px; background: white; color: #382d27; font: inherit; }
+.horizon-explorer-scene { margin: 18px 0; padding: 18px; border: 1px solid #efdac8; border-radius: 14px; background: white; }
+.horizon-explorer-scene-title { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
+.horizon-explorer-scene-title h3 { margin: 0; }
+.horizon-explorer-scene-title span { color: #9b4924; font-size: 14px; font-weight: 700; }
+.horizon-explorer-timeline { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 3px; padding: 0; margin: 18px 0 4px; list-style: none; }
+.horizon-explorer-timeline li { min-width: 0; padding: 11px 0; border-radius: 5px; background: #eee8e2; text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; }
+.horizon-explorer-timeline li.passed { background: #75b590; color: #173a26; font-weight: 700; }
+.horizon-explorer-timeline li.cutoff { outline: 2px solid #b75523; outline-offset: 1px; }
+.horizon-explorer-labels { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 3px; color: #775f50; font-size: 12px; }
+.horizon-explorer-labels span:first-child { grid-column: 1 / 10; text-align: right; }
+.horizon-explorer-labels span:last-child { grid-column: 10 / 13; text-align: right; }
+.horizon-explorer-lift { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+.horizon-explorer-lift div { display: grid; gap: 3px; padding: 12px; background: #f8f4ef; border-radius: 10px; }
+.horizon-explorer-lift span { color: #654f42; font-size: 12px; }
+.horizon-explorer-lift strong { font-size: 19px; font-variant-numeric: tabular-nums; }
+.horizon-explorer-invalid { margin-bottom: 0; }
+.horizon-explorer-decision { padding: 15px 16px; border-left: 4px solid #b75523; background: #fff0e0; }
+.horizon-explorer details { margin-top: 12px; }
+.horizon-explorer details p { overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .horizon-explorer-stats { grid-template-columns: 1fr; }
+  .horizon-explorer-picker { grid-template-columns: 1fr; }
+  .horizon-explorer-timeline { gap: 2px; }
+  .horizon-explorer-timeline li { font-size: 10px; }
+  .horizon-explorer-labels { font-size: 10px; }
+}

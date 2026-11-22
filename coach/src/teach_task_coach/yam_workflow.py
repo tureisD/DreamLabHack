@@ -254,7 +254,7 @@ class YamWorkflow:
         self.list_finetunes = list_finetunes
         self.lock = Lock()
         self._diagnosis_lock = Lock()
-        self._diagnosis_cache: OrderedDict[tuple[str, str, str], TrialDiagnosis] = OrderedDict()
+        self._diagnosis_cache: OrderedDict[tuple[Path, str], TrialDiagnosis] = OrderedDict()
         self.cancel = Event()
         self._reset_lock = Lock()
         self._reset_requested = Event()
@@ -604,11 +604,12 @@ class YamWorkflow:
         plan = snapshot.plan
         threshold = plan.simulator_hold_threshold_m or 0.08
         trials = {}
+        local_trials = []
         for pair in snapshot.pairs:
             for role, attempt in (("baseline", pair.baseline), ("candidate", pair.candidate)):
                 if attempt is None:
                     continue
-                diagnosis = None
+                trials[attempt.trial_id] = saved_metrics_diagnosis(attempt, threshold)
                 if (
                     pair.scenario_id.isascii() and pair.scenario_id.isdecimal()
                     and len(pair.scenario_id) <= 10 and len(plan.evaluation_id) == 32
@@ -617,17 +618,21 @@ class YamWorkflow:
                     seed = int(pair.scenario_id)
                     expected = f"{plan.evaluation_id}-{seed}-{role}"
                     if seed < 2**32 and attempt.trial_id == expected and attempt.source_uri == f"local-rollout://{expected}":
-                        diagnosis = self._local_trial_diagnosis(task_id, seed, attempt, threshold)
-                trials[attempt.trial_id] = diagnosis or saved_metrics_diagnosis(attempt, threshold)
+                        trial = self._local_trial_folder(task_id, expected)
+                        if trial is not None:
+                            local_trials.append((trial, seed, attempt))
+        trials.update(self._diagnose_local_trials(local_trials, threshold))
         return YamComparisonDiagnostics(evaluation_id=plan.evaluation_id, trials=trials)
 
-    def _local_trial_diagnosis(
-        self, task_id: str, seed: int, attempt: PairAttempt, threshold: float,
-    ) -> TrialDiagnosis | None:
+    def _local_trial_folder(self, task_id: str, trial_id: str) -> Path | None:
         task_folder = (self.root / task_id).resolve()
-        trial = (task_folder / attempt.trial_id).resolve()
+        trial = (task_folder / trial_id).resolve()
         if task_folder.parent != self.root.resolve() or trial.parent != task_folder or not trial.is_dir():
             return None
+        return trial
+
+    @staticmethod
+    def _read_saved_diagnosis(trial: Path, seed: int, attempt: PairAttempt) -> TrialDiagnosis | None:
         try:
             path = (trial / "diagnosis.json").resolve()
             if path.parent == trial:
@@ -636,33 +641,62 @@ class YamWorkflow:
                     return saved.diagnosis
         except (OSError, ValidationError):
             pass
-        if attempt.outcome not in ("success", "failure"):
-            return None
-        key = (task_id, attempt.trial_id, attempt.outcome)
+        return None
+
+    def _diagnose_local_trials(
+        self, trials: list[tuple[Path, int, PairAttempt]], threshold: float,
+    ) -> dict[str, TrialDiagnosis]:
+        diagnosed = {}
+        pending = []
         with self._diagnosis_lock:
-            if key in self._diagnosis_cache:
-                self._diagnosis_cache.move_to_end(key)
-                return self._diagnosis_cache[key]
-            diagnosis = self._replay_diagnosis(trial, seed, attempt) or saved_metrics_diagnosis(attempt, threshold)
-            self._diagnosis_cache[key] = diagnosis
-            if len(self._diagnosis_cache) > 128:
-                self._diagnosis_cache.popitem(last=False)
-            return diagnosis
+            for trial, seed, attempt in trials:
+                key = (trial, attempt.outcome)
+                saved = self._read_saved_diagnosis(trial, seed, attempt)
+                if saved is not None:
+                    diagnosed[attempt.trial_id] = saved
+                elif key in self._diagnosis_cache:
+                    self._diagnosis_cache.move_to_end(key)
+                    diagnosed[attempt.trial_id] = self._diagnosis_cache[key]
+                elif attempt.outcome in ("success", "failure") and self._verified_trace(trial, seed, attempt):
+                    pending.append((trial, seed, attempt))
+            if pending:
+                args = [{"folder": str(trial), "seed": seed} for trial, seed, _ in pending]
+                try:
+                    scores = workflow_result(
+                        "--diagnose-batch", json.dumps(args), timeout=max(45, 7 * len(args) + 7),
+                    ).get("scores", {})
+                except (SimulatorRunError, ValueError):
+                    scores = {}
+                for trial, seed, attempt in pending:
+                    score = scores.get(str(trial)) if isinstance(scores, dict) else None
+                    diagnosis = self._diagnosis_from_score(score, seed, attempt)
+                    diagnosis = diagnosis or saved_metrics_diagnosis(attempt, threshold)
+                    diagnosed[attempt.trial_id] = diagnosis
+                    self._diagnosis_cache[(trial, attempt.outcome)] = diagnosis
+                    if len(self._diagnosis_cache) > 128:
+                        self._diagnosis_cache.popitem(last=False)
+        return diagnosed
 
     @staticmethod
-    def _replay_diagnosis(trial: Path, seed: int, attempt: PairAttempt) -> TrialDiagnosis | None:
+    def _verified_trace(trial: Path, seed: int, attempt: PairAttempt) -> bool:
         try:
             [sidecar] = trial.glob("*/rollout.json")
             parquet = sidecar.parent / "data/chunk-000/episode_000000.parquet"
             if not sidecar.resolve().is_relative_to(trial) or not parquet.resolve().is_relative_to(trial):
-                return None
+                return False
             metadata = json.loads(sidecar.read_text(encoding="utf-8"))
-            if (
-                metadata["status"] != "complete" or metadata["simulation"]["source"] != "model"
-                or metadata["simulation"]["seed"] != seed or metadata["checkpoint"] != attempt.checkpoint_id
-            ):
-                return None
-            score = workflow_result(str(trial), "--held-out-seed", str(seed), "--diagnose", timeout=15)
+            return (
+                metadata["status"] == "complete" and metadata["simulation"]["source"] == "model"
+                and metadata["simulation"]["seed"] == seed and metadata["checkpoint"] == attempt.checkpoint_id
+            )
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+
+    @staticmethod
+    def _diagnosis_from_score(score: dict | None, seed: int, attempt: PairAttempt) -> TrialDiagnosis | None:
+        if not isinstance(score, dict):
+            return None
+        try:
             if (
                 score["seed"] != seed or score["checkpoint"] != attempt.checkpoint_id
                 or score["model_action_rows"] != attempt.model_action_rows
@@ -672,7 +706,7 @@ class YamWorkflow:
             ):
                 return None
             return TrialDiagnosis.model_validate(score.get("diagnosis"))
-        except (OSError, ValueError, KeyError, TypeError, SimulatorRunError):
+        except (ValueError, KeyError, TypeError):
             return None
 
     def _compare(self, job: YamJob, folder: Path, seeds: list[int], candidate: str) -> None:
