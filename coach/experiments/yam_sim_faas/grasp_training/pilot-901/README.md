@@ -4,6 +4,17 @@ The 24-demo checkpoint reached the apple, closed its left gripper and lifted the
 
 ### Review the recording
 
+**Matched base comparison.** On the same frozen scene, the base model touched the apple with one fingertip. The fine-tune brought both fingertips around it and started lifting. Neither reached the task threshold within the shared 14.4-second window. This is one paired simulator observation. A change in the overall success rate remains unmeasured. [Synchronized overhead and wrist video](comparison.mp4)
+
+| Metric over 288 control rows | Dream-1 base | 24-demo fine-tune |
+|---|---:|---:|
+| Closest left gripper center to apple center, measured in physics replay | 3.64 cm | 1.56 cm |
+| Frames with both fingertips of one hand contacting the apple | 0 of 288 | 47 of 288 |
+| Peak rise above settled height | 0.02 cm | 1.68 cm |
+| Time holding the apple at least 8 cm up | 0 s | 0 s |
+
+Each recording used the same prompt, initial simulation state, 33 warm-up rows and 20 Hz playback. The recorded warm-up joint states and commands matched, as did the joint state immediately before the first model action. Six new Dream requests produced six base-model replies. Both recordings ended at the request cap before the planned 400 control rows. The fine-tune recording used for this comparison was the replacement attempt. [Base recording metadata](base/rollout.json) · [Base contact trace](base/apple-evidence-v1.csv) · [Fine-tune contact trace](attempt-2/apple-evidence-v1.csv)
+
 Open either the overhead or left wrist MP4 and skip to **13.70 s**. Times below are measured from the start of the video, including the 1.65-second camera warm-up. GitHub’s **Download raw file** button retrieves the original MP4. [Overhead](attempt-2/videos/chunk-000/observation.images.overhead/episode_000000.mp4) · [Left wrist](attempt-2/videos/chunk-000/observation.images.wrist_l/episode_000000.mp4) · [Right wrist](attempt-2/videos/chunk-000/observation.images.wrist_r/episode_000000.mp4)
 
 | Video time | Simulator observation |
