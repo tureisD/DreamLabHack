@@ -15,11 +15,12 @@ from teach_task_coach.storage import EpisodeStore
 def test_training_batches_are_independent(monkeypatch):
     scripts = Path(__file__).resolve().parents[1] / "experiments/yam_sim_faas/grasp_training"
     monkeypatch.syspath_prepend(str(scripts))
-    from batch import HOLDOUT, SEEDS
+    from batch import CONFIRMATION, HOLDOUT, SEEDS
 
     assert len(SEEDS["varied"]) == len(SEEDS["independent"]) == 24
     assert SEEDS["varied"].isdisjoint(SEEDS["independent"])
     assert SEEDS["independent"].isdisjoint(HOLDOUT)
+    assert all(seeds.isdisjoint(CONFIRMATION) for seeds in SEEDS.values())
 
 
 def test_simulator_pilot_budget_and_review(tmp_path, monkeypatch):
