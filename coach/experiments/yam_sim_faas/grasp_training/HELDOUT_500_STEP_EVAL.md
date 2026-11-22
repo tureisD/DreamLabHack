@@ -1,5 +1,7 @@
 # Dima 500-step checkpoint: held-out simulator comparison
 
+Follow-up: [the corrected longer evaluation](EXTENDED_500_STEP_EVAL.md) explains the original trial cutoff and gripper stop, and reports a predeclared fresh four-scene comparison. Keep the results below as the unmodified first test.
+
 Run on 22 November 2026 with the dima24kor Dream account. Dream's API confirmed job `ftj_0b80885351caf8f7` succeeded after 500 steps on `dima24kor/apple-grasp-varied-3374a5388381` and published `dream-1-ft:7820aef9-apple-varied24-500`. No further training job was submitted.
 
 The predeclared test seeds were 901–904; none appear in either training archive. Each checkpoint received the same prompt, wrist-visible starting pose, seed-specific apple placement, 20 Hz simulation, and at most nine productive 48-row action chunks. Runs were sequential with checkpoint order rotated by seed. A complete run has 432 executed model action rows plus 33 camera warm-up rows, for 23.25 seconds total.
