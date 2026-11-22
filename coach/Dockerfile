@@ -1,9 +1,12 @@
 FROM node:22-bookworm-slim AS frontend
-WORKDIR /build
+WORKDIR /build/coach/frontend
 COPY coach/frontend/package.json coach/frontend/package-lock.json ./
 RUN npm ci
 COPY coach/frontend/index.html coach/frontend/tsconfig.json coach/frontend/vite.config.ts ./
 COPY coach/frontend/src ./src
+COPY coach/experiments/yam_sim_faas/closed_loop_repair_report.json \
+     coach/experiments/yam_sim_faas/horizon_confirmation_report.json \
+     /build/coach/experiments/yam_sim_faas/
 RUN npm run build
 
 FROM python:3.11-slim-bookworm AS runtime
@@ -17,7 +20,7 @@ COPY shared /app/shared
 COPY coach/pyproject.toml coach/uv.lock /app/coach/
 COPY coach/src /app/coach/src
 COPY coach/experiments /app/coach/experiments
-COPY --from=frontend /build/dist /app/coach/frontend/dist
+COPY --from=frontend /build/coach/frontend/dist /app/coach/frontend/dist
 WORKDIR /app/coach
 RUN uv sync --locked --no-dev --extra sim \
     && useradd --system --uid 10001 --create-home dreamcoach \
