@@ -2,6 +2,8 @@
 
 This is a **prospective operator study template**, not evidence that the coach already saves time or Dream FaaS spend. The committed eight-person example is entirely synthetic. Its made-up 3/4 versus 1/4 validation rates are useful for testing the analysis and display, not for a product claim. Even with those invented numbers, a two-sided Fisher test is not significant.
 
+The separate [observed simulator diagnostic](../experiments/yam_sim_faas/CLOSED_LOOP_REPAIR_STUDY.md) measures how an evaluation horizon changes the verdict for one already-trained checkpoint. It does not provide an ordinary-workflow versus coach-workflow operator comparison.
+
 ## Run the synthetic example
 
 From `coach/`:

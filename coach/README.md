@@ -22,6 +22,8 @@ The [Statistical audit](STATISTICAL_AUDIT.md) adds the separate evaluator from t
 
 The [matched-scene evidence path](PAIRED_EVIDENCE.md) adds the authoritative paired audit and a one-click replay of the measured 500-step apple comparison. Simulator outcomes remain descriptive; eligible physical pairs use a separate conservative interval. The [coach-effectiveness benchmark](benchmark/README.md) is a prospective study template; its included results are synthetic, not evidence of savings.
 
+The [measured closed-loop repair study](experiments/yam_sim_faas/CLOSED_LOOP_REPAIR_STUDY.md) tests the unchanged checkpoint under the original and corrected evaluation horizons. A fresh same-trajectory confirmation found 14/19 valid scenes passed by request nine and 19/19 by request twelve; one of twenty attempts was invalid and retained. **Coach effect** displays both observed simulator results separately from its synthetic operator study. These measurements establish an evaluation decision problem, not saved operator time, demonstrations, or FaaS dollars.
+
 For the apple experiment, use the [two-account training handoff and verified datasets](experiments/yam_sim_faas/grasp_training/README.md).
 
 For robot-free collection targeted at fresh model failures, use [failure-conditioned YAM demonstrations](experiments/yam_sim_faas/FAILURE_CONDITIONED_SIM.md). Its local collector writes reviewable LeRobot episodes into the coach Demos folder and refuses the reserved evaluation seeds. It has not yet been compared with random collection under equal FaaS budget.

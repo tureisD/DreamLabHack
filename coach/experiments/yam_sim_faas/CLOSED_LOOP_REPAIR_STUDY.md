@@ -19,7 +19,19 @@ The twelve-request arm consumed 33% more productive action rows per scene. Its t
 
 ## Independent confirmation
 
-After seeing the eight-pair result, we froze a **separate** [20-scene confirmation protocol](horizon_confirmation_plan.json) on fresh seeds 921–940. It records twelve-request trajectories and scores the nine-request prefix from those **same** trajectories. This isolates the effect of the execution horizon within each recorded model run and avoids a second stochastic inference run per scene. Its results must be reported separately from the exploratory eight-pair comparison. The [confirmation runner](horizon_confirmation.py) retains invalid and incomplete attempts.
+After seeing the eight-pair result, we froze a **separate** [20-scene confirmation protocol](horizon_confirmation_plan.json) in commit `4b46c02`, before calling Dream on fresh seeds 921–940. It records twelve-request trajectories and scores the nine-request prefix from those **same** trajectories. This isolates the effect of the execution horizon within each recorded model run and avoids a second stochastic inference run per scene. Its results are separate from the exploratory eight-pair comparison.
+
+| Confirmation measure | Result |
+| --- | ---: |
+| Planned new scenes | 20 |
+| Full, replay-checked trajectories | 19 |
+| Nine-request prefixes meeting the held-lift rule | 14/19 |
+| Twelve-request trajectories meeting the rule | 19/19 |
+| Extra action needed after request nine | 5/19 |
+
+On seeds **923, 930, and 936**, success first appeared in request 10. On **933 and 934**, it first appeared in request 11. The other fourteen valid trajectories met the rule during request nine. Seed **921** had a Dream episode restart: twelve requests were attempted but only ten chunks executed, so it is **invalid under the frozen twelve-chunk analysis**. It was retained and not rerun. The [confirmation runner](horizon_confirmation.py) and [machine-readable report](horizon_confirmation_report.json) retain all twenty attempts. Full action traces are local under `%LOCALAPPDATA%/TeachTaskCoach/horizon-confirmation-921-940`.
+
+**Decision supported by this evidence:** when an apple run fails at the nine-request cutoff, evaluate the unchanged checkpoint with a sufficient horizon before deciding to collect data or pay for another fine-tune. This is a same-distribution simulator finding. It does not establish a physical-robot runtime setting; longer runs execute more actions and can have their own risks. Nor does it show that any operator actually saved time or money.
 
 ## Remaining product claim
 
