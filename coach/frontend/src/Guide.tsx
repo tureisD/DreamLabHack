@@ -18,7 +18,7 @@ async function json<T>(url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-export default function Guide() {
+export default function Guide({ onRepair }: { onRepair: () => void }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [taskId, setTaskId] = useState('');
   const [guidance, setGuidance] = useState<Guidance | null>(null);
@@ -60,6 +60,7 @@ export default function Guide() {
         <h2>{guidance.headline}</h2>
         <p className="guide-action">{guidance.next_action}</p>
         <p><strong>Open:</strong> {guidance.target_screen === 'runs' ? 'Run review' : guidance.target_screen[0].toUpperCase() + guidance.target_screen.slice(1)} tab. Select this task there.</p>
+        {guidance.target_screen === 'repair' && <button onClick={onRepair}>Open repair comparison</button>}
         <h3>What this is based on</h3>
         <ul>{guidance.evidence.map((item, index) => <li key={index}>{item}</li>)}</ul>
         {guidance.pilot_ready && <p className="notice">Ready to try an initial pilot, subject to Dream dataset validation. This is a coverage signal, not a predicted success rate.</p>}

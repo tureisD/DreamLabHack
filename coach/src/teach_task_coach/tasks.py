@@ -49,7 +49,10 @@ class Trial(TrialInput):
     evaluation_id: str | None = None
     scene_index: int | None = None
     sequence_index: int | None = None
-    purpose: Literal["baseline", "evaluation", "deployed"] = "baseline"
+    purpose: Literal["baseline", "evaluation", "deployed", "repair"] = "baseline"
+    repair_id: str | None = None
+    repair_role: Literal["baseline", "candidate"] | None = None
+    prompt_override: str | None = None
 
 
 class HeldoutScene(BaseModel):
@@ -100,6 +103,9 @@ class TaskStore:
                 scene_index INTEGER,
                 sequence_index INTEGER,
                 purpose TEXT NOT NULL DEFAULT 'baseline'
+                ,repair_id TEXT
+                ,repair_role TEXT
+                ,prompt_override TEXT
             );
             CREATE INDEX IF NOT EXISTS trials_task_id ON trials(task_id);
             CREATE TABLE IF NOT EXISTS heldout_scenes (
@@ -130,6 +136,7 @@ class TaskStore:
             ("checkpoint", "TEXT"), ("evaluation_id", "TEXT"),
             ("scene_index", "INTEGER"), ("sequence_index", "INTEGER"),
             ("purpose", "TEXT NOT NULL DEFAULT 'baseline'"),
+            ("repair_id", "TEXT"), ("repair_role", "TEXT"), ("prompt_override", "TEXT"),
         ):
             if name not in columns:
                 connection.execute(f"ALTER TABLE trials ADD COLUMN {name} {sql_type}")
@@ -309,6 +316,23 @@ class TaskStore:
                 "SELECT * FROM trials WHERE evaluation_id = ? ORDER BY sequence_index", (evaluation_id,)
             ).fetchall()
         return [Trial.model_validate(dict(row)) for row in rows]
+
+    def list_repair_trials(self, repair_id: str) -> list[Trial]:
+        with self.db.connect() as connection:
+            self._schema(connection)
+            rows = connection.execute(
+                "SELECT * FROM trials WHERE repair_id = ? ORDER BY sequence_index", (repair_id,)
+            ).fetchall()
+        return [Trial.model_validate(dict(row)) for row in rows]
+
+    def next_repair_trial(self, repair_id: str) -> Trial | None:
+        with self.db.connect() as connection:
+            self._schema(connection)
+            row = connection.execute(
+                """SELECT * FROM trials WHERE repair_id = ? AND status NOT IN ('completed', 'abandoned')
+                   ORDER BY sequence_index LIMIT 1""", (repair_id,)
+            ).fetchone()
+        return None if row is None else Trial.model_validate(dict(row))
 
     def next_evaluation_trial(self, evaluation_id: str) -> Trial | None:
         with self.db.connect() as connection:

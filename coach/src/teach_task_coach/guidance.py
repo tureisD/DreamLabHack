@@ -8,6 +8,7 @@ from teach_task_coach.coverage import plan
 from teach_task_coach.demos import DemoStore
 from teach_task_coach.evaluation import EvaluationStore
 from teach_task_coach.faas import FaaSStore, FineTuneRequest
+from teach_task_coach.repair import RepairStore
 from teach_task_coach.storage import EpisodeStore
 from teach_task_coach.tasks import TaskStore
 
@@ -18,7 +19,7 @@ class Guidance(BaseModel):
     headline: str
     next_action: str
     evidence: list[str]
-    target_screen: Literal["tasks", "runs", "demos", "training", "evaluation"]
+    target_screen: Literal["tasks", "runs", "demos", "training", "evaluation", "repair"]
     pilot_ready: bool
     suggested_recipe: FineTuneRequest | None = None
 
@@ -30,6 +31,7 @@ def guidance(
     demos: DemoStore,
     faas: FaaSStore,
     evaluations: EvaluationStore,
+    repairs: RepairStore | None = None,
 ) -> Guidance:
     trials = tasks.list_trials(task_id)
     labelled = []
@@ -122,6 +124,31 @@ def guidance(
                 next_action="Review the paired failures, collect targeted demos if needed, and train a new dataset version.",
                 evidence=evidence + [report.reason], target_screen="evaluation", pilot_ready=False,
             )
+
+    if failures and repairs is not None:
+        studies = repairs.list(task_id)
+        if not studies:
+            return Guidance(
+                task_id=task_id, phase="fix", headline="Test a cheap repair before FaaS",
+                next_action="Compare a prompt or setup change on matched scenes; training may be unnecessary.",
+                evidence=evidence, target_screen="repair", pilot_ready=False,
+            )
+        repair_report = repairs.report(studies[0], tasks, episodes)
+        if repair_report.decision == "use_fix":
+            return Guidance(
+                task_id=task_id, phase="fix", headline="Use the cheaper repair",
+                next_action=repair_report.recommendation,
+                evidence=evidence + [f"Repair audit: {repair_report.input_sha256}."],
+                target_screen="repair", pilot_ready=False,
+            )
+        if repair_report.decision in ("not_evaluable", "inconclusive"):
+            return Guidance(
+                task_id=task_id, phase="fix", headline="Finish the cheap repair comparison",
+                next_action=repair_report.recommendation,
+                evidence=evidence + repair_report.problems,
+                target_screen="repair", pilot_ready=False,
+            )
+        evidence.append("A matched cheap repair produced no observed gain; FaaS is worth considering.")
 
     if versions:
         latest_version = versions[0]

@@ -35,10 +35,9 @@ def test_guidance_moves_from_baseline_to_covered_pilot(tmp_path):
     episodes.label(episode.id, False, "grasp", "missed")
     tasks.transition(trial.id, "planned", "completed", episode_id=episode.id)
     ready = client.get(route).json()
-    assert ready["phase"] == "train"
-    assert ready["pilot_ready"] is True
-    assert ready["suggested_recipe"]["steps"] == 1000
-    assert ready["suggested_recipe"]["base_share"] == 0.5
+    assert ready["phase"] == "fix"
+    assert ready["target_screen"] == "repair"
+    assert ready["pilot_ready"] is False
     diagnosis = client.get(f"/api/tasks/{task.id}/diagnosis").json()
     assert diagnosis["data_count"] == 1
     assert diagnosis["failure_stages"] == {"grasp": 1}
@@ -74,8 +73,8 @@ def test_guidance_names_uncovered_failure_cell(tmp_path):
         demo_store=demos, faas_store=faas,
     ))
     result = client.get(f"/api/tasks/{task.id}/guidance").json()
-    assert result["phase"] == "collect"
-    assert "Cell 3" in result["next_action"]
+    assert result["phase"] == "fix"
+    assert result["target_screen"] == "repair"
     assert result["pilot_ready"] is False
 
 
