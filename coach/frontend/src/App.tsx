@@ -99,6 +99,12 @@ export default function App() {
     setScreen('evaluation');
   }
 
+  function returnToCoach() {
+    if (window.location.hash) window.location.hash = '';
+    setScreen('start');
+    window.scrollTo(0, 0);
+  }
+
   if (!needsHostedConnection && (mode === 'offline' || offlineRequested)) {
     if (mode === 'loading') return <main className="page"><p role="status">Opening the local walkthrough…</p></main>;
     if (mode !== 'offline') return <main className="page">
@@ -127,23 +133,23 @@ export default function App() {
 
   return (
     <>
-      {screen !== 'start' && <nav className="top-nav" aria-label="DreamCoach">
-        <button type="button" onClick={() => {
-          if (window.location.hash) window.location.hash = '';
-          setScreen('start');
-        }}>Back to DreamCoach</button>
+      {screen !== 'start' && screen !== 'effect' && <nav className="top-nav" aria-label="DreamCoach">
+        <button type="button" onClick={returnToCoach}>Back to DreamCoach</button>
       </nav>}
-      {screen === 'start' && <div className="coach-experience" onPointerMove={movePointer}
+      {(screen === 'start' || screen === 'effect') && <div className="coach-experience" onPointerMove={movePointer}
         onPointerLeave={(event) => event.currentTarget.classList.remove('has-pointer')}>
         <div className="coach-pointer" aria-hidden="true" />
-        <CoachChat
+        {screen === 'effect' ? <CoachEffect onBack={returnToCoach} /> : <CoachChat
           needsHostedConnection={needsHostedConnection}
           onHostedConnection={() => {
             resetChatSession();
             setNeedsHostedConnection(false);
           }}
           resetSession={resetChatSession}
-          onEvidence={() => setScreen('effect')}
+          onEvidence={() => {
+            setScreen('effect');
+            window.scrollTo(0, 0);
+          }}
           activeTaskId={activeTaskId}
           selectTask={selectTask}
           demoApproval={demoApproval}
@@ -152,7 +158,7 @@ export default function App() {
           showSimulatorOnOpen={showSimulator}
           simulatorMode={simulatorMode}
           chooseSimulatorMode={chooseSimulatorMode}
-        />
+        />}
       </div>}
       {screen === 'guide' && <Guide initialTaskId={route.screen === 'guide' ? routeTask : activeTaskId}
         onRepair={() => setScreen('repair')} />}
@@ -169,7 +175,6 @@ export default function App() {
         initialEvaluationId={evaluationSelection.evaluationId}
       />}
       {screen === 'statistical' && <StatisticalAudit />}
-      {screen === 'effect' && <CoachEffect />}
       {screen === 'runs' && <Runs key={`${initialRun}:${runPrompt}`} initialEpisodeId={initialRun} initialPrompt={runPrompt} />}
     </>
   );

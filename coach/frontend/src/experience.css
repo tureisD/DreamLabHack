@@ -4,6 +4,8 @@
   --accent: #8c4027;
   --edge: #ead5c5;
   --paper: #fffaf5;
+  --wash: #ffeddf;
+  --panel-shadow: 0 2px 2px #6135200e, 0 24px 64px #69453139, 0 0 0 1px #a8725d26;
   position: relative;
   isolation: isolate;
   min-height: 100dvh;
@@ -12,7 +14,7 @@
 }
 
 .coach-experience::before {
-  position: absolute;
+  position: fixed;
   z-index: -1;
   inset: 0;
   content: '';
@@ -29,7 +31,7 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
     linear-gradient(155deg, #f5c8de, #ffc9a1 55%, #b7d1bf);
 }
 
-.coach-experience .chat-page {
+.coach-experience :is(.chat-page, .coach-evidence-page) {
   position: relative;
   margin: 0 auto;
   max-width: 1080px;
@@ -38,7 +40,7 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
   background: transparent;
 }
 
-.coach-experience .chat-page .header {
+.coach-experience :is(.chat-page, .coach-evidence-page) .header {
   align-items: center;
   justify-content: center;
   text-align: center;
@@ -64,7 +66,7 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
   font: 27px/1 system-ui, sans-serif;
 }
 
-.coach-experience .chat-page h1 {
+.coach-experience .coach-hero h1 {
   margin: 0;
   color: #35231f;
   font-family: 'Bitcount Single', ui-monospace, monospace;
@@ -75,12 +77,12 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
   text-shadow: 0 1px 18px #fff2dd;
 }
 
-html:has(meta[name="dreamcoach-mode"]) .coach-experience .chat-page h1 {
+html:has(meta[name="dreamcoach-mode"]) .coach-experience .coach-hero h1 {
   font-family: ui-monospace, monospace;
   font-weight: 650;
 }
 
-.coach-experience .chat-page .subtitle {
+.coach-experience .coach-hero .subtitle {
   color: #4d352c;
   text-shadow: 0 1px 12px #fff4e7;
   font-size: clamp(15px, 2.2vw, 19px);
@@ -97,7 +99,7 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience .chat-page h1 {
   border: 1px solid #fff7ec;
   border-radius: 25px;
   background: var(--paper);
-  box-shadow: 0 2px 2px #6135200e, 0 24px 64px #69453139, 0 0 0 1px #a8725d26;
+  box-shadow: var(--panel-shadow);
 }
 
 .coach-experience .chat-panel-top {
@@ -172,6 +174,7 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience .chat-page h1 {
 }
 
 .coach-experience .chat-begin button:enabled { animation: none; }
+.coach-experience .chat-begin button:enabled:hover { transform: none; }
 .coach-experience .chat-begin button:enabled:hover,
 .coach-experience .chat-composer button:enabled:hover { background: #783922; }
 .coach-experience .chat-begin-arrow { background: #ffffff24; }
@@ -207,6 +210,61 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience .chat-page h1 {
   box-shadow: none;
 }
 
+.coach-evidence-page {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+}
+
+.coach-evidence-page .coach-evidence-back {
+  justify-self: start;
+  padding: 8px 13px;
+  border: 1px solid #fff7ec;
+  border-radius: 999px;
+  background: var(--paper);
+}
+
+.coach-evidence-page .coach-evidence-back span { margin-right: 4px; }
+
+.coach-experience .coach-evidence-page .header { margin-bottom: 8px; }
+.coach-evidence-page .eyebrow { margin: 0 0 6px; color: var(--accent); }
+.coach-evidence-page .coach-hero .eyebrow { margin: 0; }
+.coach-experience .coach-evidence-page h1 {
+  max-width: 22ch;
+  font-size: clamp(34px, 6.5vw, 70px);
+  text-wrap: balance;
+}
+.coach-evidence-page .subtitle { max-width: 54ch; }
+
+.coach-evidence-page > .card {
+  min-width: 0;
+  padding: clamp(18px, 3.1vw, 30px);
+  border-color: #fff7ec;
+  border-radius: 22px;
+  background: var(--paper);
+  box-shadow: 0 8px 24px #61352018, 0 0 0 1px var(--edge);
+}
+
+.coach-evidence-page :is(.card p, .evaluation-metrics span, .audit-table th) { color: var(--muted); }
+.coach-evidence-page :is(.evaluation-metrics div, .horizon-explorer-stats div, .audit-table th, .horizon-explorer-decision) {
+  background: var(--wash);
+}
+.coach-evidence-page :is(.audit-table th, .audit-table td, .audit-file textarea, .horizon-explorer-scene) {
+  border-color: var(--edge);
+}
+.coach-evidence-page code { overflow-wrap: anywhere; }
+
+.coach-evidence-page button { background: #974b30; color: #fff9f1; }
+.coach-evidence-page button:enabled:hover { background: #783922; }
+.coach-evidence-page button.secondary,
+.coach-evidence-page .horizon-explorer-presets button:not(.selected),
+.coach-experience .chat-suggestions button.secondary { background: var(--wash); color: #663b2a; }
+.coach-evidence-page button.secondary:enabled:hover,
+.coach-evidence-page .horizon-explorer-presets button:not(.selected):hover,
+.coach-experience .chat-suggestions button.secondary:enabled:hover,
+.coach-experience .chat-suggestions button[aria-pressed="true"] { background: #ffdcc4; }
+.coach-evidence-page .horizon-explorer-presets button.selected { background: #974b30; }
+
 .coach-pointer { display: none; }
 
 @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
@@ -227,23 +285,29 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience .chat-page h1 {
     left: 0;
     width: 24px;
     height: 24px;
+    pointer-events: none;
+    transform: translate3d(calc(var(--pointer-x) - 12px), calc(var(--pointer-y) - 12px), 0);
+  }
+
+  .coach-pointer::before {
+    content: '';
+    position: absolute;
+    inset: 0;
     border: 1px solid #a55b46a6;
     border-radius: 50%;
     box-shadow: 0 0 9px #ffce857a, inset 0 0 0 2px #fff8e768;
-    pointer-events: none;
-    transform: translate3d(calc(var(--pointer-x) - 12px), calc(var(--pointer-y) - 12px), 0);
-    transition: scale .16s ease, border-color .16s ease;
+    transition: transform .16s ease, border-color .16s ease;
   }
 
-  .coach-experience:has(:is(button, a, summary):hover) .coach-pointer {
-    scale: 1.3;
+  .coach-experience:has(:is(button:enabled, a[href], summary):hover) .coach-pointer::before {
+    transform: scale(1.3);
     border-color: var(--accent);
   }
 }
 
 @media (max-width: 580px) {
   .coach-experience::before { background-position: 29% center; }
-  .coach-experience .chat-page { padding-inline: 12px; }
+  .coach-experience :is(.chat-page, .coach-evidence-page) { padding-inline: 12px; }
   .coach-experience .chat-page .chat-shell { height: max(365px, calc(100dvh - 272px)); border-radius: 19px; }
   .coach-experience .chat-panel-top { flex-basis: 49px; }
   .coach-experience .chat-bubble { max-width: 100%; }

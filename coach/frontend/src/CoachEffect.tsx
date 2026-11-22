@@ -20,7 +20,7 @@ type Footprint = { task_id: string; baseline_trials: number; repair_trials: numb
 
 const fmt = (value: number | null, suffix = '') => value === null ? 'Unknown' : `${value.toFixed(1)}${suffix}`;
 
-export default function CoachEffect() {
+export default function CoachEffect({ onBack }: { onBack: () => void }) {
   const [plan, setPlan] = useState('');
   const [outcomes, setOutcomes] = useState('');
   const [report, setReport] = useState<Report | null>(null);
@@ -79,8 +79,18 @@ export default function CoachEffect() {
     ['Actual FaaS bill', report.standard.mean_faas_cost_usd, report.coach.mean_faas_cost_usd, report.coach_minus_standard_mean_faas_cost_usd, ' USD'],
   ] : [];
 
-  return <main className="page">
-    <header className="header"><div><p className="eyebrow">DreamCoach evidence</p><h1>Check the run before retraining</h1><p className="subtitle">A completed Dream-1 fine-tune changed its simulator verdict when the evaluation ran long enough.</p></div></header>
+  return <main className="page coach-evidence-page">
+    <button className="secondary coach-evidence-back" type="button" onClick={onBack}>
+      <span aria-hidden="true">←</span> Back to DreamCoach
+    </button>
+    <header className="header">
+      <div className="coach-hero">
+        <div className="coach-mark" aria-hidden="true">✦</div>
+        <p className="eyebrow">DreamCoach evidence</p>
+        <h1>Check the run before retraining</h1>
+        <p className="subtitle">A completed Dream-1 fine-tune changed its simulator verdict when the evaluation ran long enough.</p>
+      </div>
+    </header>
     <HorizonExplorer />
     <section className="card"><p className="eyebrow">Observed simulator diagnostic</p><h2>Did the evaluation stop too early?</h2><p>We tested the same completed fine-tune on eight new apple scenes using the original nine-request limit and the coach’s twelve-request limit. All sixteen runs were saved and passed action replay.</p><div className="evaluation-metrics"><div><strong>{repairStudy.conditions.original_short.successes}/{repairStudy.conditions.original_short.valid}</strong><span>original limit</span></div><div><strong>{repairStudy.conditions.coach_extended.successes}/{repairStudy.conditions.coach_extended.valid}</strong><span>extended limit</span></div><div><strong>{repairStudy.coach_only_successes}</strong><span>scene passed only with extension</span></div></div><p>On scene 916, the extended trace first met the two-second lift rule during request 10. No new FaaS job was submitted. Twelve requests execute 33% more action rows than nine, and this eight-scene result does not measure operator time or financial savings.</p><div className="audit-table-wrap"><table className="audit-table"><thead><tr><th>Scene seed</th><th>Nine requests</th><th>Twelve requests</th></tr></thead><tbody>{repairStudy.pairs.map((pair) => <tr key={pair.seed}><td>{pair.seed}</td><td>{pair.original_short_success ? 'Pass' : 'Fail'}</td><td>{pair.coach_extended_success ? 'Pass' : 'Fail'}</td></tr>)}</tbody></table></div><p>Frozen-plan SHA-256: <code>{repairStudy.plan_sha256}</code>.</p><button className="secondary" onClick={() => { const url = URL.createObjectURL(new Blob([JSON.stringify(repairStudy, null, 2)], { type: 'application/json' })); const link = document.createElement('a'); link.href = url; link.download = 'closed-loop-repair-report.json'; link.click(); URL.revokeObjectURL(url); }}>Download measured report</button></section>
     <section className="card"><h2>Evidence needed</h2><p>Randomize operators before starting, use the same robot, task, budget, and held-out success rule, then count every assigned operator. Record demos, FaaS jobs and steps, operator minutes, and the actual bill when available. Validate successful outcomes with independent evaluation reports.</p><p>The operator-study example is <strong>synthetic</strong>. The observed simulator result below measures one evaluation decision; it provides no observed time, demo, or FaaS-spend savings.</p><button className="secondary" disabled={busy} onClick={() => void example()}>Load synthetic example</button></section>
