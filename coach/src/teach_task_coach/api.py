@@ -87,6 +87,11 @@ class SimCorrectionInput(BaseModel):
     target_pixel: tuple[float, float] | None = None
 
 
+class SceneTaskInput(BaseModel):
+    spec: dict
+    seed: int = Field(ge=0, le=2**32 - 1)
+
+
 class StatisticalPlanRequest(BaseModel):
     baseline_rate: float = Field(ge=0, le=1, allow_inf_nan=False)
     alternative_gain: float = Field(gt=0, le=1, allow_inf_nan=False)
@@ -306,6 +311,27 @@ def create_app(
     @app.get("/api/sim-correction/status")
     def sim_correction_status() -> dict:
         return sim_correction.status()
+
+    @app.post("/api/scene-task/preview")
+    def preview_scene_task(value: SceneTaskInput) -> dict:
+        try:
+            return sim_correction.preview_scene_task(value.spec, value.seed)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post("/api/tasks/{task_id}/scene-task")
+    def start_scene_task(task_id: str, value: SceneTaskInput) -> dict:
+        task = tasks.get_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        try:
+            return sim_correction.start_scene_task(task_id, task.prompt, value.spec, value.seed)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get("/api/simulator/status", response_model=SimulatorStatus)
     def get_simulator_status() -> SimulatorStatus:

@@ -151,7 +151,9 @@ def read_demo(folder: Path, task_id: str) -> Demo:
             if actions.ndim != 2 or actions.shape[0] != frames:
                 findings.append(DemoFinding(code="action_rows", severity="error", message="Action rows do not match metadata."))
             elif actions.shape[0] > 1:
-                if (folder / "click_correction.json").is_file() and actions.shape[1] == 14:
+                scripted_simulator = ((folder / "click_correction.json").is_file()
+                                      or (folder / "scene_task.json").is_file())
+                if scripted_simulator and actions.shape[1] == 14:
                     # The YAM click teacher holds the unused arm fixed. Its wrist
                     # image can be identical for seconds without a camera fault.
                     for role, arm in (("wrist_r", actions[:, :7]), ("wrist_l", actions[:, 7:])):
