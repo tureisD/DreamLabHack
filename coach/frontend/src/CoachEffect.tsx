@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 type Snapshot = { plan: object; outcomes: object[] };
 type Arm = { participants: number; validated_by_horizon: number; validation_rate: number;
@@ -10,6 +10,11 @@ type Report = { study_id: string; data_kind: 'synthetic' | 'observed'; horizon_m
   coach_minus_standard_mean_demos: number; coach_minus_standard_mean_faas_jobs: number;
   coach_minus_standard_mean_faas_steps: number; coach_minus_standard_mean_operator_minutes: number;
   coach_minus_standard_mean_faas_cost_usd: number | null; fisher_two_sided_p: number };
+type Task = { id: string; name: string };
+type Footprint = { task_id: string; baseline_trials: number; repair_trials: number;
+  demos_imported: number; demos_kept: number; faas_jobs_submitted: number;
+  faas_steps_submitted: number; evaluations_planned: number; validated_improvements: number;
+  notes: string[] };
 
 const fmt = (value: number | null, suffix = '') => value === null ? 'Unknown' : `${value.toFixed(1)}${suffix}`;
 
@@ -19,6 +24,22 @@ export default function CoachEffect() {
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [taskId, setTaskId] = useState('');
+  const [local, setLocal] = useState<Footprint | null>(null);
+
+  useEffect(() => {
+    void fetch('/api/tasks').then(async (response) => response.json() as Promise<Task[]>).then((items) => {
+      setTasks(items); setTaskId((current) => current || items[0]?.id || '');
+    }).catch(() => setTasks([]));
+  }, []);
+  useEffect(() => {
+    if (!taskId) { setLocal(null); return; }
+    void fetch(`/api/tasks/${taskId}/footprint`).then(async (response) => {
+      if (!response.ok) throw new Error('Could not load local counts.');
+      return response.json() as Promise<Footprint>;
+    }).then(setLocal).catch(() => setLocal(null));
+  }, [taskId]);
 
   async function example() {
     setBusy(true); setError(''); setReport(null);
@@ -59,6 +80,7 @@ export default function CoachEffect() {
   return <main className="page">
     <header className="header"><div><p className="eyebrow">Operator study</p><h1>Does the coach save work?</h1><p className="subtitle">Compare real operator sessions against the ordinary workflow on one frozen task and time horizon.</p></div></header>
     <section className="card"><h2>Evidence needed</h2><p>Randomize operators before starting, use the same robot, task, budget, and held-out success rule, then count every assigned operator. Record demos, FaaS jobs and steps, operator minutes, and the actual bill when available. Validate successful outcomes with independent evaluation reports.</p><p>The current repo contains only a <strong>synthetic example</strong>. It exercises this analysis but provides no observed time, demo, or spend savings.</p><button className="secondary" disabled={busy} onClick={() => void example()}>Load synthetic example</button></section>
+    <section className="card"><h2>Observed local task counts</h2>{tasks.length ? <label>Task<select value={taskId} onChange={(event) => setTaskId(event.target.value)}>{tasks.map((task) => <option key={task.id} value={task.id}>{task.name}</option>)}</select></label> : <p>No local task yet.</p>}{local && <><div className="evaluation-metrics"><div><strong>{local.baseline_trials}</strong><span>baseline trials</span></div><div><strong>{local.repair_trials}</strong><span>repair trials</span></div><div><strong>{local.demos_kept}/{local.demos_imported}</strong><span>kept/imported demos</span></div><div><strong>{local.faas_steps_submitted}</strong><span>submitted FaaS steps</span></div></div><p>{local.faas_jobs_submitted} submitted jobs · {local.evaluations_planned} planned evaluations · {local.validated_improvements} validated improvements.</p><ul>{local.notes.map((note) => <li key={note}>{note}</li>)}</ul></>}</section>
     <section className="card"><h2>Analyze a fixed-horizon study</h2><label className="audit-file">Frozen plan JSON<input type="file" accept=".json,application/json" onChange={async (event) => { const file = event.target.files?.[0]; if (file) { setPlan(await file.text()); setReport(null); } }} /><textarea value={plan} onChange={(event) => { setPlan(event.target.value); setReport(null); }} spellCheck={false} /></label><label className="audit-file">All participant outcomes JSON<input type="file" accept=".json,application/json" onChange={async (event) => { const file = event.target.files?.[0]; if (file) { setOutcomes(await file.text()); setReport(null); } }} /><textarea value={outcomes} onChange={(event) => { setOutcomes(event.target.value); setReport(null); }} spellCheck={false} /></label><button disabled={busy || !plan.trim() || !outcomes.trim()} onClick={() => void analyze()}>{busy ? 'Checking…' : 'Analyze operator study'}</button></section>
     {error && <div className="alert" role="alert">{error}</div>}
     {report && <section className="card evaluation-report" aria-live="polite"><p className="eyebrow">{report.data_kind === 'synthetic' ? 'Synthetic demonstration — no measured savings' : 'Operator-reported study — verify source logs'}</p><h2>{report.study_id}</h2><p>{report.coach.validated_by_horizon}/{report.coach.participants} coach operators versus {report.standard.validated_by_horizon}/{report.standard.participants} standard operators reached validation within {report.horizon_minutes} minutes.</p><div className="audit-table-wrap"><table className="audit-table"><thead><tr><th>Outcome per operator</th><th>Standard</th><th>Coach</th><th>Coach − standard</th></tr></thead><tbody>{rows.map(([label, standard, coached, delta, suffix]) => <tr key={label}><td>{label}</td><td>{fmt(standard, suffix)}</td><td>{fmt(coached, suffix)}</td><td>{fmt(delta, suffix)}</td></tr>)}</tbody></table></div><p>Two-sided Fisher p-value for validation: {report.fisher_two_sided_p.toFixed(3)}. Snapshot SHA-256: <code>{report.snapshot_sha256}</code>.</p><ul>{report.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul><button className="secondary" onClick={() => { const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' })); const link = document.createElement('a'); link.href = url; link.download = 'coach-effect-report.json'; link.click(); URL.revokeObjectURL(url); }}>Download report JSON</button></section>}
