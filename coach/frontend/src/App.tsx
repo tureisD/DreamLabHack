@@ -70,6 +70,7 @@ export default function App() {
       </nav>
       {screen === 'start' && <CoachChat
         resetSession={resetChatSession}
+        onEvidence={() => setScreen('effect')}
         activeTaskId={activeTaskId}
         selectTask={selectTask}
         demoApproval={demoApproval}

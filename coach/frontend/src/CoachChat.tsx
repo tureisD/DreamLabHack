@@ -47,10 +47,11 @@ function savedMessages(): Message[] {
 }
 
 export default function CoachChat({
-  resetSession, activeTaskId, selectTask, showSimulatorOnOpen,
+  resetSession, onEvidence, activeTaskId, selectTask, showSimulatorOnOpen,
   simulatorMode, chooseSimulatorMode, demoApproval, clearDemoApproval, onDemoKept,
 }: {
   resetSession: () => void;
+  onEvidence: () => void;
   activeTaskId: string;
   selectTask: (taskId: string) => void;
   showSimulatorOnOpen: boolean;
@@ -691,7 +692,7 @@ export default function CoachChat({
       {!workSurface && begun && !hostedGuide && <form onSubmit={(event) => void submit(event)} className="chat-composer"><textarea ref={composer} aria-label="Message to coach" disabled={!ai?.configured} value={text} maxLength={2000} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(event); } }} placeholder="Tell me about your robot or ask what to do next…" /><button disabled={!ai?.configured || busy || !text.trim()}>Send</button></form>}
     </section>
     <LiveEvaluation taskId={evaluationTaskId} simulatorActive={!!simulatorRequested && simulatorMode === 'apple'}
-      onOpen={openEvaluation} evidence={evaluation} />
+      onOpen={openEvaluation} onEvidence={onEvidence} evidence={evaluation} />
     </div>
   </main>;
 }

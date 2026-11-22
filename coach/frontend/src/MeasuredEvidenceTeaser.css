@@ -1,0 +1,5 @@
+.measured-evidence-teaser { margin-top: 20px; padding: 15px; border: 1px solid #f0d9c0; border-radius: 12px; background: #fff0df; }
+.measured-evidence-teaser span, .measured-evidence-teaser strong { display: block; }
+.measured-evidence-teaser span { color: #8c4927; font-size: 12px; font-weight: 700; }
+.measured-evidence-teaser strong { margin-top: 7px; font-size: 26px; font-variant-numeric: tabular-nums; }
+.measured-evidence-teaser p { margin: 7px 0 12px; font-size: 13px; }

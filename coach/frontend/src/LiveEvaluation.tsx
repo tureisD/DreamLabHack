@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Evaluation, Report } from './Evaluation';
 import type { PairedReport } from './StatisticalAudit';
+import './MeasuredEvidenceTeaser.css';
 
 type LiveResult = {
   task_name: string;
@@ -97,10 +98,11 @@ export function useLiveEvaluation(taskId: string, comparisonId?: string) {
   };
 }
 
-export default function LiveEvaluation({ taskId, simulatorActive, onOpen, evidence }: {
+export default function LiveEvaluation({ taskId, simulatorActive, onOpen, onEvidence, evidence }: {
   taskId: string;
   simulatorActive: boolean;
   onOpen: (taskId?: string, evaluationId?: string) => void;
+  onEvidence: () => void;
   evidence: ReturnType<typeof useLiveEvaluation>;
 }) {
   const { result, simulation: sim, failed } = evidence;
@@ -162,5 +164,11 @@ export default function LiveEvaluation({ taskId, simulatorActive, onOpen, eviden
     {taskId && result === null && !sim && (simulatorActive
       ? <p>Run a matched comparison from chat when a checkpoint is ready.</p>
       : <button type="button" className="live-eval-link" onClick={() => onOpen(taskId)}>Plan a physical evaluation</button>)}
+    {!sim && !current && <div className="measured-evidence-teaser">
+      <span>Measured YAM simulator case</span>
+      <strong>14/19 → 19/19</strong>
+      <p>The same fine-tune passed more scenes when the evaluation ran long enough. This is an example, not a result for your task.</p>
+      <button type="button" className="secondary" onClick={onEvidence}>Explore the saved evidence</button>
+    </div>}
   </aside>;
 }
