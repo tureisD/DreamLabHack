@@ -623,7 +623,9 @@ class YamWorkflow:
             if pending:
                 args = [{"folder": str(trial), "seed": seed} for trial, seed, _ in pending]
                 try:
-                    scores = workflow_result("--diagnose-batch", json.dumps(args), timeout=45).get("scores", {})
+                    scores = workflow_result(
+                        "--diagnose-batch", json.dumps(args), timeout=max(45, 7 * len(args) + 7),
+                    ).get("scores", {})
                 except (SimulatorRunError, ValueError):
                     scores = {}
                 for trial, seed, attempt in pending:
