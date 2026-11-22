@@ -122,6 +122,9 @@ class DreamContractTests(unittest.TestCase):
         actions = {k: [[0, 0, 0, 0, 0, 0, 1]] * 48 for k in ("q_l_chunk", "q_r_chunk")}
         left, right = validate_chunk(env, actions)
         env.step(left[0], right[0])
+        actions["q_l_chunk"] = [[0, 0, 0, 0, 0, 0, 1.052775]] * 48
+        left, _ = validate_chunk(env, actions)
+        self.assertEqual(left[0, 6], 1.0)
         actions["q_r_chunk"] = [[0, 0, 0, 0, 0, 0, 99]] * 48
         with self.assertRaises(ValueError):
             validate_chunk(env, actions)
@@ -145,7 +148,7 @@ class DreamContractTests(unittest.TestCase):
         full, _ = validate_chunk(env, actions, 48)
         self.assertEqual(full[30, 1], 0.0)
 
-    def _run_with_policies(self, replies, model="dreamlabs/test-yam-joints"):
+    def _run_with_policies(self, replies, model="dreamlabs/test-yam-joints", extra_args=None):
         """Runs one task on fake dream client policies: each opened policy answers the next of `replies` (an action
         dict, or an exception to raise), and the run stops after the first chunk.
         @return The configs the policies were opened with, and each policy's calls."""
@@ -191,8 +194,20 @@ class DreamContractTests(unittest.TestCase):
             patch("dream_control.capture", side_effect=fake_capture),
             patch("dream_control.open_policy", side_effect=open_policy),
         ):
-            main(["--headless"] + (["--model", model] if model else []), shared_env=env, stop_event=stop)
+            main(["--headless"] + (["--model", model] if model else []) + (extra_args or []), shared_env=env, stop_event=stop)
         return env, opened
+
+    def test_pool_warming_does_not_consume_one_reply_budget(self):
+        from dream.errors import DreamServerError
+
+        warming = DreamServerError(
+            "model warming", code="DA-2000", reason="pool_warming",
+            retryable=True, retry_after_s=0.01,
+        )
+        chunk = {"q_l_chunk": [[0.2, 0, 0, 0, 0, 0, 1]], "q_r_chunk": [[0.2, 0, 0, 0, 0, 0, 1]]}
+        env, opened = self._run_with_policies([warming, chunk], extra_args=["--max-requests", "1"])
+        self.assertEqual(len(opened[0].calls), 3)
+        self.assertEqual([name for name, _ in opened[0].calls], ["get_action", "get_action", "close"])
 
     def test_a_server_side_episode_restart_asks_again_up_to_three_times(self):
         class DreamSessionExpired(Exception):
@@ -269,6 +284,7 @@ class DreamContractTests(unittest.TestCase):
 
         self.assertEqual(resolve_model(" Beta "), BETA_MODEL)
         self.assertEqual(resolve_model("1"), BETA_MODEL)
+        self.assertEqual(resolve_model("dream-1-beta"), BETA_MODEL)
         self.assertEqual(resolve_model("dream-1-ft:0a1b2c3d-towels"), "dream-1-ft:0a1b2c3d-towels")
         self.assertEqual(resolve_model("run-7/checkpoint-12000"), "run-7/checkpoint-12000")
         for bad in ("", "  ", "my model"):
@@ -307,6 +323,11 @@ class DreamContractTests(unittest.TestCase):
             main(["--dry-run", "--headless"], shared_env=env)
         self.assertEqual(len(kept), FRAMES)
         np.testing.assert_allclose(np.diff(kept), FRAME_EVERY_STEPS * 0.05, rtol=0, atol=1e-9)
+        self.assertAlmostEqual(
+            env.data.time,
+            ((FRAMES - 1) * FRAME_EVERY_STEPS + 1) * 0.05,
+            msg="the observation window spans frame steps 0, 4, ..., 32",
+        )
 
     def test_reference_camera_calibration(self):
         from yam_env import CALIBRATION, TOP_CAMERA_LOWER_M, WORLD_OFFSET, WORLD_ROTATION

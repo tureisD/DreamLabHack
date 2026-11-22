@@ -2,6 +2,12 @@
 
 A local companion for the [Dream Labs public library](../dream_library/README.md). It checks the robot station, reviews saved rollouts and demonstrations, submits a Dream FaaS job, and guides a paired before/after evaluation. Robot runs and paid fine-tuning require explicit operator actions.
 
+See [why this coach matters](WHY_THIS_COACH.md) for the operator decision loop, the measured apple checkpoint comparison, and the limits of the time and cost claims.
+
+The [Statistical audit](STATISTICAL_AUDIT.md) adds the separate evaluator from the team's `codex/stat-eval-implementation` branch for prospective independent real-world trials. It does not replace the paired Evaluation tab or reclassify simulator rollouts as independent robot evidence.
+
+The [matched-scene evidence path](PAIRED_EVIDENCE.md) adds a paired analysis and a one-click replay of the measured 500-step apple comparison. Simulator outcomes remain descriptive; eligible physical pairs use a separate conservative interval.
+
 For the apple experiment, use the [two-account training handoff and verified datasets](experiments/yam_sim_faas/grasp_training/README.md).
 
 ## Run locally
@@ -54,7 +60,7 @@ The **Guide** screen derives the next action from labelled baseline runs, statio
 
 For a hardware-free run, follow the [simulator setup and one-request pilot](experiments/yam_sim_faas/PILOT.md).
 
-The [YAM simulation FaaS experiment](experiments/yam_sim_faas/README.md) includes reproducible simulated robot recordings, a locally validated LeRobot dataset, a separate Dream-1 baseline rollout, and the observed Dream dataset-processing failure. It is a format and integration test, not evidence of task improvement.
+The [YAM simulation FaaS experiment](experiments/yam_sim_faas/README.md) began as a format and integration test with reproducible simulated robot recordings, a validated LeRobot dataset, and a base-model rollout. The later [held-out comparison](experiments/yam_sim_faas/grasp_training/EXTENDED_500_STEP_EVAL.md) measured task improvement for the 500-step checkpoint in simulation; it is not physical robot evidence.
 
 The **Demos** screen can launch a single local SO-101 follower/leader recording with `lerobot-record` when LeRobot is installed on the robot computer. Configure the follower and leader serial ports and camera index in that screen. Stop the Dream station process first: the station holds the follower arms even while idle. The recorder saves one 30-second session under `COACH_DEMOS_DIR` with Hub upload disabled; after it exits, the scanner imports the result for review. This launcher has only been tested with a fake process, not physical arms. See [LeRobot's SO-101 recording guide](https://huggingface.co/docs/lerobot/main/en/il_robots) for calibration and wiring.
 

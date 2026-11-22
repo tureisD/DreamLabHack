@@ -1,5 +1,6 @@
 """Exercise the simulator recorder through the same endpoints as Coach's Runs screen."""
 
+import json
 import sys
 from pathlib import Path
 
@@ -14,11 +15,12 @@ from teach_task_coach.storage import EpisodeStore
 def test_training_batches_are_independent(monkeypatch):
     scripts = Path(__file__).resolve().parents[1] / "experiments/yam_sim_faas/grasp_training"
     monkeypatch.syspath_prepend(str(scripts))
-    from batch import HOLDOUT, SEEDS
+    from batch import CONFIRMATION, HOLDOUT, SEEDS
 
     assert len(SEEDS["varied"]) == len(SEEDS["independent"]) == 24
     assert SEEDS["varied"].isdisjoint(SEEDS["independent"])
     assert SEEDS["independent"].isdisjoint(HOLDOUT)
+    assert all(seeds.isdisjoint(CONFIRMATION) for seeds in SEEDS.values())
 
 
 def test_simulator_pilot_budget_and_review(tmp_path, monkeypatch):
@@ -59,16 +61,27 @@ def test_simulator_pilot_budget_and_review(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", [*argv, "42"])
     with pytest.raises(RuntimeError, match="simulated inference failure"):
         pilot.main()
+    monkeypatch.setattr(sys, "argv", [*argv, "43", "--score-only"])
+    pilot.main()
 
     client = TestClient(create_app(store=EpisodeStore(tmp_path / "coach"), scanner=RolloutScanner(root)))
-    assert client.post("/api/rollouts/import").json() == {"imported": 2, "skipped": []}
+    assert client.post("/api/rollouts/import").json() == {"imported": 3, "skipped": []}
     runs = [client.get("/api/episodes/" + item["id"]).json() for item in client.get("/api/episodes").json()]
-    first, failed = sorted(runs, key=lambda r: r["simulation"]["seed"])
+    first, failed, _score_only = sorted(runs, key=lambda r: r["simulation"]["seed"])
     assert first["status"] == "complete" and first["simulation"]["model_action_rows"] == 1
     assert failed["simulation"]["requests_attempted"] == 1
     assert failed["simulation"]["model_action_rows"] == 0
     assert failed["status"] == "partial" and failed["success"] is None
     assert first["simulation"]["apple_xy_m"] != failed["simulation"]["apple_xy_m"]
+    score_folder = next(folder for folder in root.iterdir() if
+                        json.loads((folder / "rollout.json").read_text())["simulation"]["seed"] == 43)
+    assert json.loads((score_folder / "rollout.json").read_text())["has_video"] is False
+    assert not list(score_folder.glob("videos/**/*.mp4"))
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(score_folder / "data/chunk-000/episode_000000.parquet")
+    assert "observation.apple_height_m" in table.column_names
+    assert len(table["observation.apple_height_m"]) == 2
     path = "/api/episodes/" + first["id"]
     for role in ("overhead", "wrist_l", "wrist_r"):
         assert client.get(path + "/video/" + role).content[4:8] == b"ftyp"

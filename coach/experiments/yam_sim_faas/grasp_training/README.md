@@ -16,6 +16,10 @@
 
 Dream published `dream-1-ft:7820aef9-apple-varied24-500` after 500 steps on the varied apple dataset. The model runs on Dream Labs. With a Dream API key that has access, pass this exact ID to the simulator recorder’s `--model` option. The checkpoint record links the hosted model to its training job and dataset manifest. [Checkpoint record](varied-checkpoint.json) · [Simulator recorder instructions](../PILOT.md)
 
+The [held-out simulator comparison](HELDOUT_500_STEP_EVAL.md) records matched base and fine-tune runs on seeds 901–904. `score_rollouts.py` replays saved model actions to check the lift threshold and state agreement; review the videos before interpreting the result as a real task outcome.
+
+The [corrected longer comparison](EXTENDED_500_STEP_EVAL.md) documents the 12-request score-only path and the fresh predeclared seeds 905–908. Run `record_dream_model_rollout.py` with `--score-only` to save actions, joint states, and actual simulated apple height without encoding review videos; use normal recording when human video review is needed. Score with `grasp_training/score_rollouts.py <rollout-folder>`. Do not pool the exploratory reruns of 901–904 with the fresh confirmation set.
+
 On 22 November 2026 Dream confirmed **processed** for the first account's dataset `dima24kor/apple-grasp-varied-3374a5388381`, ID `ds_25be44f202eb5d8c`. It contains 24 episodes and 3,871 rows at 10 Hz. The 16 varied demonstrations closed at 15 distinct times between 5.45 and 8.90 seconds. Across all 24 episodes the gripper was 4.08–6.27 mm from the apple center at first closure. No paid job was submitted by the first PC during preparation. This committed archive is a comparison reference only; it is not part of the second account's training data.
 
 All 24 archived action sequences also passed a separate 10 Hz physics replay. Every sequence held the apple at least 14.1 cm above the table for two continuous seconds and then released it. All 11,613 exported camera frames were checked against the corresponding frames in the original three camera streams. The independent batch builder runs the same exported-action replay on each new episode before packaging it.
@@ -86,7 +90,7 @@ python experiments/yam_sim_faas/grasp_training/preflight_heldout.py --output app
 
 This restores each scene twice, once with each first-account model ID. It compares the decoded videos from all three cameras, their timestamps, and the recorded state/action tables. A passing report covers eight camera warm-ups and zero model calls.
 
-For a live attempt, set `DREAM_API_KEY` locally for the checkpoint's account. For example, these commands use scene 901 and the first account's candidate. The request cap includes retries and cold-start refusals. Each call can spend credits.
+For a live attempt, set `DREAM_API_KEY` locally for the checkpoint's account. These commands use scene 901 and the first account's candidate. The recorder logs every attempted call. Dream's pool-warming refusals count toward the wall-clock limit and leave the request budget available for inference. Other retries use a request slot.
 
 ~~~powershell
 $experiment = 'experiments/yam_sim_faas'

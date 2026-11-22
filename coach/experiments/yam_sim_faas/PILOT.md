@@ -40,7 +40,7 @@ try {
 uv run --locked --extra sim teach-task-coach serve
 ```
 
-Open **http://127.0.0.1:8765** and select **Runs → Scan rollouts**. Open the **model** recording. Check that it shows at least one executed model action row, play each camera view, then save an operator outcome or leave it unlabelled if the clip is too short to judge. A single response can cover only the start of a pickup. The cap counts calls to the SDK's `get_action`; account charges are determined by Dream. The seconds flag limits the control loop, and an in-flight request can take longer. This command only runs inference.
+Open **http://127.0.0.1:8765** and select **Runs → Scan rollouts**. Open the **model** recording. Check that it shows at least one executed model action row, play each camera view, then save an operator outcome or leave it unlabelled if the clip is too short to judge. A single response can cover only the start of a pickup. The cap counts calls to the SDK's `get_action` except `pool_warming` refusals, which are retried at Dream's requested interval; the rollout records all attempted calls. Account charges are determined by Dream. The seconds flag is a wall-clock ceiling that includes cold-start waiting; a fresh fine-tune may need up to an hour. An in-flight request can take longer. This command only runs inference.
 
 ## Gather varied runs
 

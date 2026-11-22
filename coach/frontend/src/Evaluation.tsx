@@ -55,6 +55,10 @@ export default function EvaluationPage() {
   const [outcome, setOutcome] = useState<'success' | 'failure'>('success');
   const [stage, setStage] = useState('');
   const [note, setNote] = useState('');
+  const [reviewerId, setReviewerId] = useState('');
+  const [heldoutAttested, setHeldoutAttested] = useState(false);
+  const [resetsAttested, setResetsAttested] = useState(false);
+  const [auditDecision, setAuditDecision] = useState('');
 
   useEffect(() => {
     void json<Task[]>('/api/tasks').then((values) => {
@@ -149,10 +153,29 @@ export default function EvaluationPage() {
       await json<Trial>(`/api/trials/${trial.id}/label`, 'POST', {
         success: outcome === 'success', failure_stage: outcome === 'failure' && stage ? stage : null,
         note: note.trim() || null,
+        reviewer_id: reviewerId.trim(),
       });
       await refreshEvaluation(selectedId);
       setOutcome('success'); setStage(''); setNote('');
       setMessage('Outcome saved. Reset the scene for the next run.');
+    });
+  }
+
+  function auditSnapshot() {
+    if (!selectedId) return;
+    void act(async () => {
+      const snapshot = await json<unknown>(`/api/evaluations/${selectedId}/paired-snapshot`, 'POST', {
+        heldout_attested: heldoutAttested, resets_attested: resetsAttested,
+      });
+      const audit = await json<{ decision: string; problems: string[]; usable_pairs: number }>(
+        '/api/paired-evaluations/analyze', 'POST', snapshot,
+      );
+      setAuditDecision(`${audit.decision}: ${audit.usable_pairs}/30 usable pairs${audit.problems.length ? `; ${audit.problems.join(' ')}` : ''}`);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url; link.download = `paired-evaluation-${selectedId}.json`; link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setMessage('Paired evidence downloaded. Open Statistical evaluation to inspect the full audit.');
     });
   }
 
@@ -222,6 +245,15 @@ export default function EvaluationPage() {
       <p className="hint">Auto promotion for this comparison: {selected.auto_promote ? 'on' : 'off'}. It only changes the checkpoint used by future coach runs after an improved verdict; it never starts robot motion.</p>
     </section>}
 
+    {selected && <section className="card">
+      <h2>Paired statistical audit</h2>
+      <p>Export all observed runs for the stricter statistical check. Older labels without a reviewer and unfinished scenes remain in the snapshot but cannot earn an improvement verdict.</p>
+      <label><input type="checkbox" checked={heldoutAttested} onChange={(event) => setHeldoutAttested(event.target.checked)} /> I checked that these scenes were kept out of training.</label>
+      <label><input type="checkbox" checked={resetsAttested} onChange={(event) => setResetsAttested(event.target.checked)} /> I checked that the scene was reset between runs.</label>
+      <button disabled={busy || !heldoutAttested || !resetsAttested} onClick={auditSnapshot}>Analyze and download paired evidence</button>
+      {auditDecision && <p role="status">{auditDecision}</p>}
+    </section>}
+
     {selected && nextTrial && <section className="card evaluation-next">
       <p className="eyebrow">Trial {(nextTrial.sequence_index ?? 0) + 1} of {trials.length}</p>
       <h2>Scene {(nextTrial.scene_index ?? 0) + 1} · cell {nextTrial.start_cell + 1}</h2>
@@ -241,7 +273,8 @@ export default function EvaluationPage() {
         <label>Outcome<select value={outcome} onChange={(event) => setOutcome(event.target.value as 'success' | 'failure')}><option value="success">Success</option><option value="failure">Failure</option></select></label>
         {outcome === 'failure' && <label>Failure stage<select value={stage} onChange={(event) => setStage(event.target.value)}><option value="">Unknown</option><option value="approach">Approach</option><option value="grasp">Grasp</option><option value="transport">Transport</option><option value="release">Release</option><option value="other">Other</option></select></label>}
         <label>Note<textarea maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} /></label>
-        <button disabled={busy} onClick={() => label(nextTrial)}>Save outcome</button>
+        <label>Reviewer name or ID<input maxLength={120} value={reviewerId} onChange={(event) => setReviewerId(event.target.value)} /></label>
+        <button disabled={busy || !reviewerId.trim()} onClick={() => label(nextTrial)}>Save outcome</button>
       </div>}
     </section>}
     {selected && trials.length > 0 && !nextTrial && <section className="card"><h2>{unusable ? 'This comparison has an unusable run' : 'All planned runs are finished'}</h2><p>{unusable ? 'Plan a fresh comparison with the same fine-tune. The incomplete result stays in the record.' : 'Read the verdict above before deciding whether to deploy the candidate.'}</p></section>}

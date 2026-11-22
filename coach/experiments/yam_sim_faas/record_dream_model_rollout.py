@@ -26,6 +26,7 @@ def main(argv=None) -> None:
     parser.add_argument("--held-out-scene", type=Path, help="Replay a frozen apple evaluation scene for exactly 20 simulated seconds")
     parser.add_argument("--max-requests", type=int, default=1, help="Limit get_action calls per run")
     parser.add_argument("--dry-run", action="store_true", help="Record the observation warm-up offline")
+    parser.add_argument("--score-only", action="store_true", help="Save action/state replay without review videos")
     args = parser.parse_args(argv)
     if not args.dry_run and not os.getenv("DREAM_API_KEY"):
         parser.error("Set DREAM_API_KEY in the process environment")
@@ -50,7 +51,8 @@ def main(argv=None) -> None:
     if seed is None:
         seed = secrets.randbits(32)
     source = "observation dry run" if args.dry_run else "model"
-    with recorder.recording(args.output, args.task, args.model, seed, source, start_pose=pose) as (env, details):
+    with recorder.recording(args.output, args.task, args.model, seed, source,
+                            start_pose=pose, videos=not args.score_only) as (env, details):
         options = ["--headless", "--quiet", "--seconds", str(args.seconds), "--task", args.task,
                    "--model", args.model, "--max-requests", str(args.max_requests)]
         if args.dry_run:
@@ -70,7 +72,8 @@ def main(argv=None) -> None:
         finally:
             details["simulated_control_seconds"] = details["model_action_rows"] / recorder.FPS
         if args.held_out_scene is not None and not args.dry_run and rows != control_rows:
-            details["control_stop"] = "request_cap" if details["requests_attempted"] >= args.max_requests else "wall_clock_limit"
+            budgeted_calls = details["requests_attempted"] - details.get("pool_warming_refusals", 0)
+            details["control_stop"] = "request_cap" if budgeted_calls >= args.max_requests else "wall_clock_limit"
             raise RuntimeError(f"Incomplete held-out trial: executed {rows} of {control_rows} control rows")
         if not args.dry_run and not rows:
             raise RuntimeError("Pilot ended with zero executed model actions. Review the partial recording.")

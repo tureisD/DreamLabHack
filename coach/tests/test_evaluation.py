@@ -1,3 +1,4 @@
+import datetime as dt
 import json
 
 from fastapi.testclient import TestClient
@@ -135,6 +136,42 @@ def populate_report(tasks, episodes, evaluation, base_results, candidate_results
         episodes.upsert(episode)
         episodes.label(episode.id, success, None, None)
         tasks.transition(trial.id, "planned", "completed", episode_id=episode.id)
+
+
+def test_paired_snapshot_preserves_incomplete_and_requires_review_provenance(tmp_path):
+    client, tasks, episodes, evaluations, task, job, _station = setup_comparison(tmp_path)
+    evaluation_id = client.post(
+        f"/api/tasks/{task.id}/evaluations", json={"fine_tune_job_id": job.id}
+    ).json()["id"]
+    url = f"/api/evaluations/{evaluation_id}/paired-snapshot"
+    assert client.post(url, json={"heldout_attested": False, "resets_attested": True}).status_code == 409
+    attestation = {"heldout_attested": True, "resets_attested": True}
+    empty = client.post(url, json=attestation)
+    assert empty.status_code == 200
+    assert client.post("/api/paired-evaluations/analyze", json=empty.json()).json()["decision"] == "not_evaluable"
+
+    evaluation = evaluations.get(evaluation_id)
+    assert evaluation is not None
+    populate_report(tasks, episodes, evaluation, [False] * 30, [True] * 30)
+    old = client.post(url, json=attestation)
+    assert old.status_code == 200
+    old_report = client.post("/api/paired-evaluations/analyze", json=old.json()).json()
+    assert old_report["decision"] == "not_evaluable"
+    assert any("reviewer" in problem for problem in old_report["problems"])
+
+    started = (dt.datetime.fromisoformat(evaluation.created_at) + dt.timedelta(seconds=1)).isoformat()
+    for trial in tasks.list_evaluation_trials(evaluation_id):
+        episode = episodes.get(trial.episode_id)
+        assert episode is not None
+        episode.started_at_utc = started
+        episodes.upsert(episode)
+        episodes.label(episode.id, episode.success, None, None, "operator-1")
+    ready = client.post(url, json=attestation)
+    assert ready.status_code == 200
+    report = client.post("/api/paired-evaluations/analyze", json=ready.json()).json()
+    assert report["decision"] == "improved"
+    assert report["usable_pairs"] == 30
+    assert report["difference_interval"][0] > 0.15
 
 
 def test_paired_report_distinguishes_improvement_and_inconclusive_result(tmp_path):

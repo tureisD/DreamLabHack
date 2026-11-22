@@ -128,3 +128,14 @@ button.secondary { background: #e6eef2; color: #23546a; }
 .guide-card li { margin: 7px 0; color: #596872; }
 .guide-card .notice { margin-top: 22px; }
 @media (max-width: 700px) { .evaluation-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.audit-file { display: grid; gap: 8px; margin: 18px 0; font-size: 13px; font-weight: 650; }
+.audit-file textarea { min-height: 230px; width: 100%; resize: vertical; font: 12px/1.5 monospace; border: 1px solid #cfdae0; border-radius: 8px; padding: 12px; }
+.audit-file input { font: inherit; }
+.audit-plan-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
+.audit-plan-grid label { display: grid; gap: 6px; font-size: 13px; font-weight: 650; }
+.audit-plan-grid input { min-width: 0; padding: 10px; border: 1px solid #cfdae0; border-radius: 8px; font: inherit; }
+@media (max-width: 700px) { .audit-plan-grid { grid-template-columns: 1fr; } }
+.audit-table-wrap { overflow-x: auto; margin: 18px 0; }
+.audit-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.audit-table th, .audit-table td { text-align: left; padding: 10px; border-bottom: 1px solid #dce5e9; white-space: nowrap; }
+.audit-table th { color: #536872; background: #f1f6f8; }

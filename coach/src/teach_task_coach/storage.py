@@ -41,9 +41,13 @@ class CoachDatabase:
                     summary_json TEXT NOT NULL,
                     success INTEGER,
                     failure_stage TEXT,
-                    note TEXT
+                    note TEXT,
+                    reviewer_id TEXT
                 )"""
             )
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(episodes)")}
+            if "reviewer_id" not in columns:
+                connection.execute("ALTER TABLE episodes ADD COLUMN reviewer_id TEXT")
             yield connection
             connection.commit()
         finally:
@@ -56,7 +60,7 @@ class EpisodeStore:
         self.data_dir = self.db.data_dir
 
     def upsert(self, episode: EpisodeSummary) -> None:
-        payload = episode.model_dump(exclude={"success", "failure_stage", "note"})
+        payload = episode.model_dump(exclude={"success", "failure_stage", "note", "reviewer_id"})
         with self.db.connect() as connection:
             connection.execute(
                 """INSERT INTO episodes (id, source_path, summary_json)
@@ -78,12 +82,13 @@ class EpisodeStore:
         return None if row is None else self._decode(row)
 
     def label(
-        self, episode_id: str, success: bool | None, failure_stage: str | None, note: str | None
+        self, episode_id: str, success: bool | None, failure_stage: str | None, note: str | None,
+        reviewer_id: str | None = None,
     ) -> EpisodeSummary | None:
         with self.db.connect() as connection:
             cursor = connection.execute(
-                "UPDATE episodes SET success = ?, failure_stage = ?, note = ? WHERE id = ?",
-                (None if success is None else int(success), failure_stage, note, episode_id),
+                "UPDATE episodes SET success = ?, failure_stage = ?, note = ?, reviewer_id = ? WHERE id = ?",
+                (None if success is None else int(success), failure_stage, note, reviewer_id, episode_id),
             )
             changed = cursor.rowcount
         return self.get(episode_id) if changed else None
@@ -96,5 +101,6 @@ class EpisodeStore:
                 "success": None if row["success"] is None else bool(row["success"]),
                 "failure_stage": row["failure_stage"],
                 "note": row["note"],
+                "reviewer_id": row["reviewer_id"],
             }
         )
