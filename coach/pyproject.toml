@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "teach-task-coach"
+version = "0.1.0"
+description = "A guided task improvement workflow for Dream Labs robots"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "dreamlabs-client[datasets]>=1.1.0,<2",
+    "fastapi>=0.115,<1",
+    "httpx>=0.27,<1",
+    "numpy>=2,<3",
+    "scipy>=1.14,<2",
+    "uvicorn>=0.30,<1",
+]
+
+[project.optional-dependencies]
+sim = ["mujoco>=3.3.5,<5", "pillow>=10"]
+
+[project.scripts]
+teach-task-coach = "teach_task_coach.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.3,<10", "ruff>=0.8,<1"]
+
+[tool.uv.sources]
+dreamlabs-client = { path = "../dream_library/dream_client", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/teach_task_coach", "src/dreamlab"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

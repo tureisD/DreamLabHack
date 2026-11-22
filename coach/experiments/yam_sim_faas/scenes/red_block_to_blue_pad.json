@@ -1,0 +1,18 @@
+{
+  "prompt": "place the red block on the blue pad",
+  "object": {
+    "label": "red block",
+    "shape": "box",
+    "size": [0.025, 0.025, 0.025],
+    "mass": 0.07,
+    "color": [0.85, 0.1, 0.1, 1.0],
+    "start_xy": [0.15, 0.10]
+  },
+  "target": {
+    "label": "blue pad",
+    "xy": [0.15, -0.10],
+    "radius": 0.06,
+    "color": [0.1, 0.25, 0.8, 1.0]
+  },
+  "goal": {"type": "place_on_target"}
+}

@@ -1,0 +1,12 @@
+{
+  "checkpoint": "dream-1-ft:7820aef9-apple-varied24-500",
+  "provider": "Dream Labs",
+  "job_id": "ftj_0b80885351caf8f7",
+  "status": "succeeded",
+  "finished_at": "2026-11-22T07:13:32.482551Z",
+  "base_model": "dreamlabs/dream-1-beta",
+  "dataset": "dima24kor/apple-grasp-varied-3374a5388381",
+  "dataset_manifest": "varied.json",
+  "steps": 500,
+  "lr_schedule": "constant"
+}
