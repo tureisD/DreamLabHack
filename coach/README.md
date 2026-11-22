@@ -2,6 +2,8 @@
 
 A local companion for the [Dream Labs public library](../dream_library/README.md). It checks the robot station, reviews saved rollouts and demonstrations, submits a Dream FaaS job, and guides a paired before/after evaluation. Robot runs and paid fine-tuning require explicit operator actions.
 
+See [why this coach matters](WHY_THIS_COACH.md) for the operator decision loop, the measured apple checkpoint comparison, and the limits of the time and cost claims.
+
 For the apple experiment, use the [two-account training handoff and verified datasets](experiments/yam_sim_faas/grasp_training/README.md).
 
 ## Run locally
