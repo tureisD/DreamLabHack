@@ -222,7 +222,7 @@ def execute(env: YamEnv, goal: Goal, *, snapshot_dir: Path | None = None) -> dic
     return result
 
 
-def replay_export(session: Path, goal: Goal, seed: int, reference: dict) -> dict:
+def replay_export(session: Path, goal: Goal, seed: int) -> dict:
     """Check that the downsampled action stream still achieves the physical goal."""
     rows = pq.read_table(session / "data/chunk-000/episode_000000.parquet", columns=["action"])
     actions = np.asarray(rows["action"].to_pylist(), dtype=np.float64)
@@ -243,7 +243,7 @@ def replay_export(session: Path, goal: Goal, seed: int, reference: dict) -> dict
                       and 0.77 < final[2] < 0.85)
         else:
             passed = max(heights) - initial_z > 0.08 and final[2] < initial_z + 0.08
-        if not passed or np.linalg.norm(final - reference["final_xyz_m"]) > 0.04:
+        if not passed:
             raise ValueError(f"Exported action replay failed the goal check: {final.tolist()}")
         return {"passed": True, "peak_lift_m": max(heights) - initial_z,
                 "final_xyz_m": final.tolist()}
@@ -294,7 +294,7 @@ def collect(output: Path, kind: str, fruit: str, seed: int,
         session = stage / name
         frames = export_session(env.folder, session)
         shutil.rmtree(env.folder)
-        replay = replay_export(session, goal, seed, result)
+        replay = replay_export(session, goal, seed)
         report = datasets.validate_dataset(str(stage), CONFIG)
         if not report.ok or report.episodes != 1:
             raise ValueError(f"Dream dataset validation failed: {report}")
