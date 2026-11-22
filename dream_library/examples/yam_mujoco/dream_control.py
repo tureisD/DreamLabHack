@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 import mujoco
 import numpy as np
-from dream.errors import DreamServerError
+from dream.errors import DreamServerError, DreamSessionExpired
 from PIL import Image
 from yam_env import YamEnv, aim_viewer
 
@@ -48,6 +48,8 @@ def settings():
 ## The model the terminal names, and its shortcuts for it; any other model id is used as typed.
 BETA_MODEL = "dreamlabs/dream-1-beta"
 MODEL_SHORTCUTS = {"1": BETA_MODEL, "beta": BETA_MODEL, "dream-1-beta": BETA_MODEL}
+MAX_CONSECUTIVE_SESSION_RETRIES = 3
+MAX_SESSION_RETRIES = 12
 
 
 def resolve_model(text):
@@ -337,7 +339,8 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
     parser.add_argument("--actions", type=int, default=48, help="Execute 1–48 rows before observing again")
     parser.add_argument("--seconds", type=float, default=120, help="Wall-clock trial duration")
     parser.add_argument("--show-side-panel", action="store_true", help="Show native MuJoCo controls")
-    parser.add_argument("--max-requests", type=int, help="Maximum get_action calls, excluding pool-warming refusals")
+    parser.add_argument("--max-requests", type=int,
+                        help="Action request limit, excluding pool warming and session replacements")
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Render and validate observation without calling API")
     parser.add_argument("--quiet", action="store_true", help="Compact progress and one final summary")
@@ -419,6 +422,7 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
             policy = open_policy(policy_config(args.model, gateway, poses), key)
             feed(policy, env, windows, args.task, args.model, steps, every=0, station=poses)
             restarts = 0
+            session_replacements = 0
             requests_started = 0
             requests_attempted = 0
             warming_refusals = 0
@@ -443,6 +447,26 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
                     time.sleep(0.02)
                 try:
                     reply = future.result()
+                except DreamSessionExpired as error:
+                    session_replacements += 1
+                    reason = error.reason if error.reason in ("expired", "unknown", "serve_died") else None
+                    if progress is not None:
+                        progress["session_replacements"] = session_replacements
+                        progress["last_session_replacement_reason"] = reason
+                    if (
+                        restarts >= MAX_CONSECUTIVE_SESSION_RETRIES
+                        or (args.max_requests is not None and session_replacements > MAX_SESSION_RETRIES)
+                    ):
+                        raise
+                    # The SDK adopted the new session but delivered no action for this request.
+                    restarts += 1
+                    requests_started -= 1
+                    print(
+                        f"  Dream replaced the inference session ({reason or 'reason unavailable'}); "
+                        "retrying on the new session.",
+                        flush=True,
+                    )
+                    continue
                 except Exception as error:
                     if (isinstance(error, DreamServerError) and error.reason == "pool_warming"
                             and error.retryable):
@@ -477,11 +501,6 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
                     if (args.max_requests is not None and type(error).__name__ == "DreamProtocolError"
                             and isinstance(error.__cause__, ConnectionAbortedError)):
                         print("Socket aborted. The next request uses a fresh connection and counts against the cap.", flush=True)
-                        continue
-                    # The serve restarted the episode: the client already holds the new session, so ask again.
-                    if type(error).__name__ == "DreamSessionExpired" and restarts < 3:
-                        restarts += 1
-                        print("  The model restarted the episode; asking again.", flush=True)
                         continue
                     if poses or not needs_poses(error):
                         raise
