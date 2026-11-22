@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import LiveEvaluation from './LiveEvaluation';
+import type { ScenePreset } from './SceneTask';
 import YamChatWorkflow, { type SimulatorMode, type TaskPipeline, type YamJob } from './YamChatWorkflow';
 
 type Screen = 'preflight' | 'tasks' | 'demos' | 'training' | 'evaluation' | 'statistical';
@@ -46,7 +47,7 @@ export default function CoachChat({
   showSimulatorOnOpen: boolean;
   simulatorMode: SimulatorMode;
   chooseSimulatorMode: (mode: SimulatorMode) => void;
-  openRecorder: (mode: 'fruit' | 'scene') => void;
+  openRecorder: (mode: 'fruit' | 'scene', preset?: ScenePreset) => void;
 }) {
   const [messages, setMessages] = useState<Message[]>(savedMessages);
   const [reply, setReply] = useState<Reply | null>(null);

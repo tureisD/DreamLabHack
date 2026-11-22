@@ -10,6 +10,7 @@ import Repair from './Repair';
 import CoachEffect from './CoachEffect';
 import CoachChat from './CoachChat';
 import type { SimulatorMode } from './YamChatWorkflow';
+import type { ScenePreset } from './SceneTask';
 
 type Check = { state: 'ready' | 'blocked' | 'unavailable'; message: string };
 type Model = {
@@ -127,6 +128,7 @@ export default function App() {
     return mode === 'scene' || mode === 'fruit' ? mode : 'apple';
   });
   const [recorderFocus, setRecorderFocus] = useState<'fruit' | 'scene' | null>(null);
+  const [scenePreset, setScenePreset] = useState<ScenePreset>();
 
   function chooseSimulatorMode(mode: SimulatorMode) {
     setSimulatorMode(mode);
@@ -173,9 +175,10 @@ export default function App() {
         showSimulatorOnOpen={showSimulator}
         simulatorMode={simulatorMode}
         chooseSimulatorMode={chooseSimulatorMode}
-        openRecorder={(mode) => {
+        openRecorder={(mode, preset) => {
           chooseSimulatorMode(mode);
           setRecorderFocus(mode);
+          setScenePreset(preset);
           setReviewOnOpen(false);
           setScreen('demos');
         }}
@@ -186,6 +189,7 @@ export default function App() {
       {screen === 'tasks' && <Tasks />}
       {screen === 'demos' && <Demos initialTaskId={activeTaskId} reviewOnOpen={reviewOnOpen}
         recorderFocus={recorderFocus} onTaskSelected={selectTask}
+        initialScenePreset={recorderFocus === 'scene' ? scenePreset : undefined}
         openSimulator={() => { setShowSimulator(true); setScreen('start'); }} />}
       {screen === 'training' && <Training initialTaskId={activeTaskId} onEvaluate={() => openEvaluation(activeTaskId)}
         onSimulatorEvaluate={(taskId) => { selectTask(taskId); chooseSimulatorMode('apple'); setShowSimulator(true); setScreen('start'); }} />}

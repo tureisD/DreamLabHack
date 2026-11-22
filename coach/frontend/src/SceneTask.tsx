@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 type Shape = 'box' | 'sphere' | 'cylinder';
+export type ScenePreset = 'block' | 'ball' | 'custom';
 type Form = {
   prompt: string; objectLabel: string; shape: Shape; objectColor: string;
   sizeX: number; sizeY: number; sizeZ: number; mass: number;
@@ -21,6 +22,7 @@ const ballPreset: Form = {
   shape: 'sphere', objectColor: '#ebbf1a', sizeX: 0.027, mass: 0.06, startX: 0.18, startY: 0.08,
   targetLabel: 'green pad', targetColor: '#1fa633', targetX: 0.12, targetY: -0.07,
 };
+const customDefaults: Form = { ...initial, prompt: '', objectLabel: '', targetLabel: '' };
 const newSeed = () => Math.floor(Math.random() * 2 ** 32);
 
 function rgba(hex: string): number[] {
@@ -48,19 +50,25 @@ async function post<T>(url: string, body: unknown): Promise<T> {
   return value as T;
 }
 
-export default function SceneTask({ taskId, taskPrompt, onComplete, onSetupTask }: {
+export default function SceneTask({ taskId, taskPrompt, onComplete, onSetupTask, initialPreset = 'block' }: {
   taskId: string; taskPrompt: string; onComplete: () => void;
   onSetupTask: (draft: { name: string; prompt: string; success_rule: string }) => Promise<void>;
+  initialPreset?: ScenePreset;
 }) {
-  const [form, setForm] = useState<Form>(initial);
-  const [preset, setPreset] = useState<'block' | 'ball' | 'custom'>('block');
+  const [form, setForm] = useState<Form>(() => {
+    if (initialPreset === 'ball') return ballPreset;
+    if (initialPreset === 'custom') return customDefaults;
+    return initial;
+  });
+  const [preset, setPreset] = useState(initialPreset);
   const [seed, setSeed] = useState(newSeed);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const currentStatus = status?.task_id === taskId ? status : null;
-  const matchesTask = form.prompt.trim() === taskPrompt;
+  const matchesTask = Boolean(taskId) && form.prompt.trim() === taskPrompt;
+  const hasSceneDetails = Boolean(form.prompt.trim() && form.objectLabel.trim() && form.targetLabel.trim());
 
   useEffect(() => {
     let active = true;
@@ -123,8 +131,8 @@ export default function SceneTask({ taskId, taskPrompt, onComplete, onSetupTask 
         if (next !== 'custom') setForm(next === 'ball' ? ballPreset : initial);
         setPreview(null);
       }}><option value="block">Red block → blue pad</option><option value="ball">Yellow ball → green pad</option><option value="custom">Custom scene</option></select></label>
-      <label>Task instruction<input value={form.prompt} onChange={(event) => update('prompt', event.target.value)} /></label>
-      <label>Object name<input value={form.objectLabel} onChange={(event) => update('objectLabel', event.target.value)} /></label>
+      <label>Task instruction<input value={form.prompt} placeholder="Place the block on the pad" onChange={(event) => update('prompt', event.target.value)} /></label>
+      <label>Object name<input value={form.objectLabel} placeholder="Red block" onChange={(event) => update('objectLabel', event.target.value)} /></label>
       <label>Shape<select value={form.shape} onChange={(event) => update('shape', event.target.value as Shape)}><option value="box">Box</option><option value="sphere">Ball</option><option value="cylinder">Cylinder</option></select></label>
       <label>Object color<input type="color" value={form.objectColor} onChange={(event) => update('objectColor', event.target.value)} /></label>
       <label>{form.shape === 'box' ? 'Half width (m)' : 'Radius (m)'}<input type="number" min="0.015" max="0.05" step="0.005" value={form.sizeX} onChange={(event) => update('sizeX', Number(event.target.value))} /></label>
@@ -133,17 +141,19 @@ export default function SceneTask({ taskId, taskPrompt, onComplete, onSetupTask 
       <label>Object mass (kg)<input type="number" min="0.02" max="0.25" step="0.01" value={form.mass} onChange={(event) => update('mass', Number(event.target.value))} /></label>
       <label>Start X (m)<input type="number" step="0.01" value={form.startX} onChange={(event) => update('startX', Number(event.target.value))} /></label>
       <label>Start Y (m)<input type="number" step="0.01" value={form.startY} onChange={(event) => update('startY', Number(event.target.value))} /></label>
-      <label>Target name<input value={form.targetLabel} onChange={(event) => update('targetLabel', event.target.value)} /></label>
+      <label>Target name<input value={form.targetLabel} placeholder="Blue pad" onChange={(event) => update('targetLabel', event.target.value)} /></label>
       <label>Target color<input type="color" value={form.targetColor} onChange={(event) => update('targetColor', event.target.value)} /></label>
       <label>Target X (m)<input type="number" step="0.01" value={form.targetX} onChange={(event) => update('targetX', Number(event.target.value))} /></label>
       <label>Target Y (m)<input type="number" step="0.01" value={form.targetY} onChange={(event) => update('targetY', Number(event.target.value))} /></label>
       <label>Target radius (m)<input type="number" min="0.04" max="0.09" step="0.01" value={form.radius} onChange={(event) => update('radius', Number(event.target.value))} /></label>
       <label>Scene seed<input type="number" min="0" max="4294967295" value={seed} onChange={(event) => { setSeed(Number(event.target.value)); setPreview(null); }} /></label>
       <button className="secondary" disabled={busy || status?.state === 'recording'} onClick={() => { setSeed(newSeed()); setPreview(null); }}>New seed</button>
-      <button className="secondary" disabled={busy || status?.state === 'recording'} onClick={() => void previewScene()}>Preview scene</button>
+      <button className="secondary" disabled={!hasSceneDetails || busy || status?.state === 'recording'} onClick={() => void previewScene()}>Preview scene</button>
     </div>
-    {!matchesTask && <p className="hint">Set up the task for <strong>{form.prompt.trim()}</strong>, preview the scene, then record.</p>}
-    {!matchesTask && <button className="secondary" disabled={busy || !form.prompt.trim() || !form.objectLabel.trim() || !form.targetLabel.trim() || status?.state === 'recording'} onClick={() => void setupTask()}>Set up this scene task</button>}
+    {!matchesTask && <p className="hint">{hasSceneDetails
+      ? 'Set up the matching task and preview the scene before recording.'
+      : 'Enter a task instruction, object name, and target name to continue.'}</p>}
+    {!matchesTask && <button className="secondary" disabled={!hasSceneDetails || busy || status?.state === 'recording'} onClick={() => void setupTask()}>Set up this scene task</button>}
     {preview && <div className="sim-image-wrap"><img src={preview.image} width={preview.width} height={preview.height} alt="YAM simulator scene with the new object and target" />
       {Object.entries(preview.markers).map(([name, [x, y]]) => <span key={name} className="sim-marker" style={{ left: `${x / preview.width * 100}%`, top: `${y / preview.height * 100}%` }}>{name}</span>)}
     </div>}

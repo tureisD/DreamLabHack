@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import SimCorrect from './SimCorrect';
-import SceneTask from './SceneTask';
+import SceneTask, { type ScenePreset } from './SceneTask';
 
 type Task = { id: string; name: string; prompt: string; success_rule: string };
 type TaskDraft = Pick<Task, 'name' | 'prompt' | 'success_rule'>;
@@ -29,13 +29,14 @@ async function json<T>(url: string, method = 'GET', body?: unknown): Promise<T> 
 }
 
 export default function Demos({
-  initialTaskId = '', reviewOnOpen = false, openSimulator, recorderFocus, onTaskSelected,
+  initialTaskId = '', reviewOnOpen = false, openSimulator, recorderFocus, onTaskSelected, initialScenePreset,
 }: {
   initialTaskId?: string;
   reviewOnOpen?: boolean;
   openSimulator?: () => void;
   recorderFocus?: 'fruit' | 'scene' | null;
   onTaskSelected?: (taskId: string) => void;
+  initialScenePreset?: ScenePreset;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [taskId, setTaskId] = useState('');
@@ -178,7 +179,7 @@ export default function Demos({
         onComplete={() => void scan()} onSetupTask={setupTask} />}
       {recorderFocus !== 'fruit' && <SceneTask taskId={taskId}
         taskPrompt={tasks.find((task) => task.id === taskId)?.prompt ?? ''}
-        onComplete={() => void scan()} onSetupTask={setupTask} />}
+        onComplete={() => void scan()} onSetupTask={setupTask} initialPreset={initialScenePreset} />}
     </div>
     {openSimulator && <section className="card"><h2>Collect apple pickup corrections</h2><p>DreamCoach can prepare YAM, record fresh model trials, and add verified corrections to demo review.</p><button className="secondary" onClick={openSimulator}>Open simulator workflow in chat</button></section>}
     {plan && <section className="card coverage">

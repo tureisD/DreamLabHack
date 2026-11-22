@@ -209,13 +209,98 @@ button.secondary:hover { background: #cfe2ea; color: #153d50; }
 .chat-setup-help strong { color: #1c1c1c; }
 .chat-simulator-link { align-self: flex-start; background: #ffefdf; color: #603a24; font-size: 13px; padding: 8px 14px; }
 .chat-simulator-link:hover { background: #ffdab6; }
-.yam-chat-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
-.yam-chat-workflow h2 { font-size: 17px; }
-.yam-chat-heading span { border-radius: 999px; padding: 3px 9px; background: #ffe4ca; color: #6b3e24; }
-.yam-chat-status { width: 100%; padding: 8px 0; }
-.yam-chat-status progress { width: min(180px, 65%); margin-right: 8px; accent-color: #b96124; }
-.yam-scene-count { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
-.yam-scene-count select { border: 1px solid #e8d7c9; background: #fffaf5; padding: 7px; border-radius: 8px; font: inherit; }
+.yam-chat-workflow {
+  container: yam-card / inline-size;
+  display: grid;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 14px;
+  min-width: 0;
+  border: 1px solid #ebd9cb;
+  border-radius: 17px;
+  background: #fffdf9;
+  box-shadow: 0 5px 17px #6946310a;
+}
+.yam-chat-heading, .yam-next, .yam-buttons, .yam-setup, .yam-job {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.yam-chat-heading { justify-content: space-between; align-items: flex-start; }
+.yam-chat-workflow h2 { font-size: 18px; }
+.yam-chat-workflow h3 { font-size: 15px; margin: 0; color: #332821; }
+.yam-chat-workflow p, .yam-chat-workflow small { margin: 0; font-size: 13px; color: #63554a; line-height: 1.4; }
+.yam-chat-heading p, .yam-panel-heading p { margin-top: 3px; }
+.yam-ready { font-size: 12px; padding: 4px 9px; border-radius: 999px; background: #fff0dc; color: #734721; white-space: nowrap; }
+.yam-ready[data-ready="true"] { background: #e7f4eb; color: #235439; }
+.yam-ready[data-ready="true"]::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: #378054; vertical-align: 1px; }
+.yam-workflow-options, .yam-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.yam-chat-workflow .yam-choice {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-content: start;
+  align-items: center;
+  justify-items: start;
+  gap: 3px 6px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #e9ded5;
+  border-radius: 10px;
+  background: #fffdf9;
+  color: #3f3027;
+  box-shadow: none;
+  text-align: left;
+  white-space: normal;
+}
+.yam-choice:hover { border-color: #c99979; background: #fff4e9; }
+.yam-chat-workflow .yam-choice[aria-pressed="true"] {
+  border-color: #bb754c;
+  background: #ffead7;
+  box-shadow: inset 0 0 0 1px #bb754c55;
+}
+.yam-choice strong { font-size: 13px; line-height: 1.2; overflow-wrap: anywhere; }
+.yam-chat-workflow .yam-choice small { grid-column: 2; font-size: 11px; }
+.yam-choice-icon { font: 600 16px/1 system-ui, sans-serif; color: #8f4827; }
+.yam-panel, .yam-setup, .yam-job { border: 1px solid #ede2d8; border-radius: 12px; padding: 10px; background: #faf5ef; }
+.yam-panel { display: grid; gap: 8px; }
+.yam-next { justify-content: space-between; }
+.yam-next > small { flex: 1 1 120px; }
+.yam-chat-workflow .yam-preset { grid-template-columns: 30px minmax(0, 1fr); }
+.yam-preset-mark {
+  position: relative;
+  display: block;
+  grid-row: span 2;
+  width: 30px;
+  height: 24px;
+}
+.yam-preset-mark::before, .yam-preset-mark::after { content: ""; position: absolute; left: 50%; transform: translateX(-50%); }
+.yam-preset-mark::before { width: 26px; height: 7px; bottom: 2px; border-radius: 50%; background: #8cabec; }
+.yam-preset-mark::after { width: 13px; height: 13px; bottom: 7px; border-radius: 3px; background: #ca4942; box-shadow: inset -2px -2px 0 #0002; }
+.yam-preset-ball::before { background: #75ae88; }
+.yam-preset-ball::after { border-radius: 50%; background: #efbc4e; }
+.yam-preset-custom::before { background: #daabf0; }
+.yam-preset-custom::after { border: 1px dashed #956caf; background: #f1dcf8; box-shadow: none; transform: translateX(-50%) rotate(12deg); }
+.yam-chat-workflow .yam-primary, .yam-chat-workflow .yam-secondary { justify-self: start; white-space: normal; font-size: 13px; padding: 8px 13px; }
+.yam-chat-workflow .yam-primary { background: #ffb77e; color: #3a251b; }
+.yam-chat-workflow .yam-primary:hover { background: #ff9e55; }
+.yam-primary span { margin-left: 4px; }
+.yam-chat-workflow .yam-secondary { border: 1px solid #dec8b7; background: #fff9f2; color: #573821; }
+.yam-chat-workflow .yam-secondary:hover { background: #ffe5cb; }
+.yam-chat-workflow button:focus-visible, .yam-scene-count select:focus-visible { outline: 2px solid #924827; outline-offset: 2px; }
+.yam-job { justify-content: space-between; }
+.yam-job strong { font-size: 14px; }
+.yam-job[data-state="failed"] { border-color: #edc3af; background: #fff1e9; }
+.yam-job-progress { display: flex; align-items: center; gap: 7px; margin-top: 4px; }
+.yam-job-progress progress { width: min(155px, 60%); accent-color: #a95931; }
+.yam-scene-count { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; }
+.yam-scene-count select { border: 1px solid #dec8b7; background: #fffaf5; padding: 5px 7px; border-radius: 8px; font: inherit; }
+@container yam-card (max-width: 405px) {
+  .yam-chat-workflow .yam-choice { grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; padding-inline: 5px; }
+  .yam-workflow-options .yam-choice small { display: none; }
+  .yam-chat-workflow .yam-preset small { grid-column: auto; }
+  .yam-preset-mark { grid-row: auto; }
+}
 .live-eval-checkpoints { overflow-wrap: anywhere; font-size: 13px; }
 .chat-inventory { margin: 12px 26px; border: 1px solid #f1ded1; border-radius: 12px; background: #fffaf5; padding: 12px 16px; font-size: 13px; color: #564c45; }
 .chat-inventory summary { cursor: pointer; font-weight: 700; }
