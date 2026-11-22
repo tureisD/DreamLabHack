@@ -4,6 +4,8 @@ A local companion for the [Dream Labs public library](../dream_library/README.md
 
 See [why this coach matters](WHY_THIS_COACH.md) for the operator decision loop, the measured apple checkpoint comparison, and the limits of the time and cost claims.
 
+The [Statistical audit](STATISTICAL_AUDIT.md) adds the separate evaluator from the team's `codex/stat-eval-implementation` branch for prospective independent real-world trials. It does not replace the paired Evaluation tab or reclassify simulator rollouts as independent robot evidence.
+
 For the apple experiment, use the [two-account training handoff and verified datasets](experiments/yam_sim_faas/grasp_training/README.md).
 
 ## Run locally
