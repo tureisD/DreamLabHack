@@ -49,8 +49,9 @@ function selectDemo(demo: Demo): ReviewSelection {
   };
 }
 
-export default function ChatDemoReview({ taskId, onClose, onKeep }: {
+export default function ChatDemoReview({ taskId, initialDemoId, onClose, onKeep }: {
   taskId: string;
+  initialDemoId?: string;
   onClose: () => void;
   onKeep: (receipt: DemoKeepReceipt) => void;
 }) {
@@ -83,7 +84,8 @@ export default function ChatDemoReview({ taskId, onClose, onKeep }: {
     void request<Demo[]>(`/api/tasks/${encodeURIComponent(taskId)}/demos`, { signal: controller.signal })
       .then((values) => {
         if (controller.signal.aborted) return;
-        const first = values.find((item) => item.task_id === taskId && item.decision === 'unreviewed');
+        const first = values.find((item) => item.task_id === taskId && item.decision === 'unreviewed'
+          && (!initialDemoId || item.id === initialDemoId));
         setDemos(values);
         setSelection(first ? selectDemo(first) : null);
       })
@@ -96,7 +98,7 @@ export default function ChatDemoReview({ taskId, onClose, onKeep }: {
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
 
     return () => controller.abort();
-  }, [taskId, retry]);
+  }, [taskId, initialDemoId, retry]);
 
   function choose(item: Demo) {
     setSelection(selectDemo(item));
@@ -157,7 +159,7 @@ export default function ChatDemoReview({ taskId, onClose, onKeep }: {
   } else if (loadFailed) {
     content = <button type="button" className="secondary" onClick={() => setRetry((previous) => previous + 1)}>Retry</button>;
   } else if (!demo || !selection) {
-    content = <p>No demos waiting for review.</p>;
+    content = <p>{initialDemoId && !message ? 'This recording is unavailable or already reviewed.' : 'No demos waiting for review.'}</p>;
   } else {
     const roles = demo.camera_keys.map(cameraRole);
     content = <>

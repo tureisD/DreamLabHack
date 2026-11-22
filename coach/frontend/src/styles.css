@@ -509,3 +509,34 @@ html:has(meta[name="dreamcoach-mode"]) .chat-landscape-title { font-family: ui-m
 .chat-workspace-return { justify-content: space-between; border: 1px solid #ead9c9; }
 .chat-workspace-return strong { color: #714123; }
 .chat-workspace-return p { margin-top: 4px; }
+.chat-recorder .chat-workspace-header, .chat-tool-panel .chat-workspace-header {
+  padding-bottom: 14px;
+  border-bottom: 1px solid #ead9c9;
+}
+.chat-recorder .sim-correct { display: grid; gap: 12px; min-width: 0; justify-items: start; }
+.chat-recorder .sim-correct > * { margin: 0; }
+.chat-recorder .sim-correct > h2 { display: none; }
+.chat-recorder .sim-recorder-fields { width: 100%; min-width: 0; padding: 0; border: 0; }
+.chat-recorder .training-controls { width: 100%; }
+.chat-recorder .training-controls label { flex-basis: 140px; min-width: 0; }
+.chat-recorder .sim-recorder-details {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ead9c9;
+  border-radius: 10px;
+}
+.chat-recorder .sim-recorder-details summary { cursor: pointer; font-weight: 650; color: #6e4128; }
+.chat-recorder .sim-recorder-details .training-controls { margin-bottom: 0; }
+.chat-recorder .sim-task-approval {
+  width: 100%;
+  padding: 14px;
+  border: 1px solid #ead9c9;
+  border-radius: 10px;
+  background: #fff1e3;
+}
+.chat-recorder .sim-task-approval p { margin: 0 0 10px; }
+.chat-tool-body { min-width: 0; }
+.chat-tool-body > .page { padding: 0; max-width: none; min-width: 0; }
+.chat-tool-body video { max-width: 100%; }
+.chat-action code { overflow-wrap: anywhere; }
+@media (max-width: 480px) { .chat-secret { flex-wrap: wrap; } }

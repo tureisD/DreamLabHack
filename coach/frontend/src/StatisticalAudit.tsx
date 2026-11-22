@@ -37,7 +37,7 @@ function percent(value: number | null) {
   return value === null ? '—' : `${(value * 100).toFixed(1)}%`;
 }
 
-export default function StatisticalAudit() {
+export default function StatisticalAudit({ embedded = false }: { embedded?: boolean }) {
   const [snapshot, setSnapshot] = useState('');
   const [report, setReport] = useState<AuditReport | null>(null);
   const [error, setError] = useState('');
@@ -146,10 +146,10 @@ export default function StatisticalAudit() {
     URL.revokeObjectURL(url);
   }
 
-  return <main className="page">
+  const Container = embedded ? 'div' : 'main';
+  return <Container className="page">
     <header className="header"><div>
-      <p className="eyebrow">Checkpoint evidence</p>
-      <h1>Statistical evaluation</h1>
+      {!embedded && <><p className="eyebrow">Checkpoint evidence</p><h1>Statistical evaluation</h1></>}
       <p className="subtitle">Compare fine-tuned and base models with the method appropriate to how the trials were collected.</p>
     </div></header>
     <section className="card">
@@ -256,5 +256,5 @@ export default function StatisticalAudit() {
       <h3>Limits</h3><ul>{report.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
       <p className="footnote">This audit does not promote a checkpoint, prove random assignment, or authorize robot deployment. An inconclusive result is not evidence that the models are equal.</p>
     </section>}
-  </main>;
+  </Container>;
 }

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import SimCorrect from './SimCorrect';
-import SceneTask, { type ScenePreset } from './SceneTask';
+import SceneTask from './SceneTask';
 import type { DemoKeepReceipt } from './ChatDemoReview';
 
 type Task = { id: string; name: string; prompt: string; success_rule: string };
@@ -30,14 +30,12 @@ async function json<T>(url: string, method = 'GET', body?: unknown): Promise<T> 
 }
 
 export default function Demos({
-  initialTaskId = '', onKeep, openSimulator, recorderFocus, onTaskSelected, initialScenePreset,
+  initialTaskId = '', onKeep, openSimulator, onTaskSelected,
 }: {
   initialTaskId?: string;
   onKeep?: (receipt: DemoKeepReceipt) => void;
   openSimulator?: () => void;
-  recorderFocus?: 'fruit' | 'scene' | null;
   onTaskSelected?: (taskId: string) => void;
-  initialScenePreset?: ScenePreset;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [taskId, setTaskId] = useState('');
@@ -56,7 +54,6 @@ export default function Demos({
   const [leaderId, setLeaderId] = useState('so101_leader');
   const [cameraIndex, setCameraIndex] = useState(0);
   const [teleop, setTeleop] = useState<TeleopStatus | null>(null);
-  const recorderSection = useRef<HTMLDivElement>(null);
   const selected = demos.find((demo) => demo.id === selectedId);
 
   useEffect(() => {
@@ -87,10 +84,6 @@ export default function Demos({
     const timer = window.setInterval(() => void refresh(), 15000);
     return () => { active = false; window.clearInterval(timer); };
   }, [taskId]);
-
-  useEffect(() => {
-    if (recorderFocus) recorderSection.current?.scrollIntoView({ block: 'start' });
-  }, [recorderFocus]);
 
   async function setupTask(draft: TaskDraft) {
     const existing = tasks.find((task) => task.prompt === draft.prompt && task.success_rule === draft.success_rule);
@@ -173,13 +166,13 @@ export default function Demos({
     {message && <div className="notice" role="status">{message}</div>}
     <div className="demo-task-select"><label>Task <select value={taskId} onChange={(event) => { setTaskId(event.target.value); setSelectedId(''); }}>{tasks.map((task) => <option value={task.id} key={task.id}>{task.name}</option>)}</select></label></div>
     <section className="card teleop-controls"><h2>SO-101 leader/follower recording</h2><p>Stop the Dream station process before using the same arm with LeRobot. This records one local episode and does not upload it to Hugging Face.</p><div className="training-controls"><label>Follower port<input value={followerPort} onChange={(event) => setFollowerPort(event.target.value)} placeholder="/dev/ttyACM0" /></label><label>Leader port<input value={leaderPort} onChange={(event) => setLeaderPort(event.target.value)} placeholder="/dev/ttyACM1" /></label><label>Follower ID<input value={followerId} onChange={(event) => setFollowerId(event.target.value)} /></label><label>Leader ID<input value={leaderId} onChange={(event) => setLeaderId(event.target.value)} /></label><label>Camera index<input type="number" min={0} value={cameraIndex} onChange={(event) => setCameraIndex(Number(event.target.value))} /></label><button disabled={busy || !taskId || !followerPort || !leaderPort || teleop?.state === 'recording' || teleop?.state === 'stopping'} onClick={() => void record()}>Record one demo</button>{teleop?.state === 'recording' && <button className="secondary" disabled={busy} onClick={() => void stopRecording()}>Stop recording</button>}</div><p className="hint">Recorder: {teleop?.state ?? 'idle'}{teleop?.session_path ? ` · ${teleop.session_path}` : ''}. Restart the station after the recording exits, then review the new demo below.</p>{teleop?.state === 'failed' && teleop.log_tail && <pre className="trial-error">{teleop.log_tail}</pre>}</section>
-    <div ref={recorderSection}>
-      {recorderFocus !== 'scene' && <SimCorrect taskId={taskId}
+    <div>
+      <SimCorrect taskId={taskId}
         taskPrompt={tasks.find((task) => task.id === taskId)?.prompt ?? ''}
-        onComplete={() => void scan()} onSetupTask={setupTask} />}
-      {recorderFocus !== 'fruit' && <SceneTask taskId={taskId}
+        onComplete={() => void scan()} onSetupTask={setupTask} />
+      <SceneTask taskId={taskId}
         taskPrompt={tasks.find((task) => task.id === taskId)?.prompt ?? ''}
-        onComplete={() => void scan()} onSetupTask={setupTask} initialPreset={initialScenePreset} />}
+        onComplete={() => void scan()} onSetupTask={setupTask} />
     </div>
     {openSimulator && <section className="card"><h2>Collect apple pickup corrections</h2><p>DreamCoach can prepare YAM, record fresh model trials, and add verified corrections to demo review.</p><button className="secondary" onClick={openSimulator}>Open simulator workflow in chat</button></section>}
     {plan && <section className="card coverage">

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { RolloutPreview } from './Runs';
 
 type Task = { id: string; name: string; success_rule: string; baseline_checkpoint: string };
 type Job = { id: string; status: string; checkpoint: string | null };
@@ -46,9 +47,10 @@ async function json<T>(url: string, method = 'GET', body?: unknown): Promise<T> 
 
 function percent(value: number | null) { return value === null ? '—' : `${(value * 100).toFixed(1)}%`; }
 
-export default function EvaluationPage({ initialTaskId = '', initialEvaluationId = '' }: {
+export default function EvaluationPage({ initialTaskId = '', initialEvaluationId = '', embedded = false }: {
   initialTaskId?: string;
   initialEvaluationId?: string;
+  embedded?: boolean;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [taskId, setTaskId] = useState('');
@@ -78,6 +80,7 @@ export default function EvaluationPage({ initialTaskId = '', initialEvaluationId
   const [auditDecision, setAuditDecision] = useState('');
   const [interventions, setInterventions] = useState(0);
   const [firstResponseS, setFirstResponseS] = useState('');
+  const [openEpisodeId, setOpenEpisodeId] = useState<string | null>(null);
 
   useEffect(() => {
     setAuditDecision('');
@@ -86,12 +89,21 @@ export default function EvaluationPage({ initialTaskId = '', initialEvaluationId
   }, [selectedId]);
 
   useEffect(() => {
-    void json<Task[]>('/api/tasks').then((values) => {
+    if (embedded && !initialTaskId) return;
+    let active = true;
+    const taskRequest = embedded
+      ? json<Task>(`/api/tasks/${encodeURIComponent(initialTaskId)}`).then((task) => [task])
+      : json<Task[]>('/api/tasks');
+    void taskRequest.then((values) => {
+      if (!active) return;
       setTasks(values);
       setTaskId(values.find((task) => task.id === initialTaskId)?.id ?? values[0]?.id ?? '');
-    }).catch((caught: Error) => setError(caught.message));
-    void json<{ configured: boolean }>('/api/scene-adapter/status').then((value) => setSceneAdapter(value.configured));
-  }, [initialTaskId]);
+    }).catch((caught: Error) => { if (active) setError(caught.message); });
+    void json<{ configured: boolean }>('/api/scene-adapter/status').then((value) => {
+      if (active) setSceneAdapter(value.configured);
+    }).catch(() => { if (active) setSceneAdapter(false); });
+    return () => { active = false; };
+  }, [embedded, initialTaskId]);
 
   useEffect(() => {
     if (!taskId) return;
@@ -252,8 +264,9 @@ export default function EvaluationPage({ initialTaskId = '', initialEvaluationId
   const task = tasks.find((value) => value.id === taskId);
   const candidates = jobs.filter((job) => job.status === 'succeeded' && job.checkpoint);
 
-  return <main className="page">
-    <header className="header"><div><p className="eyebrow">Before and after</p><h1>Evaluate the fine-tune</h1><p className="subtitle">Plan matched held-out scenes, review every outcome, then audit the candidate against the base.</p></div></header>
+  const Container = embedded ? 'div' : 'main';
+  return <Container className="page">
+    <header className="header"><div>{!embedded && <><p className="eyebrow">Before and after</p><h1>Evaluate the fine-tune</h1></>}<p className="subtitle">Plan matched held-out scenes, review every outcome, then audit the candidate against the base.</p></div></header>
     {error && <div className="alert" role="alert">{error}</div>}
     {message && <div className="notice" role="status">{message}</div>}
     <section className="card evaluation-workflow" aria-label="Evaluation steps">
@@ -276,13 +289,13 @@ export default function EvaluationPage({ initialTaskId = '', initialEvaluationId
     </section>
     <section className="card">
       <div className="training-controls">
-        <label>Task<select value={taskId} onChange={(event) => { setTaskId(event.target.value); setSelectedId(''); }}><option value="">Choose a task</option>{tasks.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}</select></label>
+        {!embedded && <label>Task<select value={taskId} onChange={(event) => { setTaskId(event.target.value); setSelectedId(''); }}><option value="">Choose a task</option>{tasks.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}</select></label>}
         <label>Fine-tuned checkpoint<select value={jobId} onChange={(event) => setJobId(event.target.value)}><option value="">Choose a completed job</option>{candidates.map((job) => <option key={job.id} value={job.id}>{job.checkpoint}</option>)}</select></label>
         <label>Planned scene pairs<input type="number" min="1" max="512" step="1" value={plannedPairs} onChange={(event) => setPlannedPairs(Number(event.target.value))} /></label>
         <button disabled={busy || !taskId || !jobId || !Number.isFinite(minimumEffect) || minimumEffect < 0 || minimumEffect >= 1 || !Number.isInteger(plannedPairs) || plannedPairs < 1 || plannedPairs > 512} onClick={create}>Freeze comparison plan</button>
       </div>
       <p className="hint">The scene count and gain threshold are fixed when you create the comparison. Use the same object, lighting, and success rule for both models in a pair. Keep these scenes out of training. The estimate does not guarantee statistical power.</p>
-      {task && <p><strong>Success rule:</strong> {task.success_rule}</p>}
+      {task && <p>{embedded && <><strong>{task.name}</strong><br /></>}<strong>Success rule:</strong> {task.success_rule}</p>}
       {deployment && <p><strong>Checkpoint for future task runs:</strong> {deployment.checkpoint} {deployment.checkpoint !== deployment.baseline_checkpoint && <button className="secondary" disabled={busy} onClick={rollback}>Roll back to baseline</button>}</p>}
       {evaluations.length > 0 && <label className="evaluation-select">Comparison<select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>{evaluations.map((item) => <option key={item.id} value={item.id}>{item.candidate_checkpoint} · {item.created_at}</option>)}</select></label>}
     </section>
@@ -334,7 +347,13 @@ export default function EvaluationPage({ initialTaskId = '', initialEvaluationId
         {nextTrial.status === 'awaiting_rollout' && <><button disabled={busy} onClick={() => trialAction(nextTrial, 'sync')}>Find rollout</button><button className="secondary" disabled={busy} onClick={() => abandon(nextTrial)}>Mark unusable</button></>}
       </div>
       {nextTrial.status === 'awaiting_label' && <div className="label-form trial-label">
-        {nextTrial.episode_id && <a href={`/api/episodes/${nextTrial.episode_id}`} target="_blank" rel="noreferrer">Open rollout details</a>}
+        {nextTrial.episode_id && <>
+          <button type="button" className="secondary" aria-expanded={openEpisodeId === nextTrial.episode_id}
+            onClick={() => setOpenEpisodeId(openEpisodeId === nextTrial.episode_id ? null : nextTrial.episode_id)}>
+            {openEpisodeId === nextTrial.episode_id ? 'Hide rollout preview' : 'Preview rollout'}
+          </button>
+          {openEpisodeId === nextTrial.episode_id && <RolloutPreview key={nextTrial.episode_id} episodeId={nextTrial.episode_id} />}
+        </>}
         <label>Outcome<select value={outcome} onChange={(event) => setOutcome(event.target.value as 'success' | 'failure')}><option value="success">Success</option><option value="failure">Failure</option></select></label>
         {outcome === 'failure' && <label>Failure stage<select value={stage} onChange={(event) => setStage(event.target.value)}><option value="">Unknown</option><option value="approach">Approach</option><option value="grasp">Grasp</option><option value="transport">Transport</option><option value="release">Release</option><option value="other">Other</option></select></label>}
         <label>Note<textarea maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} /></label>
@@ -345,5 +364,5 @@ export default function EvaluationPage({ initialTaskId = '', initialEvaluationId
       </div>}
     </section>}
     {selected && trials.length > 0 && !nextTrial && <section className="card"><h2>{unusable ? 'This comparison has an unusable run' : 'All planned runs are finished'}</h2><p>{unusable ? 'Plan a fresh comparison with the same fine-tune. The incomplete result stays in the record.' : 'Read the verdict above before deciding whether to deploy the candidate.'}</p></section>}
-  </main>;
+  </Container>;
 }

@@ -16,10 +16,56 @@ type Episode = EpisodeItem & {
 type ImportResult = { imported: number; skipped: string[] };
 type IntentAudit = { command_rows: number; comparable_rows: number; differing_rows: number; differing_share: number | null; median_staleness_ms: number | null; discarded_replies: number; warnings: string[] };
 
+function RunCameras({ episode }: { episode: Episode }) {
+  const roles = Object.keys(episode.videos);
+  const [role, setRole] = useState(roles[0] ?? '');
+  if (!role) return <div className="video-empty">No finished camera video in this rollout.</div>;
+  return <>
+    <div className="role-tabs" role="group" aria-label="Cameras">
+      {roles.map((name) => <button type="button" key={name} className={role === name ? 'role-active' : ''}
+        aria-pressed={role === name} onClick={() => setRole(name)}>{name}</button>)}
+    </div>
+    <video key={role} aria-label={`${role} rollout video`} controls playsInline preload="metadata"
+      src={`/api/episodes/${encodeURIComponent(episode.id)}/video/${encodeURIComponent(role)}`} />
+  </>;
+}
+
+export function RolloutPreview({ episodeId }: { episodeId: string }) {
+  const [episode, setEpisode] = useState<Episode | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    async function load() {
+      try {
+        const response = await fetch(`/api/episodes/${encodeURIComponent(episodeId)}`, { signal: controller.signal });
+        if (!response.ok) throw new Error('Could not load this rollout.');
+        const result = await response.json() as Episode;
+        if (!controller.signal.aborted) setEpisode(result);
+      } catch {
+        if (!controller.signal.aborted) setFailed(true);
+      }
+    }
+    void load();
+    return () => controller.abort();
+  }, [episodeId, attempt]);
+
+  if (failed) return <div>
+    <p role="alert">Could not load this rollout.</p>
+    <button type="button" className="secondary" onClick={() => { setFailed(false); setAttempt(attempt + 1); }}>Retry</button>
+  </div>;
+  if (episode?.id !== episodeId) return <p role="status">Loading rollout…</p>;
+  return <section className="review" aria-label="Rollout details">
+    <p>{episode.task} · {episode.status}</p>
+    <RunCameras key={episode.id} episode={episode} />
+    {episode.error && <p role="status">{episode.error}</p>}
+    {episode.findings.map((finding, index) => <p key={`${finding.kind}-${index}`}>{finding.message}</p>)}
+  </section>;
+}
+
 export default function Runs() {
   const [items, setItems] = useState<EpisodeItem[]>([]);
   const [selected, setSelected] = useState<Episode | null>(null);
-  const [role, setRole] = useState('');
   const [outcome, setOutcome] = useState('unlabelled');
   const [stage, setStage] = useState('');
   const [note, setNote] = useState('');
@@ -48,7 +94,6 @@ export default function Runs() {
       setAudit(null);
       const auditResponse = await fetch(`/api/episodes/${id}/intent-audit`);
       if (auditResponse.ok) setAudit((await auditResponse.json()) as IntentAudit);
-      setRole(Object.keys(episode.videos)[0] ?? '');
       setOutcome(episode.success === null ? 'unlabelled' : episode.success ? 'success' : 'failure');
       setStage(episode.failure_stage ?? '');
       setNote(episode.note ?? '');
@@ -129,14 +174,9 @@ export default function Runs() {
             <>
               <div className="card-heading"><h2>{selected.task}</h2><span className="count">{selected.status}</span></div>
               <p className="muted">{selected.checkpoint} · {selected.robot_name ?? selected.body ?? 'Robot unknown'}</p>
-              {Object.keys(selected.videos).length > 0 ? (
-                <>
-                  <div className="role-tabs">{Object.keys(selected.videos).map((name) => <button key={name} className={role === name ? 'role-active' : ''} onClick={() => setRole(name)}>{name}</button>)}</div>
-                  <video key={`${selected.id}-${role}`} controls preload="metadata" src={`/api/episodes/${selected.id}/video/${encodeURIComponent(role)}`} />
-                </>
-              ) : <div className="video-empty">No finished camera video in this rollout.</div>}
+              <RunCameras key={selected.id} episode={selected} />
               <dl className="details">
-                {selected.simulation && <div><dt>Simulation</dt><dd>{selected.simulation.source} � seed {selected.simulation.seed}{selected.simulation.start_pose && ` � start: ${selected.simulation.start_pose}`}{selected.simulation.model_action_rows !== undefined && ` � ${selected.simulation.model_action_rows} model action rows`}</dd></div>}
+                {selected.simulation && <div><dt>Simulation</dt><dd>{selected.simulation.source} · seed {selected.simulation.seed}{selected.simulation.start_pose && ` · start: ${selected.simulation.start_pose}`}{selected.simulation.model_action_rows !== undefined && ` · ${selected.simulation.model_action_rows} model action rows`}</dd></div>}
                 <div><dt>Duration</dt><dd>{selected.duration_s?.toFixed(1) ?? '—'} s</dd></div>
                 <div><dt>Frames</dt><dd>{selected.frames ?? '—'} at {selected.fps ?? '—'} fps</dd></div>
                 <div><dt>Stop reason</dt><dd>{selected.stop_reason ?? '—'}</dd></div>
