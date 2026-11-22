@@ -538,9 +538,9 @@ def home_path(state, seconds=2.0, hz=20.0):
 class YamEnv:
     """Position servo control at 20 Hz, physics at 500 Hz. No API calls required."""
 
-    def __init__(self):
+    def __init__(self, scene_xml: str | None = None):
         """Initialize the object and its owned state."""
-        self.model = mujoco.MjModel.from_xml_string(build_xml())
+        self.model = mujoco.MjModel.from_xml_string(scene_xml if scene_xml is not None else build_xml())
         self.data = mujoco.MjData(self.model)
         self.renderer = None
         self.reset()

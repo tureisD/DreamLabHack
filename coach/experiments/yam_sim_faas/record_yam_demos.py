@@ -40,11 +40,11 @@ CONFIG = {
 
 class RecordingYamEnv(YamEnv):
     def __init__(self, folder, task, seed, *, defer_video=False, videos=True, start_pose="home",
-                 object_name="apple"):
-        super().__init__()
+                 object_name="apple", scene_xml=None):
+        super().__init__(scene_xml=scene_xml)
         self.folder = folder
         self.task = task
-        if object_name not in ("apple", "orange", "banana"):
+        if object_name not in ("apple", "orange", "banana", "task_object"):
             raise ValueError("Unsupported YAM object")
         fruit_pose = self.data.joint(f"{object_name}_free").qpos
         fruit_pose[:2] += np.random.default_rng(seed).uniform(-0.025, 0.025, size=2)
@@ -58,7 +58,9 @@ class RecordingYamEnv(YamEnv):
             raise ValueError(f"Unknown simulator start pose: {start_pose}")
         mujoco.mj_forward(self.model, self.data)
         self.object_xy = fruit_pose[:2].tolist()
-        self.apple_xy = self.object_xy if object_name == "apple" else self.data.joint("apple_free").qpos[:2].tolist()
+        apple_joint = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "apple_free")
+        self.apple_xy = (self.object_xy if object_name == "apple" else
+                         self.data.joint("apple_free").qpos[:2].tolist() if apple_joint >= 0 else None)
         self.states: list[np.ndarray] = []
         self.actions: list[np.ndarray] = []
         self.apple_heights = [] if not videos else None
@@ -162,13 +164,13 @@ def scene_seed(value):
 
 @contextmanager
 def recording(root, task, checkpoint, seed, source, *, start_pose="home", videos=True,
-              object_name="apple"):
+              object_name="apple", scene_xml=None):
     root.mkdir(parents=True, exist_ok=True)
     folder = root / f"yam-{uuid4().hex}"
     folder.mkdir()
     started = datetime.now(UTC).isoformat()
     env = RecordingYamEnv(folder, task, seed, defer_video=source == "model", videos=videos,
-                          start_pose=start_pose, object_name=object_name)
+                          start_pose=start_pose, object_name=object_name, scene_xml=scene_xml)
     details = {"source": source, "seed": seed, "apple_xy_m": env.apple_xy,
                "object_name": object_name, "object_xy_m": env.object_xy, "start_pose": start_pose}
     status, reason, error = "complete", "finished", None
