@@ -3,7 +3,7 @@
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from teach_task_coach.account import AccountService
+from teach_task_coach.account import AccountService, AccountStatus
 from teach_task_coach.api import create_app
 from teach_task_coach.assistant import (
     AiConnect,
@@ -133,10 +133,68 @@ def test_chat_asks_model_for_next_turn_and_never_sends_credentials(monkeypatch):
     assert payload["input"][-1]["content"] == "I have a SO-101 robot"
 
 
-def test_chat_rejects_keys_in_transcript_and_ai_key_stays_in_process(monkeypatch):
+def test_introduction_has_no_action_before_begin(monkeypatch):
+    import io
+    import json
+
+    from teach_task_coach import assistant
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-only-key")
+    calls = []
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.close()
+
+    def fake_open(request, timeout):
+        calls.append(json.loads(request.data))
+        result = {"message": "I'm your guide. We'll get a measured improvement. Press Begin.",
+                  "input_kind": "dream_key", "suggested_screen": "tasks", "task_draft": None}
+        return Response(json.dumps({"output": [{"content": [
+            {"type": "output_text", "text": json.dumps(result)}
+        ]}]}).encode())
+
+    monkeypatch.setattr(assistant.urllib.request, "urlopen", fake_open)
+    result = chat(ChatRequest(stage="introduction", messages=[], state={"dream_connected": False}))
+    assert "Press Begin" in result.message
+    assert result.input_kind == "text"
+    assert result.suggested_screen is None
+    assert "Do not ask a question" in calls[0]["instructions"]
+
+
+def test_connected_workspace_reads_only_account_inventory():
+    from types import SimpleNamespace
+
+    class Account:
+        def status(self):
+            return AccountStatus(configured=True, source="credentials_file", message="Connected")
+
+    class Gateway:
+        def datasets(self):
+            return [SimpleNamespace(id="ds_1", name="alice/apple", status="processed")]
+
+        def finetunes(self):
+            return [{"id": "ftj_1", "dataset": "alice/apple", "status": "running", "api_key": "secret"}]
+
+        @property
+        def client(self):
+            return SimpleNamespace(get_models=lambda: [SimpleNamespace(id="dream-1-ft:apple", servable=False)])
+
+    response = TestClient(create_app(account_service=Account(), dream_gateway=Gateway())).get("/api/account/workspace")
+    assert response.status_code == 200
+    assert response.json()["fine_tuning_jobs"][0]["status"] == "running"
+    assert response.json()["datasets"][0]["name"] == "alice/apple"
+    assert "secret" not in response.text
+
+
+def test_chat_rejects_keys_in_transcript_and_ai_key_stays_local(monkeypatch, tmp_path):
     from teach_task_coach import assistant
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("COACH_AI_CREDENTIALS", str(tmp_path / "coach-ai-key.dpapi"))
     monkeypatch.setattr(assistant, "_session_ai_key", None)
     seen = []
 
@@ -150,6 +208,11 @@ def test_chat_rejects_keys_in_transcript_and_ai_key_stays_in_process(monkeypatch
     monkeypatch.setattr(assistant.urllib.request, "urlopen", lambda request, timeout: seen.append(request) or Response())
     status = connect_ai(AiConnect(api_key="sk-test-key_1234567890123456"))
     assert status.configured and status.source == "session"
+    if assistant.os.name == "nt":
+        encrypted = (tmp_path / "coach-ai-key.dpapi").read_bytes()
+        assert b"sk-test-key" not in encrypted
+        monkeypatch.setattr(assistant, "_session_ai_key", None)
+        assert assistant.ai_status().source == "local_credential"
     assert len(seen) == 1
     try:
         chat(ChatRequest(messages=[ChatMessage(role="user", content="dl_live_abc1234567890123456")]))
@@ -158,3 +221,32 @@ def test_chat_rejects_keys_in_transcript_and_ai_key_stays_in_process(monkeypatch
     else:
         raise AssertionError("Dream key was accepted into chat")
     assert len(seen) == 1
+
+
+def test_chat_offers_simulator_card_and_task_draft(monkeypatch):
+    import io
+    import json
+
+    from teach_task_coach import assistant
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-only-key")
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.close()
+
+    result = {"message": "Use the bundled YAM setup card.", "input_kind": "text",
+              "suggested_screen": "tasks", "setup_help": "simulator",
+              "suggestions": ["Use the existing dataset"],
+              "task_draft": {"name": "Apple in basket", "prompt": "Put the apple in the basket.",
+                             "success_rule": "Apple remains in the basket after release for two seconds."}}
+    monkeypatch.setattr(assistant.urllib.request, "urlopen", lambda request, timeout: Response(
+        json.dumps({"output": [{"content": [{"type": "output_text", "text": json.dumps(result)}]}]}).encode()))
+    reply = chat(ChatRequest(messages=[ChatMessage(role="user", content="Where is the simulator?")]))
+    assert reply.setup_help == "simulator"
+    assert reply.suggested_screen is None
+    assert reply.suggestions == ["Use the existing dataset"]
+    assert reply.task_draft and "two seconds" in reply.task_draft.success_rule

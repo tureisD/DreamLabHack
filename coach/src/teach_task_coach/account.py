@@ -17,11 +17,25 @@ class AccountStatus(BaseModel):
     configured: bool
     source: str
     message: str
-    dashboard_url: str = "https://platform.dreamlabs.ai/"
+    dashboard_url: str = "https://platform.dreamlabs.ai/api-keys"
 
 
 class AccountConnect(BaseModel):
     api_key: SecretStr = Field(min_length=12)
+
+
+class WorkspaceItem(BaseModel):
+    id: str
+    name: str
+    status: str
+
+
+class AccountWorkspace(BaseModel):
+    state: str
+    message: str
+    datasets: list[WorkspaceItem] = Field(default_factory=list)
+    fine_tuning_jobs: list[WorkspaceItem] = Field(default_factory=list)
+    models: list[WorkspaceItem] = Field(default_factory=list)
 
 
 class AccountService:
@@ -40,7 +54,7 @@ class AccountService:
         source = "environment" if env_key else "credentials_file" if loaded.api_key else "missing"
         return AccountStatus(
             configured=bool(loaded.api_key), source=source,
-            message=("A Dream API key is configured. Check the connection before training."
+            message=("A Dream API key is configured on this local server. This does not check browser sign-in; verify live API access before training."
                      if loaded.api_key else "Create a Dream API key on the platform, then connect it here."),
         )
 
@@ -74,4 +88,4 @@ class AccountService:
             if os.path.exists(temporary):
                 os.unlink(temporary)
         return AccountStatus(configured=True, source="credentials_file",
-                             message="Dream key validated and saved in the local SDK credentials file.")
+                             message="Dream key validated and saved on this local server. Browser sign-in is separate.")

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 type Task = { id: string; name: string; success_rule: string; baseline_checkpoint: string };
 type Job = { id: string; status: string; checkpoint: string | null };
-type Evaluation = {
+export type Evaluation = {
   id: string; task_id: string; fine_tune_job_id: string; baseline_checkpoint: string;
   candidate_checkpoint: string; minimum_effect: number; created_at: string;
   planned_pairs: number;
@@ -13,8 +13,9 @@ type Trial = {
   sequence_index: number; start_cell: number; setup_note: string;
   episode_id: string | null; last_error: string | null;
 };
-type Report = {
+export type Report = {
   usable_pairs: number; target_pairs: number; baseline_successes: number; candidate_successes: number;
+  baseline_reviewed: number; candidate_reviewed: number;
   baseline_only: number; candidate_only: number; paired_difference: number | null;
   ci_low: number | null; ci_high: number | null; exact_p_value: number | null;
   baseline_safety_stops: number; candidate_safety_stops: number;
@@ -45,13 +46,16 @@ async function json<T>(url: string, method = 'GET', body?: unknown): Promise<T> 
 
 function percent(value: number | null) { return value === null ? '—' : `${(value * 100).toFixed(1)}%`; }
 
-export default function EvaluationPage() {
+export default function EvaluationPage({ initialTaskId = '', initialEvaluationId = '' }: {
+  initialTaskId?: string;
+  initialEvaluationId?: string;
+}) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [taskId, setTaskId] = useState('');
   const [jobs, setJobs] = useState<Job[]>([]);
   const [jobId, setJobId] = useState('');
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
-  const [selectedId, setSelectedId] = useState('');
+  const [selectedId, setSelectedId] = useState(initialEvaluationId);
   const [trials, setTrials] = useState<Trial[]>([]);
   const [report, setReport] = useState<Report | null>(null);
   const [minimumEffect, setMinimumEffect] = useState(0.15);
@@ -83,10 +87,11 @@ export default function EvaluationPage() {
 
   useEffect(() => {
     void json<Task[]>('/api/tasks').then((values) => {
-      setTasks(values); if (values.length) setTaskId(values[0].id);
+      setTasks(values);
+      setTaskId(values.find((task) => task.id === initialTaskId)?.id ?? values[0]?.id ?? '');
     }).catch((caught: Error) => setError(caught.message));
     void json<{ configured: boolean }>('/api/scene-adapter/status').then((value) => setSceneAdapter(value.configured));
-  }, []);
+  }, [initialTaskId]);
 
   useEffect(() => {
     if (!taskId) return;

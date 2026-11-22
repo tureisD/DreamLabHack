@@ -64,8 +64,8 @@ function Preflight() {
     <main className="page">
       <header className="header">
         <div>
-          <p className="eyebrow">Dream-1 task coach</p>
-          <h1>Teach it a task</h1>
+          <p className="eyebrow">DreamCoach</p>
+          <h1>Preflight</h1>
           <p className="subtitle">Check the robot station and Dream account before starting a task.</p>
         </div>
         <button type="button" onClick={() => void refresh()} disabled={loading}>
@@ -117,23 +117,45 @@ function Preflight() {
 
 export default function App() {
   const [screen, setScreen] = useState<'start' | 'guide' | 'repair' | 'preflight' | 'runs' | 'tasks' | 'demos' | 'training' | 'evaluation' | 'statistical' | 'effect'>('start');
+  const [evaluationSelection, setEvaluationSelection] = useState<{ taskId?: string; evaluationId?: string }>({});
+
+  function openEvaluation(taskId?: string, evaluationId?: string) {
+    setEvaluationSelection({ taskId, evaluationId });
+    setScreen('evaluation');
+  }
+
   return (
     <>
-      <nav className="top-nav" aria-label="Coach sections">
-        <span className="brand">Teach it a task</span>
+      <nav className={`top-nav${screen === 'start' ? ' chat-nav' : ''}`} aria-label="Coach sections">
+        <span className="brand">DreamCoach</span>
         <button className={screen === 'start' ? 'nav-active' : ''} onClick={() => setScreen('start')}>Start here</button>
         <button className={screen === 'guide' ? 'nav-active' : ''} onClick={() => setScreen('guide')}>Guide</button>
         <button className={screen === 'repair' ? 'nav-active' : ''} onClick={() => setScreen('repair')}>Repair first</button>
         <button className={screen === 'preflight' ? 'nav-active' : ''} onClick={() => setScreen('preflight')}>Preflight</button>
-        <button className={screen === 'tasks' ? 'nav-active' : ''} onClick={() => setScreen('tasks')}>Tasks</button>
         <button className={screen === 'runs' ? 'nav-active' : ''} onClick={() => setScreen('runs')}>Run review</button>
         <button className={screen === 'demos' ? 'nav-active' : ''} onClick={() => setScreen('demos')}>Demos</button>
         <button className={screen === 'training' ? 'nav-active' : ''} onClick={() => setScreen('training')}>Training</button>
-        <button className={screen === 'evaluation' ? 'nav-active' : ''} onClick={() => setScreen('evaluation')}>Evaluation</button>
+        <button className={screen === 'evaluation' ? 'nav-active' : ''} onClick={() => { if (screen !== 'evaluation') openEvaluation(); }}>Evaluation</button>
         <button className={screen === 'statistical' ? 'nav-active' : ''} onClick={() => setScreen('statistical')}>Statistical audit</button>
         <button className={screen === 'effect' ? 'nav-active' : ''} onClick={() => setScreen('effect')}>Coach effect</button>
       </nav>
-      {screen === 'start' ? <CoachChat open={setScreen} /> : screen === 'guide' ? <Guide onRepair={() => setScreen('repair')} /> : screen === 'repair' ? <Repair onDemos={() => setScreen('demos')} onTraining={() => setScreen('training')} /> : screen === 'preflight' ? <Preflight /> : screen === 'tasks' ? <Tasks /> : screen === 'demos' ? <Demos /> : screen === 'training' ? <Training onEvaluate={() => setScreen('evaluation')} /> : screen === 'evaluation' ? <EvaluationPage /> : screen === 'statistical' ? <StatisticalAudit /> : screen === 'effect' ? <CoachEffect /> : <Runs />}
+      {screen === 'start' && <CoachChat
+        open={(next) => next === 'evaluation' ? openEvaluation() : setScreen(next)}
+        openEvaluation={openEvaluation}
+      />}
+      {screen === 'guide' && <Guide onRepair={() => setScreen('repair')} />}
+      {screen === 'repair' && <Repair onDemos={() => setScreen('demos')} onTraining={() => setScreen('training')} />}
+      {screen === 'preflight' && <Preflight />}
+      {screen === 'tasks' && <Tasks />}
+      {screen === 'demos' && <Demos />}
+      {screen === 'training' && <Training onEvaluate={() => openEvaluation()} />}
+      {screen === 'evaluation' && <EvaluationPage
+        initialTaskId={evaluationSelection.taskId}
+        initialEvaluationId={evaluationSelection.evaluationId}
+      />}
+      {screen === 'statistical' && <StatisticalAudit />}
+      {screen === 'effect' && <CoachEffect />}
+      {screen === 'runs' && <Runs />}
     </>
   );
 }

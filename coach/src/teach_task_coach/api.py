@@ -16,7 +16,13 @@ from dreamlab.contracts import EvaluationReport as StatisticalReport
 from dreamlab.contracts import EvaluationRequest as StatisticalRequest
 from dreamlab.evaluation.engine import StatisticalEvaluator
 from dreamlab.evaluation.methods.planning import plan_fixed_horizon
-from teach_task_coach.account import AccountConnect, AccountService, AccountStatus
+from teach_task_coach.account import (
+    AccountConnect,
+    AccountService,
+    AccountStatus,
+    AccountWorkspace,
+    WorkspaceItem,
+)
 from teach_task_coach.assistant import (
     AiConnect,
     AiStatus,
@@ -40,13 +46,13 @@ from teach_task_coach.evaluation import (
     EvaluationReport,
     EvaluationRequest,
     EvaluationStore,
+    LiveEvaluation,
     scene_for_trial,
 )
 from teach_task_coach.faas import (
     DatasetVersion,
     DreamGateway,
     FaaSStore,
-    LiveEvaluation,
     FineTuneRecord,
     FineTuneRequest,
 )
@@ -60,6 +66,7 @@ from teach_task_coach.repair import RepairReport, RepairRequest, RepairStore, Re
 from teach_task_coach.rollout_audit import IntentAudit, audit_rollout
 from teach_task_coach.scene import PlacementResult, SceneAdapter
 from teach_task_coach.sim_correction import SimCorrectionService
+from teach_task_coach.simulator_setup import SimulatorSetup, SimulatorStatus
 from teach_task_coach.station import StationRejected, StationUnavailable
 from teach_task_coach.storage import EpisodeStore
 from teach_task_coach.tasks import Task, TaskInput, TaskStore, Trial, TrialInput, TrialStateError
@@ -175,8 +182,9 @@ def create_app(
     repair_store: RepairStore | None = None,
     scene_adapter: SceneAdapter | None = None,
     account_service: AccountService | None = None,
+    simulator_setup: SimulatorSetup | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="Teach it a task", version="0.1.0")
+    app = FastAPI(title="DreamCoach", version="0.1.0")
 
     @app.middleware("http")
     async def local_browser_writes_only(request: Request, call_next):
@@ -205,6 +213,7 @@ def create_app(
     repairs = repair_store or RepairStore(episodes.data_dir)
     scene_fixture = scene_adapter or SceneAdapter()
     account = account_service or AccountService()
+    simulator = simulator_setup or SimulatorSetup()
 
     @app.get("/api/account/status", response_model=AccountStatus)
     def account_status() -> AccountStatus:
@@ -216,6 +225,26 @@ def create_app(
             return account.connect(value.api_key)
         except (ValueError, OSError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/account/workspace", response_model=AccountWorkspace)
+    def account_workspace() -> AccountWorkspace:
+        if not account.status().configured:
+            return AccountWorkspace(state="disconnected", message="Connect Dream Labs to inspect account resources.")
+        try:
+            datasets = dream.datasets()
+            jobs = dream.finetunes()
+            models = dream.client.get_models()
+        except DreamError:
+            return AccountWorkspace(state="unavailable", message="Dream account resources could not be loaded right now.")
+        return AccountWorkspace(
+            state="ready", message="Read-only Dream account inventory loaded.",
+            datasets=[WorkspaceItem(id=item.id, name=item.name, status=item.status) for item in datasets[:20]],
+            fine_tuning_jobs=[WorkspaceItem(id=str(item.get("id", "")),
+                                                 name=str(item.get("dataset", "Fine-tuning job")),
+                                                 status=str(item.get("status", "unknown"))) for item in jobs[:20]],
+            models=[WorkspaceItem(id=item.id, name=item.id,
+                                  status="servable" if item.servable else "pending") for item in models[:20]],
+        )
 
     @app.post("/api/assistant/ask", response_model=AssistantAnswer)
     def ask_assistant(value: AssistantQuestion) -> AssistantAnswer:
@@ -247,6 +276,11 @@ def create_app(
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/api/docs/simulator")
+    def simulator_setup_guide() -> FileResponse:
+        path = Path(__file__).resolve().parents[2] / "experiments/yam_sim_faas/FAILURE_CONDITIONED_SIM.md"
+        return FileResponse(path, media_type="text/markdown")
+
     @app.get("/api/sim-correction/scene")
     def sim_correction_scene(fruit: str = "apple", seed: int = 41) -> dict:
         try:
@@ -272,6 +306,24 @@ def create_app(
     @app.get("/api/sim-correction/status")
     def sim_correction_status() -> dict:
         return sim_correction.status()
+
+    @app.get("/api/simulator/status", response_model=SimulatorStatus)
+    def get_simulator_status() -> SimulatorStatus:
+        return simulator.status()
+
+    @app.post("/api/simulator/prepare", response_model=SimulatorStatus)
+    def prepare_simulator() -> SimulatorStatus:
+        return simulator.prepare()
+
+    @app.get("/api/docs/apple-training")
+    def apple_training_guide() -> FileResponse:
+        path = Path(__file__).resolve().parents[2] / "experiments/yam_sim_faas/grasp_training/README.md"
+        return FileResponse(path, media_type="text/markdown")
+
+    @app.get("/api/docs/apple-evaluation")
+    def apple_evaluation_report() -> FileResponse:
+        path = Path(__file__).resolve().parents[2] / "experiments/yam_sim_faas/grasp_training/SECOND_ACCOUNT_500_STEP_EVAL.md"
+        return FileResponse(path, media_type="text/markdown")
 
     @app.post("/api/coach-effect/analyze")
     def analyze_operator_study(value: CoachEffectInput) -> dict:
@@ -335,6 +387,8 @@ def create_app(
     frontend_dist = Path(__file__).resolve().parents[2] / "frontend/dist"
     if (frontend_dist / "assets").is_dir():
         app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="frontend-assets")
+    if (frontend_dist / "dream").is_dir():
+        app.mount("/dream", StaticFiles(directory=frontend_dist / "dream"), name="frontend-dream-assets")
 
     @app.get("/", response_model=None)
     def frontend() -> FileResponse | dict[str, str]:
@@ -886,6 +940,20 @@ def create_app(
             raise HTTPException(status_code=404, detail="Task not found.")
         return evaluations.list(task_id)
 
+    @app.get("/api/evaluations/latest", response_model=LiveEvaluation | None)
+    def latest_evaluation() -> LiveEvaluation | None:
+        evaluation = evaluations.latest()
+        if evaluation is None:
+            return None
+        task = tasks.get_task(evaluation.task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Evaluation task not found.")
+        return LiveEvaluation(
+            task_name=task.name,
+            evaluation=evaluation,
+            report=evaluations.report(evaluation, tasks, episodes),
+        )
+
     @app.get("/api/evaluations/{evaluation_id}", response_model=Evaluation)
     def get_evaluation(evaluation_id: str) -> Evaluation:
         result = evaluations.get(evaluation_id)
@@ -940,20 +1008,6 @@ def create_app(
                 "difference_interval": None, "interval_method": None,
                 "problems": (*current.problems, "Evidence changed since the saved audit; run it again."),
             })
-    @app.get("/api/evaluations/latest", response_model=LiveEvaluation | None)
-    def latest_evaluation() -> LiveEvaluation | None:
-        evaluation = evaluations.latest()
-        if evaluation is None:
-            return None
-        task = tasks.get_task(evaluation.task_id)
-        if task is None:
-            raise HTTPException(status_code=404, detail="Evaluation task not found.")
-        return LiveEvaluation(
-            task_name=task.name,
-            evaluation=evaluation,
-            report=evaluations.report(evaluation, tasks, episodes),
-        )
-
         return stored
 
     @app.get("/api/scene-adapter/status")
