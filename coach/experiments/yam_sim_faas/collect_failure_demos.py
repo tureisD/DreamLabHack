@@ -165,7 +165,7 @@ def collect(root: Path, output: Path, *, max_demos: int) -> dict:
         manifest = {
             "method": "failure_conditioned_simulation",
             "task": TASK, "model_checkpoint": selected[0]["checkpoint"],
-            "source_rollouts_scanned": len(failures), "selected_demos": len(rows),
+            "eligible_failed_rollouts": len(failures), "selected_demos": len(rows),
             "frames": report.frames, "fps": report.fps,
             "reserved_evaluation_seeds": "901-912 excluded",
             "previous_training_seeds": "41-48, 101-116, 201-224 excluded",
