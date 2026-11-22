@@ -6,22 +6,28 @@ from pathlib import Path
 
 import numpy as np
 import pyarrow.parquet as pq
-from batch import CONFIRMATION, HOLDOUT, SECOND_CONFIRMATION
+from batch import CONFIRMATION, HOLDOUT, SECOND_CONFIRMATION, SEEDS
 from build_batch import initialize_replay
 from record_yam_demos import TASK, YamEnv
 
+RESERVED = HOLDOUT | CONFIRMATION | SECOND_CONFIRMATION
+PREVIOUS_TRAINING = set().union(*SEEDS.values())
 
-def score(folder: Path) -> dict:
+
+def score(folder: Path, *, training_candidate: bool = False) -> dict:
     info = json.loads((folder / "rollout.json").read_text(encoding="utf-8"))
     scene = info["simulation"]
     if (
         info["status"] != "complete"
         or scene["source"] != "model"
-        or scene["seed"] not in HOLDOUT | CONFIRMATION | SECOND_CONFIRMATION
+        or not isinstance(scene.get("seed"), int)
+        or scene["seed"] < 0
+        or (scene["seed"] in RESERVED if training_candidate else scene["seed"] not in RESERVED)
+        or (training_candidate and scene["seed"] in PREVIOUS_TRAINING)
         or scene["start_pose"] != "wrist-visible"
         or info["task"] != TASK
     ):
-        raise ValueError(f"{folder}: not a complete held-out model rollout")
+        raise ValueError(f"{folder}: not an eligible complete model rollout for this split")
     table = pq.read_table(folder / "data/chunk-000/episode_000000.parquet")
     states = np.asarray(table["observation.state"].to_pylist(), dtype=float)
     actions = np.asarray(table["action"].to_pylist(), dtype=float)
