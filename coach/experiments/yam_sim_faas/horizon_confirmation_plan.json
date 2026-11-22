@@ -1,0 +1,17 @@
+{
+  "study_id": "apple-horizon-confirmation-2026-11-22",
+  "kind": "same_trajectory_horizon_confirmation",
+  "question": "On new apple scenes, how often does the unchanged fine-tune need more than nine action requests to satisfy the frozen held-lift rule?",
+  "model": "dream-1-ft:f2cc8d90-apple-independent24-500",
+  "task": "pick up the apple",
+  "start_pose": "wrist-visible",
+  "seeds": [921, 922, 923, 924, 925, 926, 927, 928, 929, 930, 931, 932, 933, 934, 935, 936, 937, 938, 939, 940],
+  "training_seeds_excluded": "41-48, 101-116, 201-224",
+  "previous_evaluation_seeds_excluded": "901-920",
+  "full_max_requests": 12,
+  "prefix_max_requests": 9,
+  "trial_cap_wall_seconds": 600,
+  "success_rule": "Apple rises at least 0.08 m above settled height for at least 2 continuous seconds; exact action replay joint-state error must be under 0.005 m.",
+  "analysis_rule": "Score the first 33 warm-up rows plus 48 action rows per request from the same recorded 12-request trajectory. Report the earliest request count meeting the success rule. Keep every invalid and partial run in the denominator record.",
+  "interpretation": "This evaluates the effect of stopping a single model trajectory after nine rather than twelve requests. It does not measure model training, operator time, demonstration efficiency, or FaaS spend."
+}
