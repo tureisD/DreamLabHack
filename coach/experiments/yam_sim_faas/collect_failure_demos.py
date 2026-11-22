@@ -37,6 +37,16 @@ def source_sha256(folder: Path) -> str:
     return digest.hexdigest()
 
 
+def demo_sha256(folder: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(item for item in folder.rglob("*") if item.is_file()):
+        digest.update(path.relative_to(folder).as_posix().encode())
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+    return digest.hexdigest()
+
+
 def failure_kind(result: dict) -> str:
     close = result["first_close_after_warmup_s"]
     if close is None:
@@ -153,6 +163,7 @@ def collect(root: Path, output: Path, *, max_demos: int) -> dict:
                 "model_source_sha256": row["source_sha256"],
                 "model_held_lift_m": row["held_lift_m"],
                 "corrective_recipe": recipe, "demo_folder": name, "demo_frames": frames,
+                "demo_sha256": demo_sha256(demo),
                 "raw_audit": raw_audit, "export_replay_held_lift_m": replay_held_lift,
             })
             # Raw 20 Hz recordings are not in the final dataset; only audited 10 Hz exports are.

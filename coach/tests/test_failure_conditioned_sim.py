@@ -30,6 +30,7 @@ def test_failure_conditioned_collection_exports_reviewable_dream_dataset(tmp_pat
     result = collect(model_root, output, max_demos=1)
     assert result["selected_demos"] == 1
     assert result["sessions"][0]["export_replay_held_lift_m"] >= 0.08
+    assert len(result["sessions"][0]["demo_sha256"]) == 64
     demo = read_demo(output / "yam-failure-seed-1201", "test-task")
     assert demo.valid
     assert demo.task_text == TASK
