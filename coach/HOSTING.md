@@ -24,4 +24,6 @@ Open `http://127.0.0.1:10000`. Check `/health`, then click **Begin** in the coac
 - Keep TLS termination in front of the gateway. Publish its HTTPS URL after checking that two independent browser sessions each see only their own workspace.
 - Store no shared Dream Labs or OpenAI key in the deployment environment. The gateway uses visitor keys, and the workers ignore host credentials. The Dream key is saved in the visitor’s workspace with restricted filesystem permissions. Protect the volume and its backups.
 
+The hosted frontend bundles original DreamCoach skyline artwork and SIL Open Font License copies of Bitcount Single and DM Sans. The font notices ship with the public assets. [Bitcount Single source](https://github.com/google/fonts/tree/main/ofl/bitcountsingle) · [DM Sans source](https://github.com/google/fonts/tree/main/ofl/dmsans)
+
 Workspace cookies last seven days. The operator should prune expired workspace directories from the protected volume when no jobs are running. The gateway limits saved workspaces and concurrent workers, and stops idle workers while preserving stored results. Increase the worker cap only after measuring simulator memory and CPU on the host. Physical station actions are disabled in hosted mode.

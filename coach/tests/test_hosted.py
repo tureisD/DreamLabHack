@@ -68,6 +68,8 @@ def test_workspace_env_and_https_cookie_are_private(tmp_path, monkeypatch):
         landing = client.get("/")
         assert '<div id="root">' in landing.text
         assert 'name="dreamcoach-workspace" content="required"' in landing.text
+        assert 'name="dreamcoach-introduction" content="Hi, I’m DreamCoach.' in landing.text
+        assert "Evaluate and improve" in landing.text
         assert client.get("/api/tasks").status_code == 401
         response = client.post("/hosted/workspace", headers={"Origin": origin},
                                json={"api_key": "fixture-dream-key-only"})

@@ -26,7 +26,9 @@ type WorkSurface =
   | { kind: 'checkpoints'; preferredCheckpoint?: string }
   | { kind: 'tool'; tool: ChatTool };
 const hosted = Boolean(document.querySelector('meta[name="dreamcoach-mode"][content="hosted"]'));
-const hostedIntroduction = 'Hi, I’m DreamCoach. I’ll guide you through teaching Dream-1 a task, from recording YAM demonstrations to fine-tuning and comparing the result with the base model. Press Begin to get started.';
+const hostedIntroduction = document.querySelector<HTMLMetaElement>('meta[name="dreamcoach-introduction"]')
+  ?.content.replace('Watch results in the sidebar', 'Open Evaluation results after connecting')
+  ?? 'Hi, I’m DreamCoach. I’ll help you record YAM demos, fine-tune Dream-1, and evaluate the result. Press Begin to get started.';
 
 const simulatorHelpPattern = /simulator screen|set up the YAM simulator/i;
 const trialExplanationPattern = /diagnos|what went wrong|(?:why|explain).*(?:run|trial|comparison|pick|scene|grasp|fail|result|miss|robot)/i;
@@ -99,8 +101,9 @@ export default function CoachChat({
 
   useEffect(() => {
     sessionStorage.setItem('coach-chat-v3', JSON.stringify(messages.slice(-24)));
-    if (!workSurface) thread.current?.scrollTo({ top: thread.current.scrollHeight });
-  }, [messages, workSurface]);
+    const content = thread.current;
+    if (!workSurface && content) content.scrollTo({ top: begun ? content.scrollHeight : 0 });
+  }, [messages, workSurface, begun]);
   useEffect(() => {
     const content = thread.current;
     if (!content) return;

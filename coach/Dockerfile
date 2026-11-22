@@ -7,7 +7,7 @@ COPY coach/frontend/src ./src
 COPY coach/experiments/yam_sim_faas/closed_loop_repair_report.json \
      coach/experiments/yam_sim_faas/horizon_confirmation_report.json \
      /build/coach/experiments/yam_sim_faas/
-RUN npm run build
+RUN npm run build && cp src/assets/fonts/*.OFL.txt dist/assets/
 
 FROM python:3.11-slim-bookworm AS runtime
 COPY --from=ghcr.io/astral-sh/uv:0.11.18 /uv /usr/local/bin/uv

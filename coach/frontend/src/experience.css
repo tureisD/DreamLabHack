@@ -26,6 +26,7 @@
 
 html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
   background:
+    url('./assets/dreamcoach-skyline.webp') center 51% / cover no-repeat,
     radial-gradient(ellipse at 17% 58%, #ffdc92, transparent 48%),
     radial-gradient(ellipse at 84% 16%, #c3b8ee, transparent 43%),
     linear-gradient(155deg, #f5c8de, #ffc9a1 55%, #b7d1bf);
@@ -69,17 +70,12 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
 .coach-experience .coach-hero h1 {
   margin: 0;
   color: #35231f;
-  font-family: 'Bitcount Single', ui-monospace, monospace;
+  font-family: var(--coach-display-font), ui-monospace, monospace;
   font-size: clamp(44px, 8vw, 88px);
   font-weight: 540;
   line-height: 1.05;
   letter-spacing: -.055em;
   text-shadow: 0 1px 18px #fff2dd;
-}
-
-html:has(meta[name="dreamcoach-mode"]) .coach-experience .coach-hero h1 {
-  font-family: ui-monospace, monospace;
-  font-weight: 650;
 }
 
 .coach-experience .coach-hero .subtitle {

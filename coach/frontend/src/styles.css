@@ -359,7 +359,9 @@ button.secondary:hover { background: #cfe2ea; color: #153d50; }
 @font-face { font-family: Walla; src: url('/dream/walla-medium.woff2') format('woff2'); font-weight: 600; font-display: swap; }
 @font-face { font-family: Walla; src: url('/dream/walla-bold.woff2') format('woff2'); font-weight: 700 900; font-display: swap; }
 @font-face { font-family: 'Bitcount Single'; src: url('/dream/bitcount-single-var.woff2') format('woff2'); font-weight: 300 900; font-display: swap; }
-:root { font-family: Walla, Figtree, sans-serif; color: #1c1c1c; background: #fff; }
+@font-face { font-family: 'DreamCoach Bitcount'; src: url('./assets/fonts/bitcount-single.woff2') format('woff2'); font-weight: 300 900; font-display: swap; }
+@font-face { font-family: 'DM Sans'; src: url('./assets/fonts/dm-sans.woff2') format('woff2'); font-weight: 400 900; font-display: swap; }
+:root { --coach-display-font: 'Bitcount Single'; font-family: Walla, Figtree, sans-serif; color: #1c1c1c; background: #fff; }
 button { border-radius: 999px; background: #1c1c1c; font-weight: 600; }
 button:hover { background: #383636; }
 .top-nav.chat-nav { background: #fffdfa; border-color: #eee3d8; }
@@ -374,7 +376,7 @@ button:hover { background: #383636; }
 .chat-landscape { position: relative; height: 220px; flex: 0 0 220px; overflow: hidden; background: #ffce9b url('/dream/sunrise-hd-poster.webp') center 55% / cover no-repeat; }
 .chat-landscape video { width: 100%; height: 100%; object-fit: cover; object-position: center 55%; }
 .chat-landscape::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(255, 237, 211, .05) 45%, rgba(255, 242, 222, .55) 100%); pointer-events: none; }
-.chat-landscape-title { position: absolute; z-index: 1; top: 20px; left: 24px; color: #fff8e9; font-family: 'Bitcount Single', monospace; font-size: clamp(26px, 3vw, 43px); font-weight: 600; text-shadow: 0 2px 14px #85522b8a; }
+.chat-landscape-title { position: absolute; z-index: 1; top: 20px; left: 24px; color: #fff8e9; font-family: var(--coach-display-font), monospace; font-size: clamp(26px, 3vw, 43px); font-weight: 600; text-shadow: 0 2px 14px #85522b8a; }
 .chat-spark { position: absolute; z-index: 1; color: #fff49c; font-size: 35px; filter: drop-shadow(0 3px 8px #9b584f4f); animation: chat-float 4s ease-in-out infinite; }
 .chat-spark-one { left: 18%; bottom: 26px; }
 .chat-spark-two { right: 13%; top: 60px; color: #c5f3ad; animation-delay: 1.3s; }
@@ -401,9 +403,11 @@ button:hover { background: #383636; }
 .chat-page .chat-shell { position: relative; isolation: isolate; display: flex; flex-direction: column; height: clamp(440px, calc(100dvh - 180px), 900px); }
 .chat-landscape { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; border-radius: inherit; pointer-events: none; }
 .chat-landscape::after { background: linear-gradient(180deg, rgba(89, 49, 32, .17), rgba(255, 245, 228, .32) 35%, rgba(255, 245, 228, .2)); }
-html:has(meta[name="dreamcoach-mode"]) { font-family: system-ui, sans-serif; }
+html:has(meta[name="dreamcoach-mode"]) {
+  --coach-display-font: 'DreamCoach Bitcount';
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
 .chat-landscape.hosted-landscape { background: linear-gradient(155deg, #514e72, #df876d 41%, #faca8f 68%, #b5c6a7); }
-html:has(meta[name="dreamcoach-mode"]) .chat-landscape-title { font-family: ui-monospace, monospace; }
 .chat-panel-top, .chat-page .chat-thread, .chat-page .chat-composer, .chat-begin { position: relative; z-index: 1; }
 .chat-panel-top { flex: 0 0 62px; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .chat-landscape-title { position: static; font-size: clamp(20px, 2.6vw, 32px); }

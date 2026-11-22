@@ -17,6 +17,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from html import escape
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
@@ -27,6 +28,8 @@ from dream.errors import DreamError
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+
+from teach_task_coach.assistant import CHAT_WELCOME
 
 COOKIE = "__Host-dreamcoach"
 PREVIEW_COOKIE = "dreamcoach-preview"
@@ -288,7 +291,8 @@ def create_gateway(
         page = page.replace(
             "</head>",
             '<meta name="dreamcoach-mode" content="hosted">'
-            f'<meta name="dreamcoach-workspace" content="{workspace_state}"></head>',
+            f'<meta name="dreamcoach-workspace" content="{workspace_state}">'
+            f'<meta name="dreamcoach-introduction" content="{escape(CHAT_WELCOME)}"></head>',
         )
         return HTMLResponse(page)
 
