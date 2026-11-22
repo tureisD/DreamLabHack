@@ -143,13 +143,14 @@ export default function YamChatWorkflow({
 
     {mode === 'apple' && <div className="yam-panel">
       <div className="yam-panel-heading"><h3>Teach apple pickup</h3><p>Lift the apple at least 8 cm and hold it for two seconds.</p></div>
+      {!running && ready && dreamReady && existingCheckpoint && <div className="yam-next">
+        <button type="button" className="yam-secondary" disabled={busy} onClick={() => void act(() => compareExisting(existingCheckpoint))}>
+          Evaluate existing checkpoint
+        </button>
+        <small>Compare the 500-step model with Dream-1 on four fresh scenes. Inference may use Dream credits.</small>
+      </div>}
       {canStart && <>
-        <div className="yam-buttons">
-          <button type="button" className="yam-primary" disabled={busy} onClick={() => void act(reuseDemos)}>Use 24 bundled demos</button>
-          {ready && dreamReady && existingCheckpoint && <button type="button" className="yam-secondary" disabled={busy} onClick={() => void act(() => compareExisting(existingCheckpoint))}>
-            Evaluate existing checkpoint
-          </button>}
-        </div>
+        <button type="button" className="yam-primary" disabled={busy} onClick={() => void act(reuseDemos)}>Use 24 bundled demos</button>
         {ready && <div className="yam-next">
           <label className="yam-scene-count">Fresh scenes
             <select value={scenes} onChange={(event) => setScenes(Number(event.target.value))}>
