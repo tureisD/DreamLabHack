@@ -23,6 +23,7 @@ def main() -> None:
     parser.add_argument("--start-pose", choices=("home", "wrist-visible"), default="home")
     parser.add_argument("--max-requests", type=int, default=1, help="Limit get_action calls per run")
     parser.add_argument("--dry-run", action="store_true", help="Record the observation warm-up offline")
+    parser.add_argument("--score-only", action="store_true", help="Save action/state replay without review videos")
     args = parser.parse_args()
     if not args.dry_run and not os.getenv("DREAM_API_KEY"):
         parser.error("Set DREAM_API_KEY in the process environment")
@@ -30,7 +31,8 @@ def main() -> None:
         parser.error("--max-requests must be positive")
     seed = args.seed if args.seed is not None else secrets.randbits(32)
     source = "observation dry run" if args.dry_run else "model"
-    with recorder.recording(args.output, args.task, args.model, seed, source, start_pose=args.start_pose) as (env, details):
+    with recorder.recording(args.output, args.task, args.model, seed, source,
+                            start_pose=args.start_pose, videos=not args.score_only) as (env, details):
         options = ["--headless", "--quiet", "--seconds", str(args.seconds), "--task", args.task,
                    "--model", args.model, "--max-requests", str(args.max_requests)]
         if args.dry_run:

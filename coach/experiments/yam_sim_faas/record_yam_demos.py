@@ -39,7 +39,7 @@ CONFIG = {
 
 
 class RecordingYamEnv(YamEnv):
-    def __init__(self, folder, task, seed, *, defer_video=False, start_pose="home"):
+    def __init__(self, folder, task, seed, *, defer_video=False, videos=True, start_pose="home"):
         super().__init__()
         self.folder = folder
         self.task = task
@@ -57,9 +57,9 @@ class RecordingYamEnv(YamEnv):
         self.apple_xy = apple[:2].tolist()
         self.states: list[np.ndarray] = []
         self.actions: list[np.ndarray] = []
-        self.video_poses = [] if defer_video else None
+        self.video_poses = [] if defer_video and videos else None
         self.outputs = {}
-        for role in ROLES.values():
+        for role in ROLES.values() if videos else ():
             video = self.folder / f"videos/chunk-000/observation.images.{role}/episode_000000.mp4"
             video.parent.mkdir(parents=True, exist_ok=True)
             container = av.open(str(video), "w")
@@ -73,12 +73,12 @@ class RecordingYamEnv(YamEnv):
         state = self.state()
         self.states.append(np.r_[state["right"], state["left"]].astype(np.float32))
         self.actions.append(np.r_[right, left].astype(np.float32))
-        if self.video_poses is None:
-            self._write_video_frame()
-        else:
+        if self.video_poses is not None:
             # Store the actual full scene pose, including the free apple. Rendering
             # review videos between model calls can outlast the gateway session.
             self.video_poses.append((self.data.time, self.data.qpos.copy()))
+        elif self.outputs:
+            self._write_video_frame()
         return super().step(left, right)
 
     def _write_video_frame(self):
@@ -131,7 +131,7 @@ class RecordingYamEnv(YamEnv):
             "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
             "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
             "features": {"action": feature, "observation.state": feature}
-            | {f"observation.images.{role}": video_feature for role in ROLES.values()},
+            | {f"observation.images.{role}": video_feature for role in self.outputs},
         }
         (meta / "info.json").write_text(json.dumps(info), encoding="utf-8")
         (meta / "tasks.jsonl").write_text(json.dumps({"task_index": 0, "task": self.task}) + "\n", encoding="utf-8")
@@ -147,12 +147,12 @@ def scene_seed(value):
 
 
 @contextmanager
-def recording(root, task, checkpoint, seed, source, *, start_pose="home"):
+def recording(root, task, checkpoint, seed, source, *, start_pose="home", videos=True):
     root.mkdir(parents=True, exist_ok=True)
     folder = root / f"yam-{uuid4().hex}"
     folder.mkdir()
     started = datetime.now(timezone.utc).isoformat()
-    env = RecordingYamEnv(folder, task, seed, defer_video=source == "model", start_pose=start_pose)
+    env = RecordingYamEnv(folder, task, seed, defer_video=source == "model", videos=videos, start_pose=start_pose)
     details = {"source": source, "seed": seed, "apple_xy_m": env.apple_xy, "start_pose": start_pose}
     status, reason, error = "complete", "finished", None
     try:
@@ -169,6 +169,7 @@ def recording(root, task, checkpoint, seed, source, *, start_pose="home"):
             "checkpoint": checkpoint, "started_at_utc": started,
             "frames": frames, "fps": FPS, "duration_s": frames / FPS,
             "status": status if frames else "empty", "stop_reason": reason, "error": error,
+            "has_video": videos,
         }
         pending = folder / "rollout.json.tmp"
         pending.write_text(json.dumps(info, indent=2), encoding="utf-8")
