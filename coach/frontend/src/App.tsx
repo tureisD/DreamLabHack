@@ -14,12 +14,16 @@ import type { DemoKeepReceipt } from './ChatDemoReview';
 import type { SimulatorMode } from './YamChatWorkflow';
 
 export default function App() {
+  const [needsHostedConnection, setNeedsHostedConnection] = useState(() =>
+    document.querySelector('meta[name="dreamcoach-workspace"]')?.getAttribute('content') === 'required');
   const [screen, setScreen] = useState<'start' | 'guide' | 'repair' | 'preflight' | 'runs' | 'tasks' | 'demos' | 'training' | 'evaluation' | 'statistical' | 'effect'>('start');
   const [evaluationSelection, setEvaluationSelection] = useState<{ taskId?: string; evaluationId?: string }>({});
-  const [activeTaskId, setActiveTaskId] = useState(() => sessionStorage.getItem('coach-active-task-v3') ?? '');
+  const [activeTaskId, setActiveTaskId] = useState(() =>
+    needsHostedConnection ? '' : sessionStorage.getItem('coach-active-task-v3') ?? '');
   const [showSimulator, setShowSimulator] = useState(false);
   const [demoApproval, setDemoApproval] = useState<DemoKeepReceipt | null>(null);
   const [simulatorMode, setSimulatorMode] = useState<SimulatorMode>(() => {
+    if (needsHostedConnection) return 'apple';
     const mode = sessionStorage.getItem('coach-simulator-mode-v3');
     return mode === 'scene' || mode === 'fruit' ? mode : 'apple';
   });
@@ -55,7 +59,7 @@ export default function App() {
 
   return (
     <>
-      <nav className={`top-nav${screen === 'start' ? ' chat-nav' : ''}`} aria-label="Coach sections">
+      {!needsHostedConnection && <nav className={`top-nav${screen === 'start' ? ' chat-nav' : ''}`} aria-label="Coach sections">
         <span className="brand">DreamCoach</span>
         <button className={screen === 'start' ? 'nav-active' : ''} onClick={() => { setShowSimulator(false); setScreen('start'); }}>Start here</button>
         <button className={screen === 'guide' ? 'nav-active' : ''} onClick={() => setScreen('guide')}>Guide</button>
@@ -67,8 +71,13 @@ export default function App() {
         <button className={screen === 'evaluation' ? 'nav-active' : ''} onClick={() => { if (screen !== 'evaluation') openEvaluation(); }}>Evaluation</button>
         <button className={screen === 'statistical' ? 'nav-active' : ''} onClick={() => setScreen('statistical')}>Statistical audit</button>
         <button className={screen === 'effect' ? 'nav-active' : ''} onClick={() => setScreen('effect')}>Coach effect</button>
-      </nav>
+      </nav>}
       {screen === 'start' && <CoachChat
+        needsHostedConnection={needsHostedConnection}
+        onHostedConnection={() => {
+          resetChatSession();
+          setNeedsHostedConnection(false);
+        }}
         resetSession={resetChatSession}
         activeTaskId={activeTaskId}
         selectTask={selectTask}

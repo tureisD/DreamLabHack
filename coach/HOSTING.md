@@ -14,7 +14,7 @@ docker run --rm --name dreamcoach -p 127.0.0.1:10000:10000 \
   -v dreamcoach-workspaces:/var/lib/dreamcoach dreamcoach
 ```
 
-Open `http://127.0.0.1:10000`. Check `/health`, then connect a Dream Labs key. Use **Begin → Use bundled apple demos** to check import and review without starting inference. Verify the base versus fine-tune sidebar with an available checkpoint and a budgeted simulator run.
+Open `http://127.0.0.1:10000`. Check `/health`, then click **Begin** in the coach conversation and connect a Dream Labs key. Choose **Use 24 bundled demos** to check import and review without starting inference. Verify the base versus fine-tune sidebar with an available checkpoint and a budgeted simulator run.
 
 ## Public deployment
 

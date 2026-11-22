@@ -172,6 +172,39 @@ def saved_metrics_diagnosis(attempt: PairAttempt, threshold_m: float) -> TrialDi
     )
 
 
+def session_failure_message(folder: Path) -> str | None:
+    sidecar = next(folder.glob("*/rollout.json"), None)
+    if sidecar is None:
+        return None
+    try:
+        rollout = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(rollout, dict) or rollout.get("error") != "DreamSessionExpired":
+        return None
+    simulation = rollout.get("simulation")
+    if not isinstance(simulation, dict):
+        return "The rollout ended when Dream replaced its inference session."
+    reason = {
+        "expired": "the previous session expired",
+        "unknown": "Dream no longer recognized the previous session",
+        "serve_died": "the model server stopped",
+    }.get(simulation.get("last_session_replacement_reason"))
+    rows = simulation.get("model_action_rows", 0)
+    replacements = simulation.get("session_replacements")
+    if not isinstance(replacements, int):
+        outcome = "The rollout ended when Dream replaced its inference session."
+    else:
+        outcome = f"The rollout reached the retry limit after {replacements} Dream session replacements."
+    if reason:
+        outcome += f" Dream reported that {reason}."
+    else:
+        outcome += " Dream’s specific reason is unavailable."
+    if isinstance(rows, int):
+        outcome += f" The partial recording saved {rows} of {MIN_ACTION_ROWS} model actions."
+    return outcome
+
+
 def write_json(path: Path, data: str) -> None:
     next_path = path.with_suffix(".tmp")
     next_path.write_text(data, encoding="utf-8")
@@ -463,11 +496,17 @@ class YamWorkflow:
         return True
 
     def _record(self, folder: Path, checkpoint: str, seed: int, *, heldout: bool = False) -> dict:
-        command(
-            "record_dream_model_rollout.py", "--output", str(folder), "--model", checkpoint,
-            "--seed", str(seed), "--start-pose", "wrist-visible", "--max-requests",
-            str(REQUESTS_PER_TRIAL), "--score-only", timeout=660, cancel=self._reset_requested,
-        )
+        try:
+            command(
+                "record_dream_model_rollout.py", "--output", str(folder), "--model", checkpoint,
+                "--seed", str(seed), "--start-pose", "wrist-visible", "--max-requests",
+                str(REQUESTS_PER_TRIAL), "--score-only", timeout=660, cancel=self._reset_requested,
+            )
+        except SimulatorRunError as exc:
+            message = session_failure_message(folder)
+            if message:
+                raise SimulatorRunError(message, exc.code) from exc
+            raise
         args = ("--held-out-seed", str(seed)) if heldout else ()
         score = workflow_result(str(folder), *args, "--diagnose", cancel=self._reset_requested)
         if score["seed"] != seed or score["checkpoint"] != checkpoint:

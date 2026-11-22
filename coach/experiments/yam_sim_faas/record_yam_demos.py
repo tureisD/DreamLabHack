@@ -66,20 +66,18 @@ class RecordingYamEnv(YamEnv):
                          self.data.joint("apple_free").qpos[:2].tolist() if apple_joint >= 0 else None)
         self.states: list[np.ndarray] = []
         self.actions: list[np.ndarray] = []
-        self.apple_heights = [] if not videos else None
+        self.apple_body = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "apple")
+        has_apple = self.apple_body >= 0 and object_name == "apple"
+        self.apple_heights = [] if not videos and has_apple else None
         self.video_poses = [] if defer_video and videos else None
-        self.apple_trace = []
-        apple_body = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "apple")
-        self.apple_body = (
-            apple_body
-            if apple_body >= 0 and object_name == "apple" and self.task.strip().casefold() == TASK
-            else None
-        )
-        self.tip_bodies = {
-            self.model.body(f"{side}_tip_{tip}").id: (hand, 1 << index)
-            for hand, side in enumerate(("left", "right")) if self.apple_body is not None
-            for index, tip in enumerate(("left", "right"))
-        }
+        self.apple_trace = [] if has_apple and self.task.strip().casefold() == TASK else None
+        self.tip_bodies = {}
+        if self.apple_trace is not None:
+            self.tip_bodies = {
+                self.model.body(f"{side}_tip_{tip}").id: (hand, 1 << index)
+                for hand, side in enumerate(("left", "right"))
+                for index, tip in enumerate(("left", "right"))
+            }
         self.outputs = {}
         for role in ROLES.values() if videos else ():
             video = self.folder / f"videos/chunk-000/observation.images.{role}/episode_000000.mp4"
@@ -93,7 +91,7 @@ class RecordingYamEnv(YamEnv):
 
     def step(self, left, right):
         # Sample before step, like the review video. Deferred rendering rewinds qpos in close().
-        if self.apple_body is not None:
+        if self.apple_trace is not None:
             fingers = [0, 0]
             other = False
             for c in self.data.contact:

@@ -4,6 +4,7 @@ from pathlib import Path
 import httpx
 from fastapi.testclient import TestClient
 
+from teach_task_coach import hosted
 from teach_task_coach.hosted import create_gateway, workspace_environment
 
 
@@ -55,12 +56,23 @@ def test_workspace_env_and_https_cookie_are_private(tmp_path, monkeypatch):
     assert "DREAM_API_KEY" not in env and "OPENAI_API_KEY" not in env
     assert env["COACH_STATION_URL"] == "http://127.0.0.1:1"
     assert Path(env["DREAM_YAM_CONFIG_DIR"]).parent == tmp_path
+    site = tmp_path / "frontend"
+    site.mkdir()
+    (site / "index.html").write_text(
+        '<html><head></head><body><div id="root"></div></body></html>', encoding="utf-8",
+    )
+    monkeypatch.setattr(hosted, "SITE", site)
     origin = "https://dreamcoach.example"
-    app = create_gateway(tmp_path, origin, validator=lambda _: None)
+    app = create_gateway(tmp_path / "workspaces", origin, validator=lambda _: None)
     with TestClient(app, base_url=origin) as client:
+        landing = client.get("/")
+        assert '<div id="root">' in landing.text
+        assert 'name="dreamcoach-workspace" content="required"' in landing.text
+        assert client.get("/api/tasks").status_code == 401
         response = client.post("/hosted/workspace", headers={"Origin": origin},
                                json={"api_key": "fixture-dream-key-only"})
         assert "__Host-dreamcoach=" in response.headers["set-cookie"]
         assert "Secure" in response.headers["set-cookie"]
         assert "fixture-dream-key-only" not in response.text
+        assert 'name="dreamcoach-workspace" content="connected"' in client.get("/").text
         assert client.get("/api/tasks", headers={"Host": "untrusted.example"}).status_code == 421

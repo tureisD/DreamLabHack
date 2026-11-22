@@ -325,3 +325,37 @@ def test_existing_checkpoint_choices_join_accessible_models_and_verified_trainin
     assert client.post("/api/simulator/compare-existing", json={"checkpoint": eligible}).status_code == 202
     assert wait_for_job(client)["state"] == "completed"
     assert compared == [eligible]
+
+
+def test_chat_reports_the_saved_session_replacement_reason(tmp_path, monkeypatch):
+    ready = SimpleNamespace(status=lambda: SimulatorStatus(state="ready", message="Offline fixture"))
+    preflight = PreflightService(model_loader=lambda: [
+        SimpleNamespace(id=BASE, owner="test", embodiment="yam", servable=True, cameras=None)
+    ])
+    client = TestClient(create_app(preflight, EpisodeStore(tmp_path), simulator_setup=ready))
+
+    def fail_recording(script, output_option, output, *args, timeout, cancel):
+        assert script == "record_dream_model_rollout.py"
+        assert output_option == "--output"
+        assert cancel is not None
+        folder = Path(output) / "fixture"
+        folder.mkdir(parents=True)
+        (folder / "rollout.json").write_text(json.dumps({
+            "error": "DreamSessionExpired",
+            "simulation": {
+                "session_replacements": 4,
+                "last_session_replacement_reason": "serve_died",
+                "model_action_rows": 288,
+            },
+        }))
+        raise yam_workflow.SimulatorRunError("Raw provider or subprocess details")
+
+    monkeypatch.setattr(yam_workflow, "command", fail_recording)
+    assert client.post("/api/simulator/collect", json={"scenes": 1}).status_code == 202
+    job = wait_for_job(client)
+    assert job["state"] == "failed"
+    assert job["message"] == (
+        "The rollout reached the retry limit after 4 Dream session replacements. "
+        "Dream reported that the model server stopped. "
+        "The partial recording saved 288 of 576 model actions."
+    )
