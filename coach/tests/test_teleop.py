@@ -55,3 +55,52 @@ def test_so101_recorder_refuses_timeout_when_station_still_holds_arms(monkeypatc
     finally:
         holder.close()
     launched.assert_not_called()
+
+
+def test_teleop_stop_retains_lock_until_recorder_exits(monkeypatch, tmp_path):
+    station = Mock()
+    station.status.side_effect = StationUnavailable("down")
+    recorder = SO101Recorder(DemoScanner(tmp_path / "demos"), station, tmp_path / "arms.lock")
+    monkeypatch.setattr("teach_task_coach.teleop.shutil.which", lambda _: "/bin/lerobot-record")
+    process = Mock()
+    process.poll.return_value = None
+    monkeypatch.setattr("teach_task_coach.teleop.subprocess.Popen", Mock(return_value=process))
+    request = TeleopRequest(
+        follower_port="/dev/follower", leader_port="/dev/leader",
+        follower_id="follower", leader_id="leader", camera_index=0,
+    )
+    with pytest.raises(ValueError, match="different serial ports"):
+        recorder.start("move block", request.model_copy(update={"leader_port": "/dev/follower"}))
+    recorder.start("move block", request)
+    assert recorder.stop().state == "stopping"
+    process.terminate.assert_called_once()
+    with pytest.raises(ValueError, match="already running"):
+        recorder.start("move block", request)
+    holder = ArmLease(tmp_path / "arms.lock")
+    with pytest.raises(ValueError, match="arms are still owned"):
+        holder.acquire()
+    process.poll.return_value = -15
+    assert recorder.status().state == "stopped"
+    holder.acquire()
+    holder.close()
+
+
+def test_teleop_failure_returns_only_current_session_log(monkeypatch, tmp_path):
+    station = Mock()
+    station.status.side_effect = StationUnavailable("down")
+    recorder = SO101Recorder(DemoScanner(tmp_path / "demos"), station, tmp_path / "arms.lock")
+    monkeypatch.setattr("teach_task_coach.teleop.shutil.which", lambda _: "/bin/lerobot-record")
+    process = Mock()
+    process.poll.return_value = None
+    monkeypatch.setattr("teach_task_coach.teleop.subprocess.Popen", Mock(return_value=process))
+    recorder.start("move block", TeleopRequest(
+        follower_port="/dev/follower", leader_port="/dev/leader",
+        follower_id="follower", leader_id="leader", camera_index=0,
+    ))
+    assert recorder.log_path is not None
+    recorder.log_file.write(b"camera unavailable\n")
+    recorder.log_file.flush()
+    process.poll.return_value = 1
+    status = recorder.status()
+    assert status.state == "failed"
+    assert "camera unavailable" in status.log_tail

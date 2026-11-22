@@ -10,7 +10,7 @@ type Demo = {
 type Cell = { cell: number; baseline_runs: number; baseline_failures: number; kept_demos: number; priority: number };
 type Plan = { cells: Cell[]; next_cell: number | null; reason: string; observed_failure_cells_covered: boolean };
 type ImportResult = { imported: number; skipped: string[] };
-type TeleopStatus = { state: string; session_path: string | null; exit_code: number | null };
+type TeleopStatus = { state: string; session_path: string | null; exit_code: number | null; log_tail: string | null };
 
 async function json<T>(url: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(url, {
@@ -99,6 +99,15 @@ export default function Demos() {
     finally { setBusy(false); }
   }
 
+  async function stopRecording() {
+    setBusy(true); setError('');
+    try {
+      setTeleop(await json<TeleopStatus>('/api/teleop/stop', 'POST'));
+      setMessage('Stopping the recorder. This episode will need review before it can be kept.');
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not stop recorder.'); }
+    finally { setBusy(false); }
+  }
+
   async function decide(decision: 'keep' | 'redo') {
     if (!selected) return;
     setBusy(true); setError('');
@@ -125,7 +134,7 @@ export default function Demos() {
     {error && <div className="alert" role="alert">{error}</div>}
     {message && <div className="notice" role="status">{message}</div>}
     <div className="demo-task-select"><label>Task <select value={taskId} onChange={(event) => { setTaskId(event.target.value); setSelectedId(''); }}>{tasks.map((task) => <option value={task.id} key={task.id}>{task.name}</option>)}</select></label></div>
-    <section className="card teleop-controls"><h2>SO-101 leader/follower recording</h2><p>Stop the Dream station process before using the same arm with LeRobot. This records one local episode and does not upload it to Hugging Face.</p><div className="training-controls"><label>Follower port<input value={followerPort} onChange={(event) => setFollowerPort(event.target.value)} placeholder="/dev/ttyACM0" /></label><label>Leader port<input value={leaderPort} onChange={(event) => setLeaderPort(event.target.value)} placeholder="/dev/ttyACM1" /></label><label>Follower ID<input value={followerId} onChange={(event) => setFollowerId(event.target.value)} /></label><label>Leader ID<input value={leaderId} onChange={(event) => setLeaderId(event.target.value)} /></label><label>Camera index<input type="number" min={0} value={cameraIndex} onChange={(event) => setCameraIndex(Number(event.target.value))} /></label><button disabled={busy || !taskId || !followerPort || !leaderPort || teleop?.state === 'recording'} onClick={() => void record()}>Record one demo</button></div><p className="hint">Recorder: {teleop?.state ?? 'idle'}{teleop?.session_path ? ` · ${teleop.session_path}` : ''}. Restart the station after the recording exits, then review the new demo below.</p></section>
+    <section className="card teleop-controls"><h2>SO-101 leader/follower recording</h2><p>Stop the Dream station process before using the same arm with LeRobot. This records one local episode and does not upload it to Hugging Face.</p><div className="training-controls"><label>Follower port<input value={followerPort} onChange={(event) => setFollowerPort(event.target.value)} placeholder="/dev/ttyACM0" /></label><label>Leader port<input value={leaderPort} onChange={(event) => setLeaderPort(event.target.value)} placeholder="/dev/ttyACM1" /></label><label>Follower ID<input value={followerId} onChange={(event) => setFollowerId(event.target.value)} /></label><label>Leader ID<input value={leaderId} onChange={(event) => setLeaderId(event.target.value)} /></label><label>Camera index<input type="number" min={0} value={cameraIndex} onChange={(event) => setCameraIndex(Number(event.target.value))} /></label><button disabled={busy || !taskId || !followerPort || !leaderPort || teleop?.state === 'recording' || teleop?.state === 'stopping'} onClick={() => void record()}>Record one demo</button>{teleop?.state === 'recording' && <button className="secondary" disabled={busy} onClick={() => void stopRecording()}>Stop recording</button>}</div><p className="hint">Recorder: {teleop?.state ?? 'idle'}{teleop?.session_path ? ` · ${teleop.session_path}` : ''}. Restart the station after the recording exits, then review the new demo below.</p>{teleop?.state === 'failed' && teleop.log_tail && <pre className="trial-error">{teleop.log_tail}</pre>}</section>
     {plan && <section className="card coverage">
       <div className="card-heading"><h2>What to record next</h2><span className="count">{plan.observed_failure_cells_covered ? 'Observed failure cells covered' : 'Coverage in progress'}</span></div>
       <p>{plan.reason}</p>

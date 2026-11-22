@@ -405,6 +405,13 @@ def create_app(
     def teleop_status() -> TeleopStatus:
         return teleop.status()
 
+    @app.post("/api/teleop/stop", response_model=TeleopStatus)
+    def stop_teleop() -> TeleopStatus:
+        try:
+            return teleop.stop()
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.get("/api/tasks/{task_id}/demos", response_model=list[Demo])
     def list_demos(task_id: str) -> list[Demo]:
         if tasks.get_task(task_id) is None:

@@ -66,6 +66,7 @@ class TeleopStatus(BaseModel):
     state: str
     session_path: str | None
     exit_code: int | None
+    log_tail: str | None = None
 
 
 class SO101Recorder:
@@ -80,7 +81,9 @@ class SO101Recorder:
         self.lease: ArmLease | None = None
         self.process: subprocess.Popen | None = None
         self.session_path: Path | None = None
+        self.log_path: Path | None = None
         self.log_file = None
+        self.stop_requested = False
 
     def status(self) -> TeleopStatus:
         if self.process is None:
@@ -93,14 +96,33 @@ class SO101Recorder:
             if self.lease is not None:
                 self.lease.close()
                 self.lease = None
+        if code is None:
+            state = "stopping" if self.stop_requested else "recording"
+        else:
+            state = "stopped" if self.stop_requested else ("complete" if code == 0 else "failed")
+        log_tail = None
+        if code is not None and state == "failed" and self.log_path and self.log_path.exists():
+            with self.log_path.open("rb") as stream:
+                stream.seek(max(0, self.log_path.stat().st_size - 4096))
+                log_tail = stream.read().decode("utf-8", errors="replace")
         return TeleopStatus(
-            state="recording" if code is None else ("complete" if code == 0 else "failed"),
-            session_path=str(self.session_path), exit_code=code,
+            state=state, session_path=str(self.session_path), exit_code=code,
+            log_tail=log_tail,
         )
 
+    def stop(self) -> TeleopStatus:
+        if self.process is None or self.process.poll() is not None:
+            raise ValueError("No teleoperation recording is running.")
+        if not self.stop_requested:
+            self.process.terminate()
+            self.stop_requested = True
+        return self.status()
+
     def start(self, prompt: str, request: TeleopRequest) -> TeleopStatus:
-        if self.status().state == "recording":
+        if self.status().state in ("recording", "stopping"):
             raise ValueError("A teleoperation recording is already running.")
+        if request.follower_port.strip() == request.leader_port.strip():
+            raise ValueError("Leader and follower must use different serial ports.")
         station_url = getattr(self.station, "base_url", None)
         if isinstance(station_url, str) and urlsplit(station_url).hostname not in (
             "127.0.0.1", "localhost", "::1"
@@ -117,6 +139,8 @@ class SO101Recorder:
             raise ValueError("Install LeRobot's lerobot-record command on the robot computer first.")
         self.scanner.root.mkdir(parents=True, exist_ok=True)
         self.session_path = self.scanner.root / f"so101-{uuid.uuid4().hex[:12]}"
+        self.log_path = self.scanner.root / f"{self.session_path.name}.log"
+        self.stop_requested = False
         repo_id = f"local/coach-{uuid.uuid4().hex[:12]}"
         camera = (
             "{overhead: {type: opencv, index_or_path: "
@@ -135,7 +159,7 @@ class SO101Recorder:
         lease = ArmLease(self.arm_lock_path)
         try:
             lease.acquire()
-            self.log_file = (self.scanner.root / "so101-recorder.log").open("ab")
+            self.log_file = self.log_path.open("wb")
             self.process = subprocess.Popen(
                 args, stdin=subprocess.DEVNULL, stdout=self.log_file,
                 stderr=subprocess.STDOUT, shell=False,
