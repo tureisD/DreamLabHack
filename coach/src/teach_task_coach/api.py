@@ -196,6 +196,12 @@ def create_app(
         source = files("teach_task_coach").joinpath("examples/apple_paired_confirmation.json")
         return PairedRequest.model_validate_json(source.read_text(encoding="utf-8"))
 
+    @app.get("/api/paired-evaluations/demo/second-account", response_model=PairedRequest)
+    def second_account_confirmation_demo() -> PairedRequest:
+        """Return the frozen summary of the independent 24-demo checkpoint comparison."""
+        source = files("teach_task_coach").joinpath("examples/second_account_paired_confirmation.json")
+        return PairedRequest.model_validate_json(source.read_text(encoding="utf-8"))
+
     frontend_dist = Path(__file__).resolve().parents[2] / "frontend/dist"
     if (frontend_dist / "assets").is_dir():
         app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="frontend-assets")

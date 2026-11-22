@@ -4,6 +4,8 @@ The **Statistical evaluation** tab now has two analysis paths. The imported inde
 
 ## Try the fine-tuning demonstration
 
+The same tab also offers **Analyze independent 500-step apple demo**, built from the second account's separately trained 24-demo checkpoint on fresh seeds 909–912. Its [live API and replay report](experiments/yam_sim_faas/grasp_training/SECOND_ACCOUNT_500_STEP_EVAL.md) records 4/4 candidate versus 0/4 base, with zero evidence problems. It remains a four-scene descriptive simulator result.
+
 Start the coach locally, open **Statistical evaluation**, and select **Load and analyze our 500-step apple demo**. The tab loads the [committed paired summary](src/teach_task_coach/examples/apple_paired_confirmation.json), calls the same `POST /api/paired-evaluations/analyze` endpoint available for user snapshots, and shows the four scenes, held lift, first gripper-close time, outcome, evidence problems, and snapshot checksum. Download the resulting JSON report for review.
 
 | Predeclared scene | Base held lift | Fine-tune held lift | Base close after warm-up | Fine-tune close after warm-up |

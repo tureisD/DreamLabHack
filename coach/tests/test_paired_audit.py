@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from teach_task_coach.api import create_app
 
 FIXTURE = Path(__file__).parents[1] / "src/teach_task_coach/examples/apple_paired_confirmation.json"
+SECOND_ACCOUNT = Path(__file__).parents[1] / "src/teach_task_coach/examples/second_account_paired_confirmation.json"
 
 
 def _snapshot() -> dict:
@@ -35,6 +36,24 @@ def test_saved_apple_confirmation_is_descriptive_and_replay_checked(tmp_path, mo
     assert demo.status_code == 200
     assert demo.json()["plan"]["evaluation_id"] == _snapshot()["plan"]["evaluation_id"]
     assert len(demo.json()["pairs"]) == 4
+
+
+def test_second_account_live_checkpoint_example_uses_same_paired_pipeline(tmp_path, monkeypatch):
+    monkeypatch.setenv("COACH_DATA_DIR", str(tmp_path))
+    client = TestClient(create_app())
+    snapshot = client.get("/api/paired-evaluations/demo/second-account")
+    assert snapshot.status_code == 200
+    assert snapshot.json()["plan"]["candidate_checkpoint"] == "dream-1-ft:f2cc8d90-apple-independent24-500"
+    report = _analyze(client, snapshot.json())
+    assert report.status_code == 200
+    assert report.json()["decision"] == "descriptive"
+    assert (report.json()["baseline_successes"], report.json()["candidate_successes"]) == (0, 4)
+    assert report.json()["problems"] == []
+    assert report.json()["difference_interval"] is None
+    assert [round(pair["candidate"]["held_lift_m"] * 100, 1) for pair in report.json()["pairs"]] == [
+        15.8, 9.5, 14.0, 15.7,
+    ]
+    assert len(SECOND_ACCOUNT.read_bytes()) > 0
 
 
 def test_incomplete_or_mislabeled_simulator_evidence_does_not_get_a_verdict(tmp_path, monkeypatch):

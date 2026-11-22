@@ -14,9 +14,9 @@ Last checked: 22 November 2026. This is the second account's batch; no examples 
 | Job ID | `ftj_94b20f291e71d600` |
 | Suffix | `apple-independent24-500` |
 | Submitted recipe | 500 steps, constant schedule, base share 0.5, EEF off, default learning rate, start from base |
-| Last observed job status | `queued` |
-| Checkpoint | Pending |
+| Last observed job status | `succeeded` (read-only Dream API check on 22 November 2026) |
+| Checkpoint | `dream-1-ft:f2cc8d90-apple-independent24-500` |
 
-The server's status response confirmed the job ID, dataset and suffix. It did not echo the recipe fields; the submitted request used the values above. Dream runs training on its servers after the local process exits. Check job status on the same account before attempting any further submission. This job should not be duplicated.
+The server's completed job record confirmed 500 steps, constant schedule, EEF off, and the published checkpoint. It reported that the job was charged $100. The job should not be duplicated. The [fresh held-out paired evaluation](SECOND_ACCOUNT_500_STEP_EVAL.md) tested this checkpoint against the base model with the coach extension.
 
 The first account's separate 24-demo dataset and job are managed by its owner. Compare both eventual checkpoints on held-out seeds 901–904 with matched settings; neither training batch contains those scenes.

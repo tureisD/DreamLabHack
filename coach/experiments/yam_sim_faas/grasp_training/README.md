@@ -10,7 +10,7 @@
 | Training dataset | **varied**, 24 demos, seeds 41–48 and 101–116 | **independent**, 24 demos, seeds 201–224 only |
 | Proposed suffix | apple-varied24-500 | apple-independent24-500 |
 | One 500-step job at the published rate | $100, about $50 left | $100, about $60 left |
-| Current assignment | Training complete. Use the published checkpoint for evaluation. | 24-demo dataset processed; one 500-step job submitted on 22 November 2026 |
+| Current assignment | Training complete. Use the published checkpoint for evaluation. | Training complete; fresh paired simulator evaluation recorded on 22 November 2026 |
 
 ## First account checkpoint
 
@@ -28,7 +28,7 @@ Each proposed job starts independently from Dream's base model. Match training s
 
 The documented price is $0.20/step. Check [Billing](https://platform.dreamlabs.ai/billing) and the current quote for **500 steps** on each account. Submitting holds that job's price on the submitting account. The default 1,000-step job is about $200. Runs with the resulting models also use credits.
 
-The second account's independent archive is committed as `independent.zip` with the matching `independent.json` manifest. It contains only seeds 201–224. Dream marked dataset `mary.m.koryakina/apple-grasp-independent-779f088ac959` (`ds_dfb867a59247e07d`) processed. One 500-step job, `ftj_94b20f291e71d600`, was accepted with suffix `apple-independent24-500`, constant schedule, base share 0.5, and EEF off. It was queued at the last check; see [the run record](SECOND_ACCOUNT_RUN.md) for the verified status and limits.
+The second account's independent archive is committed as `independent.zip` with the matching `independent.json` manifest. It contains only seeds 201–224. Dream marked dataset `mary.m.koryakina/apple-grasp-independent-779f088ac959` (`ds_dfb867a59247e07d`) processed. The 500-step job `ftj_94b20f291e71d600` succeeded and published `dream-1-ft:f2cc8d90-apple-independent24-500`. See the [run record](SECOND_ACCOUNT_RUN.md) and [fresh paired evaluation](SECOND_ACCOUNT_500_STEP_EVAL.md).
 
 ## Second PC setup and collection
 

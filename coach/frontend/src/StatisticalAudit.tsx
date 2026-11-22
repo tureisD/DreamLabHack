@@ -121,10 +121,10 @@ export default function StatisticalAudit() {
     } finally { setPairedBusy(false); }
   }
 
-  async function loadAppleDemo() {
+  async function loadAppleDemo(url = '/api/paired-evaluations/demo') {
     setPairedError(''); setPairedBusy(true);
     try {
-      const response = await fetch('/api/paired-evaluations/demo');
+      const response = await fetch(url);
       if (!response.ok) throw new Error(`Could not load the demo (${response.status}).`);
       const value: unknown = await response.json();
       setPairedSnapshot(JSON.stringify(value, null, 2));
@@ -156,7 +156,10 @@ export default function StatisticalAudit() {
       <h2>Matched fine-tune comparison</h2>
       <p>Analyze predeclared scene pairs. Physical pairs with reviewed outcomes can receive a conservative interval. Simulator pairs show measured task outcomes without a real-robot or deployment claim.</p>
       <button type="button" className="secondary" disabled={pairedBusy} onClick={() => void loadAppleDemo()}>
-        Load and analyze our 500-step apple demo
+        Analyze varied 500-step apple demo
+      </button>
+      <button type="button" className="secondary" disabled={pairedBusy} onClick={() => void loadAppleDemo('/api/paired-evaluations/demo/second-account')}>
+        Analyze independent 500-step apple demo
       </button>
       <label className="audit-file">Or load a paired JSON snapshot
         <input type="file" accept=".json,application/json" onChange={async (event) => {
