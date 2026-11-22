@@ -164,6 +164,16 @@ export default function CoachChat({ open, openEvaluation }: {
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not prepare the simulator.'); }
   }
 
+  function beginConversation() {
+    const history: Message[] = [...messages, {
+      role: 'user',
+      content: 'Begin. Please check my Dream Labs connection and guide me one step at a time.',
+    }];
+    setBegun(true);
+    setMessages(history);
+    void turn(history, 'guide');
+  }
+
   function startOver() {
     started.current = true;
     setBegun(false);
@@ -188,7 +198,6 @@ export default function CoachChat({ open, openEvaluation }: {
         {ai && !ai.configured && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>The AI coach is unavailable on this server. Ask the operator to configure its AI credential, then refresh this page.</p></div>}
         {messages.map((item, index) => <div key={index} className={`chat-bubble chat-${item.role}`}><span>{item.role === 'assistant' ? 'DreamCoach' : 'You'}</span><p>{item.content}</p></div>)}
         {busy && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>Thinking through your next step…</p></div>}
-      {!begun && ai?.configured && messages.length > 0 && <div className="chat-begin"><button disabled={busy} onClick={() => { setBegun(true); const history: Message[] = [...messages, { role: 'user', content: 'Begin. Please check my Dream Labs connection and guide me one step at a time.' }]; setMessages(history); void turn(history, 'guide'); }}>Begin</button><span>The coach will check your Dream connection and ask the first question.</span></div>}
       {begun && account && (!account.configured || dreamAccess === 'blocked') && <div className="chat-action"><p><a href={account.dashboard_url} target="_blank" rel="noreferrer">Open Dream Labs API keys</a>, sign in, and create a key. Paste it in this private field when you have it. The key is not saved in this chat. This checks API access on this machine, not your browser’s Dream website login.</p><form onSubmit={(event) => void connectDream(event)} className="chat-secret"><input aria-label="Dream API key" type="password" autoComplete="off" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="Dream API key" /><button disabled={busy || !secret.trim()}>Connect Dream</button></form></div>}
       {begun && workspace?.state === 'ready' && <details className="chat-inventory"><summary>Dream account data · {workspace.datasets.length} datasets · {workspace.fine_tuning_jobs.length} jobs</summary><div><p>Read from Dream’s API with this server’s key. These are account resources, separate from local coach tasks.</p><h3>Datasets</h3><ul>{workspace.datasets.map((item) => <li key={item.id}>{item.name} · {item.status}</li>)}</ul><h3>Fine-tuning jobs</h3><ul>{workspace.fine_tuning_jobs.map((item) => <li key={item.id}>{item.name} · {item.status}</li>)}</ul><div className="chat-inventory-links"><a href="/api/docs/apple-training" target="_blank" rel="noreferrer">Committed apple dataset and training record</a><a href="/api/docs/apple-evaluation" target="_blank" rel="noreferrer">Measured 500-step comparison</a><button className="secondary" onClick={() => open('statistical')}>Open existing apple audit</button></div></div></details>}
       {begun && reply && reply.suggestions.length > 0 && <div className="chat-suggestions"><span>Try an answer, or edit it before sending</span><div>{reply.suggestions.map((suggestion, index) => <button key={`${suggestion}-${index}`} className="secondary" disabled={busy} onClick={() => setText(suggestion)}>{suggestion}</button>)}</div></div>}
@@ -197,6 +206,12 @@ export default function CoachChat({ open, openEvaluation }: {
       {begun && reply?.task_draft && <div className="chat-action"><strong>Ready to save this task?</strong><p>{reply.task_draft.name} · {reply.task_draft.prompt}<br />Success: {reply.task_draft.success_rule}</p><button disabled={busy} onClick={() => void saveTask(reply.task_draft!)}>Confirm and save task</button></div>}
       {begun && reply?.suggested_screen && reply.suggested_screen !== 'tasks' && <div className="chat-action"><button className="secondary" onClick={() => open(reply.suggested_screen!)}>{`Open ${reply.suggested_screen}`}</button><span>Return here afterward and tell the coach what happened.</span></div>}
       </div>
+      {!begun && ai?.configured && messages.length > 0 && <div className="chat-begin">
+        <p id="chat-begin-description">First, we’ll check Dream Labs access.</p>
+        <button type="button" aria-describedby="chat-begin-description" disabled={busy} onClick={beginConversation}>
+          Begin<span className="chat-begin-arrow" aria-hidden="true">→</span>
+        </button>
+      </div>}
       {begun && <form onSubmit={(event) => void submit(event)} className="chat-composer"><textarea aria-label="Message to coach" disabled={!ai?.configured} value={text} maxLength={2000} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(event); } }} placeholder="Tell me about your robot or ask what to do next…" /><button disabled={!ai?.configured || busy || !text.trim()}>Send</button></form>}
     </section>
     <LiveEvaluation onOpen={openEvaluation} onOpenAudit={() => open('statistical')} />
