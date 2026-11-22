@@ -30,7 +30,11 @@ async function json<T>(url: string, method = 'GET', body?: unknown): Promise<T> 
   return (await response.json()) as T;
 }
 
-export default function Training({ onEvaluate }: { onEvaluate?: () => void }) {
+export default function Training({ onEvaluate, onSimulatorEvaluate, initialTaskId = '' }: {
+  onEvaluate?: () => void;
+  onSimulatorEvaluate?: (taskId: string) => void;
+  initialTaskId?: string;
+}) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [taskId, setTaskId] = useState('');
   const [bodies, setBodies] = useState<Embodiment[]>([]);
@@ -44,14 +48,28 @@ export default function Training({ onEvaluate }: { onEvaluate?: () => void }) {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const selectedTask = tasks.find((task) => task.id === taskId);
+  const guidedYam = selectedTask?.name === 'Apple pickup · YAM simulator';
   const readyDataset = datasets.find((version) => version.status === 'validated');
   const readyJob = jobs.find((job) => job.status === 'succeeded' && job.checkpoint);
   const activeJob = jobs.find((job) => ['pending_upload', 'processing', 'pending_training', 'training'].includes(job.status));
 
   useEffect(() => {
-    void json<Task[]>('/api/tasks').then((values) => { setTasks(values); if (values.length) setTaskId(values[0].id); }).catch((caught: Error) => setError(caught.message));
-    void json<Embodiment[]>('/api/embodiments').then((values) => { setBodies(values); if (values.length) setEmbodiment(values[0].name); }).catch((caught: Error) => setError(caught.message));
-  }, []);
+    void json<Task[]>('/api/tasks').then((values) => {
+      setTasks(values);
+      setTaskId(values.find((task) => task.id === initialTaskId)?.id ?? values[0]?.id ?? '');
+    }).catch((caught: Error) => setError(caught.message));
+    void json<Embodiment[]>('/api/embodiments').then(setBodies).catch((caught: Error) => setError(caught.message));
+  }, [initialTaskId]);
+
+  useEffect(() => {
+    if (!guidedYam) {
+      setEmbodiment(bodies[0]?.name ?? '');
+      return;
+    }
+    const matching = bodies.filter((body) => body.video_roles.length === 3
+      && ['overhead', 'wrist_l', 'wrist_r'].every((role) => body.video_roles.includes(role)));
+    setEmbodiment(matching.length === 1 ? matching[0].name : '');
+  }, [bodies, guidedYam]);
 
   useEffect(() => {
     if (!taskId) return;
@@ -129,10 +147,15 @@ export default function Training({ onEvaluate }: { onEvaluate?: () => void }) {
       <div className={readyJob ? 'pipeline-done' : activeJob ? 'pipeline-active' : ''}><span>3</span><strong>Fine-tune</strong><small>{readyJob ? 'Checkpoint ready' : activeJob ? `Job ${activeJob.status.replaceAll('_', ' ')}` : 'Submit FaaS job'}</small></div>
       <div><span>4</span><strong>Evaluate</strong><small>Matched held-out scenes</small></div>
     </section>
-    {readyJob && <section className="card training-next"><div><h2>Candidate checkpoint ready</h2><p>{readyJob.checkpoint} can now be compared with the task baseline. Plan the evaluation before running either model.</p></div><button type="button" onClick={onEvaluate} disabled={!onEvaluate}>Plan evaluation</button></section>}
+    {readyJob && <section className="card training-next">
+      <div><h2>Candidate checkpoint ready</h2><p>{readyJob.checkpoint} can now be compared with the task baseline.</p></div>
+      {guidedYam
+        ? <button type="button" onClick={() => onSimulatorEvaluate?.(taskId)} disabled={!onSimulatorEvaluate}>Compare in DreamCoach</button>
+        : <button type="button" onClick={onEvaluate} disabled={!onEvaluate}>Plan evaluation</button>}
+    </section>}
     <div className="training-controls card">
       <label>Task<select value={taskId} onChange={(event) => setTaskId(event.target.value)}>{tasks.map((task) => <option key={task.id} value={task.id}>{task.name}</option>)}</select></label>
-      <label>Registered embodiment<select value={embodiment} onChange={(event) => setEmbodiment(event.target.value)}>{bodies.map((body) => <option key={body.name} value={body.name}>{body.name} · {body.video_roles.join(', ')}</option>)}</select></label>
+      <label>Registered embodiment<select value={embodiment} onChange={(event) => setEmbodiment(event.target.value)}><option value="" disabled>Choose an embodiment</option>{bodies.map((body) => <option key={body.name} value={body.name}>{body.name} · {body.video_roles.join(', ')}</option>)}</select></label>
       <button disabled={busy || !taskId || !embodiment} onClick={() => void createDataset()}>Create dataset version</button>
     </div>
     <p className="hint">The local server validates datasets and checks training status in the background. Statuses update here every 10 seconds. Your Dream credentials stay in the backend.</p>
@@ -141,7 +164,7 @@ export default function Training({ onEvaluate }: { onEvaluate?: () => void }) {
       <label>Learning-rate schedule<select value={schedule} onChange={(event) => setSchedule(event.target.value as 'cosine' | 'constant')}><option value="cosine">Cosine · single-task specialization</option><option value="constant">Constant · supports later resume</option></select></label>
       <label>Training data<select value={baseShare} onChange={(event) => setBaseShare(Number(event.target.value) as 0 | 0.5)}><option value={0.5}>Mix in Dream Labs data (0.5)</option><option value={0}>My demos only (0.0)</option></select></label>
     </div>
-    <p className="hint">Dream charges by training step; this app has no price quote API. Confirm the charge in your Dream account before submitting. Record the dataset and settings so later evaluations can identify the checkpoint. The initial recipe is 1,000 steps, cosine, and a 0.5 data mix.</p>
+    <p className="hint">Dream charges by training step. Check the cost in your Dream account before submitting. {guidedYam ? 'Use the YAM embodiment with overhead and both wrist cameras. The bundled apple comparison used a 500-step pilot.' : 'The initial recipe is 1,000 steps, cosine, and a 0.5 data mix.'}</p>
     <section className="card training-list"><h2>Dataset versions</h2>
       {datasets.length === 0 && <p>No versions yet. Keep at least one valid demo, then create a version.</p>}
       {datasets.map((version) => <div className="training-row" key={version.id}>

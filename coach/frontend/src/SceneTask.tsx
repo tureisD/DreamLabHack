@@ -16,6 +16,11 @@ const initial: Form = {
   mass: 0.07, startX: 0.15, startY: 0.10,
   targetLabel: 'blue pad', targetColor: '#1a40cc', targetX: 0.15, targetY: -0.10, radius: 0.06,
 };
+const ballPreset: Form = {
+  ...initial, prompt: 'move the yellow ball onto the green pad', objectLabel: 'yellow ball',
+  shape: 'sphere', objectColor: '#ebbf1a', sizeX: 0.027, mass: 0.06, startX: 0.18, startY: 0.08,
+  targetLabel: 'green pad', targetColor: '#1fa633', targetX: 0.12, targetY: -0.07,
+};
 const newSeed = () => Math.floor(Math.random() * 2 ** 32);
 
 function rgba(hex: string): number[] {
@@ -43,10 +48,12 @@ async function post<T>(url: string, body: unknown): Promise<T> {
   return value as T;
 }
 
-export default function SceneTask({ taskId, taskPrompt, onComplete }: {
+export default function SceneTask({ taskId, taskPrompt, onComplete, onSetupTask }: {
   taskId: string; taskPrompt: string; onComplete: () => void;
+  onSetupTask: (draft: { name: string; prompt: string; success_rule: string }) => Promise<void>;
 }) {
   const [form, setForm] = useState<Form>(initial);
+  const [preset, setPreset] = useState<'block' | 'ball' | 'custom'>('block');
   const [seed, setSeed] = useState(newSeed);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
@@ -73,6 +80,7 @@ export default function SceneTask({ taskId, taskPrompt, onComplete }: {
   }, [currentStatus?.result?.demo_id]);
 
   function update<K extends keyof Form>(field: K, value: Form[K]) {
+    setPreset('custom');
     setForm((old) => ({ ...old, [field]: value }));
     setPreview(null);
   }
@@ -93,10 +101,28 @@ export default function SceneTask({ taskId, taskPrompt, onComplete }: {
     finally { setBusy(false); }
   }
 
+  async function setupTask() {
+    setBusy(true); setError('');
+    try {
+      await onSetupTask({
+        name: `${form.objectLabel.trim()} to ${form.targetLabel.trim()} · YAM scene`,
+        prompt: form.prompt.trim(),
+        success_rule: `Lift the ${form.objectLabel.trim()} and release it so it rests on the ${form.targetLabel.trim()}.`,
+      });
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not set up the local scene task.'); }
+    finally { setBusy(false); }
+  }
+
   return <section className="card sim-correct">
     <h2>Create a new pick-and-place scene</h2>
     <p>Describe a new object and target. The same simulator planner and physical goal check work across these scene files. This proof of concept supports one rigid box, ball, or cylinder and one marked tabletop target.</p>
     <div className="training-controls">
+      <label>Scene preset<select value={preset} onChange={(event) => {
+        const next = event.target.value as typeof preset;
+        setPreset(next);
+        if (next !== 'custom') setForm(next === 'ball' ? ballPreset : initial);
+        setPreview(null);
+      }}><option value="block">Red block → blue pad</option><option value="ball">Yellow ball → green pad</option><option value="custom">Custom scene</option></select></label>
       <label>Task instruction<input value={form.prompt} onChange={(event) => update('prompt', event.target.value)} /></label>
       <label>Object name<input value={form.objectLabel} onChange={(event) => update('objectLabel', event.target.value)} /></label>
       <label>Shape<select value={form.shape} onChange={(event) => update('shape', event.target.value as Shape)}><option value="box">Box</option><option value="sphere">Ball</option><option value="cylinder">Cylinder</option></select></label>
@@ -116,7 +142,8 @@ export default function SceneTask({ taskId, taskPrompt, onComplete }: {
       <button className="secondary" disabled={busy || status?.state === 'recording'} onClick={() => { setSeed(newSeed()); setPreview(null); }}>New seed</button>
       <button className="secondary" disabled={busy || status?.state === 'recording'} onClick={() => void previewScene()}>Preview scene</button>
     </div>
-    {!matchesTask && <p className="hint">Create or select a local task with this exact instruction: <strong>{form.prompt.trim()}</strong></p>}
+    {!matchesTask && <p className="hint">Set up the task for <strong>{form.prompt.trim()}</strong>, preview the scene, then record.</p>}
+    {!matchesTask && <button className="secondary" disabled={busy || !form.prompt.trim() || !form.objectLabel.trim() || !form.targetLabel.trim() || status?.state === 'recording'} onClick={() => void setupTask()}>Set up this scene task</button>}
     {preview && <div className="sim-image-wrap"><img src={preview.image} width={preview.width} height={preview.height} alt="YAM simulator scene with the new object and target" />
       {Object.entries(preview.markers).map(([name, [x, y]]) => <span key={name} className="sim-marker" style={{ left: `${x / preview.width * 100}%`, top: `${y / preview.height * 100}%` }}>{name}</span>)}
     </div>}

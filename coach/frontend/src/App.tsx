@@ -9,6 +9,7 @@ import Guide from './Guide';
 import Repair from './Repair';
 import CoachEffect from './CoachEffect';
 import CoachChat from './CoachChat';
+import type { SimulatorMode } from './YamChatWorkflow';
 
 type Check = { state: 'ready' | 'blocked' | 'unavailable'; message: string };
 type Model = {
@@ -118,6 +119,24 @@ function Preflight() {
 export default function App() {
   const [screen, setScreen] = useState<'start' | 'guide' | 'repair' | 'preflight' | 'runs' | 'tasks' | 'demos' | 'training' | 'evaluation' | 'statistical' | 'effect'>('start');
   const [evaluationSelection, setEvaluationSelection] = useState<{ taskId?: string; evaluationId?: string }>({});
+  const [activeTaskId, setActiveTaskId] = useState(() => sessionStorage.getItem('coach-active-task') ?? '');
+  const [showSimulator, setShowSimulator] = useState(false);
+  const [reviewOnOpen, setReviewOnOpen] = useState(false);
+  const [simulatorMode, setSimulatorMode] = useState<SimulatorMode>(() => {
+    const mode = sessionStorage.getItem('coach-simulator-mode');
+    return mode === 'scene' || mode === 'fruit' ? mode : 'apple';
+  });
+  const [recorderFocus, setRecorderFocus] = useState<'fruit' | 'scene' | null>(null);
+
+  function chooseSimulatorMode(mode: SimulatorMode) {
+    setSimulatorMode(mode);
+    sessionStorage.setItem('coach-simulator-mode', mode);
+  }
+
+  function selectTask(taskId: string) {
+    setActiveTaskId(taskId);
+    sessionStorage.setItem('coach-active-task', taskId);
+  }
 
   function openEvaluation(taskId?: string, evaluationId?: string) {
     setEvaluationSelection({ taskId, evaluationId });
@@ -128,27 +147,48 @@ export default function App() {
     <>
       <nav className={`top-nav${screen === 'start' ? ' chat-nav' : ''}`} aria-label="Coach sections">
         <span className="brand">DreamCoach</span>
-        <button className={screen === 'start' ? 'nav-active' : ''} onClick={() => setScreen('start')}>Start here</button>
+        <button className={screen === 'start' ? 'nav-active' : ''} onClick={() => { setShowSimulator(false); setScreen('start'); }}>Start here</button>
         <button className={screen === 'guide' ? 'nav-active' : ''} onClick={() => setScreen('guide')}>Guide</button>
         <button className={screen === 'repair' ? 'nav-active' : ''} onClick={() => setScreen('repair')}>Repair first</button>
         <button className={screen === 'preflight' ? 'nav-active' : ''} onClick={() => setScreen('preflight')}>Preflight</button>
         <button className={screen === 'runs' ? 'nav-active' : ''} onClick={() => setScreen('runs')}>Run review</button>
-        <button className={screen === 'demos' ? 'nav-active' : ''} onClick={() => setScreen('demos')}>Demos</button>
+        <button className={screen === 'demos' ? 'nav-active' : ''} onClick={() => { setReviewOnOpen(false); setRecorderFocus(null); setScreen('demos'); }}>Demos</button>
         <button className={screen === 'training' ? 'nav-active' : ''} onClick={() => setScreen('training')}>Training</button>
         <button className={screen === 'evaluation' ? 'nav-active' : ''} onClick={() => { if (screen !== 'evaluation') openEvaluation(); }}>Evaluation</button>
         <button className={screen === 'statistical' ? 'nav-active' : ''} onClick={() => setScreen('statistical')}>Statistical audit</button>
         <button className={screen === 'effect' ? 'nav-active' : ''} onClick={() => setScreen('effect')}>Coach effect</button>
       </nav>
       {screen === 'start' && <CoachChat
-        open={(next) => next === 'evaluation' ? openEvaluation() : setScreen(next)}
+        open={(next) => {
+          if (next === 'evaluation') openEvaluation(activeTaskId);
+          else {
+            setReviewOnOpen(next === 'demos');
+            setRecorderFocus(null);
+            setScreen(next);
+          }
+        }}
         openEvaluation={openEvaluation}
+        activeTaskId={activeTaskId}
+        selectTask={selectTask}
+        showSimulatorOnOpen={showSimulator}
+        simulatorMode={simulatorMode}
+        chooseSimulatorMode={chooseSimulatorMode}
+        openRecorder={(mode) => {
+          chooseSimulatorMode(mode);
+          setRecorderFocus(mode);
+          setReviewOnOpen(false);
+          setScreen('demos');
+        }}
       />}
       {screen === 'guide' && <Guide onRepair={() => setScreen('repair')} />}
       {screen === 'repair' && <Repair onDemos={() => setScreen('demos')} onTraining={() => setScreen('training')} />}
       {screen === 'preflight' && <Preflight />}
       {screen === 'tasks' && <Tasks />}
-      {screen === 'demos' && <Demos />}
-      {screen === 'training' && <Training onEvaluate={() => openEvaluation()} />}
+      {screen === 'demos' && <Demos initialTaskId={activeTaskId} reviewOnOpen={reviewOnOpen}
+        recorderFocus={recorderFocus} onTaskSelected={selectTask}
+        openSimulator={() => { setShowSimulator(true); setScreen('start'); }} />}
+      {screen === 'training' && <Training initialTaskId={activeTaskId} onEvaluate={() => openEvaluation(activeTaskId)}
+        onSimulatorEvaluate={(taskId) => { selectTask(taskId); chooseSimulatorMode('apple'); setShowSimulator(true); setScreen('start'); }} />}
       {screen === 'evaluation' && <EvaluationPage
         initialTaskId={evaluationSelection.taskId}
         initialEvaluationId={evaluationSelection.evaluationId}

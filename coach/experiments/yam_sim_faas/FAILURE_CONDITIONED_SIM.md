@@ -4,7 +4,15 @@ This collector is our own loop around the Dream Labs YAM MuJoCo example. It is n
 
 The current implementation covers the bundled YAM **apple pickup** task and wrist-visible start pose. The corrective controller is the official YAM example's scripted pickup with our failure-conditioned timing recipe. This is simulator supervision, not human teleoperation or physical robot evidence. A future object/task needs its own reset, success rule, and corrective controller; the selection and provenance pattern can remain the same.
 
-## Collect
+## Run from DreamCoach
+
+In chat, press **Begin**, then **Use the YAM simulator**. The card checks local dependencies and offers **Prepare YAM simulator** when setup is needed. Choose **Run and collect demos** for a fresh batch, or **Use the 24 bundled apple demos** for a local review that uses no Dream calls. **Review demos** opens the correct task and its camera clips. Keep the useful demos and return to chat for the Training handoff.
+
+After Dream publishes the fine-tune, **Run simulator comparison** tests it and the base on the same four held-out scenes. The sidebar updates as attempts finish. If your account can serve one of the published apple checkpoints, the chat also offers a fresh comparison without a new training job.
+
+The **Robot-free workflow** menu also offers **Click to correct a fruit task** and **Build a pick-and-place scene**. Each choice opens its recorder with a button to create the matching local task. Those recorders generate verified demonstrations locally. The automatic matched simulator comparison uses the fixed apple pickup task.
+
+## Run from the terminal
 
 From `coach/`, install `uv sync --locked --extra sim`. Select **fresh training candidate seeds** outside 41–48, 101–116, 201–224 and reserved evaluation seeds 901–912. Use new seeds such as 1201–1208. Record the base or current fine-tune on each scene with the existing model recorder. Model inference uses the local Dream credential and may consume account credits; the collector itself does not call Dream or launch FaaS.
 

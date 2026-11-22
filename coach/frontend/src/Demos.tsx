@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import SimCorrect from './SimCorrect';
 import SceneTask from './SceneTask';
 
-type Task = { id: string; name: string; prompt: string };
+type Task = { id: string; name: string; prompt: string; success_rule: string };
+type TaskDraft = Pick<Task, 'name' | 'prompt' | 'success_rule'>;
 type Finding = { code: string; severity: 'error' | 'review'; message: string };
 type Demo = {
   id: string; task_id: string; source_path: string; task_text: string; codebase_version: string;
@@ -27,7 +28,15 @@ async function json<T>(url: string, method = 'GET', body?: unknown): Promise<T> 
   return (await response.json()) as T;
 }
 
-export default function Demos() {
+export default function Demos({
+  initialTaskId = '', reviewOnOpen = false, openSimulator, recorderFocus, onTaskSelected,
+}: {
+  initialTaskId?: string;
+  reviewOnOpen?: boolean;
+  openSimulator?: () => void;
+  recorderFocus?: 'fruit' | 'scene' | null;
+  onTaskSelected?: (taskId: string) => void;
+}) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [taskId, setTaskId] = useState('');
   const [demos, setDemos] = useState<Demo[]>([]);
@@ -45,14 +54,17 @@ export default function Demos() {
   const [leaderId, setLeaderId] = useState('so101_leader');
   const [cameraIndex, setCameraIndex] = useState(0);
   const [teleop, setTeleop] = useState<TeleopStatus | null>(null);
+  const reviewSection = useRef<HTMLDivElement>(null);
+  const recorderSection = useRef<HTMLDivElement>(null);
+  const openedReview = useRef(false);
   const selected = demos.find((demo) => demo.id === selectedId);
 
   useEffect(() => {
     void json<Task[]>('/api/tasks').then((values) => {
       setTasks(values);
-      if (values.length) setTaskId(values[0].id);
+      setTaskId(values.find((task) => task.id === initialTaskId)?.id ?? values[0]?.id ?? '');
     }).catch((caught: Error) => setError(caught.message));
-  }, []);
+  }, [initialTaskId]);
 
   useEffect(() => {
     if (!taskId) return;
@@ -75,6 +87,29 @@ export default function Demos() {
     const timer = window.setInterval(() => void refresh(), 15000);
     return () => { active = false; window.clearInterval(timer); };
   }, [taskId]);
+
+  useEffect(() => {
+    if (!reviewOnOpen || openedReview.current || !demos.length || taskId !== initialTaskId) return;
+    openedReview.current = true;
+    const first = demos.find((demo) => demo.decision === 'unreviewed') ?? demos[0];
+    choose(first);
+    reviewSection.current?.scrollIntoView({ block: 'start' });
+  }, [demos, initialTaskId, reviewOnOpen, taskId]);
+
+  useEffect(() => {
+    if (recorderFocus) recorderSection.current?.scrollIntoView({ block: 'start' });
+  }, [recorderFocus]);
+
+  async function setupTask(draft: TaskDraft) {
+    const existing = tasks.find((task) => task.prompt === draft.prompt && task.success_rule === draft.success_rule);
+    const task = existing ?? await json<Task>('/api/tasks', 'POST', {
+      ...draft, baseline_checkpoint: 'dreamlabs/dream-1-beta',
+    });
+    if (!existing) setTasks((current) => [task, ...current]);
+    setSelectedId('');
+    setTaskId(task.id);
+    onTaskSelected?.(task.id);
+  }
 
   async function scan() {
     if (!taskId) return;
@@ -137,16 +172,22 @@ export default function Demos() {
     {message && <div className="notice" role="status">{message}</div>}
     <div className="demo-task-select"><label>Task <select value={taskId} onChange={(event) => { setTaskId(event.target.value); setSelectedId(''); }}>{tasks.map((task) => <option value={task.id} key={task.id}>{task.name}</option>)}</select></label></div>
     <section className="card teleop-controls"><h2>SO-101 leader/follower recording</h2><p>Stop the Dream station process before using the same arm with LeRobot. This records one local episode and does not upload it to Hugging Face.</p><div className="training-controls"><label>Follower port<input value={followerPort} onChange={(event) => setFollowerPort(event.target.value)} placeholder="/dev/ttyACM0" /></label><label>Leader port<input value={leaderPort} onChange={(event) => setLeaderPort(event.target.value)} placeholder="/dev/ttyACM1" /></label><label>Follower ID<input value={followerId} onChange={(event) => setFollowerId(event.target.value)} /></label><label>Leader ID<input value={leaderId} onChange={(event) => setLeaderId(event.target.value)} /></label><label>Camera index<input type="number" min={0} value={cameraIndex} onChange={(event) => setCameraIndex(Number(event.target.value))} /></label><button disabled={busy || !taskId || !followerPort || !leaderPort || teleop?.state === 'recording' || teleop?.state === 'stopping'} onClick={() => void record()}>Record one demo</button>{teleop?.state === 'recording' && <button className="secondary" disabled={busy} onClick={() => void stopRecording()}>Stop recording</button>}</div><p className="hint">Recorder: {teleop?.state ?? 'idle'}{teleop?.session_path ? ` · ${teleop.session_path}` : ''}. Restart the station after the recording exits, then review the new demo below.</p>{teleop?.state === 'failed' && teleop.log_tail && <pre className="trial-error">{teleop.log_tail}</pre>}</section>
-    <SimCorrect taskId={taskId} taskPrompt={tasks.find((task) => task.id === taskId)?.prompt ?? ''} onComplete={() => void scan()} />
-    <SceneTask taskId={taskId} taskPrompt={tasks.find((task) => task.id === taskId)?.prompt ?? ''} onComplete={() => void scan()} />
-    <section className="card"><h2>Collect without a robot: failed-scene replay</h2><p>For the YAM apple task, record model runs on fresh simulator seeds, then generate corrective trajectories only for failed scenes. The collector diversifies failure modes and apple positions, excludes reserved evaluation and prior training seeds, audits the physics replay, and exports Dream-validated LeRobot episodes. Review each demo here before keeping it.</p><pre className="hint">uv run --locked python experiments/yam_sim_faas/collect_failure_demos.py --model-rollouts PATH_TO_FRESH_MODEL_RUNS --max-demos 8</pre><p className="hint">This local command uses no robot or paid training job. The prerequisite model rollouts use Dream inference; their API cost and simulator limits still apply. This collector currently supports the YAM apple scene only.</p></section>
+    <div ref={recorderSection}>
+      {recorderFocus !== 'scene' && <SimCorrect taskId={taskId}
+        taskPrompt={tasks.find((task) => task.id === taskId)?.prompt ?? ''}
+        onComplete={() => void scan()} onSetupTask={setupTask} />}
+      {recorderFocus !== 'fruit' && <SceneTask taskId={taskId}
+        taskPrompt={tasks.find((task) => task.id === taskId)?.prompt ?? ''}
+        onComplete={() => void scan()} onSetupTask={setupTask} />}
+    </div>
+    {openSimulator && <section className="card"><h2>Collect apple pickup corrections</h2><p>DreamCoach can prepare YAM, record fresh model trials, and add verified corrections to demo review.</p><button className="secondary" onClick={openSimulator}>Open simulator workflow in chat</button></section>}
     {plan && <section className="card coverage">
       <div className="card-heading"><h2>What to record next</h2><span className="count">{plan.observed_failure_cells_covered ? 'Observed failure cells covered' : 'Coverage in progress'}</span></div>
       <p>{plan.reason}</p>
       <div className="coverage-grid">{plan.cells.map((item) => <div key={item.cell} className={`coverage-cell ${plan.next_cell === item.cell ? 'coverage-next' : ''}`}><strong>Cell {item.cell + 1}</strong><span>{item.baseline_failures}/{item.baseline_runs} baseline failures</span><span>{item.kept_demos} kept demos</span></div>)}</div>
       <p className="hint">Coverage is a collection guide, not a claim that the model will succeed. Placement cell is labelled by the operator.</p>
     </section>}
-    <div className="runs-layout demo-layout">
+    <div className="runs-layout demo-layout" ref={reviewSection}>
       <section className="card runs-list"><div className="card-heading"><h2>Recorded demos</h2><span className="count">{demos.length}</span></div>{demos.length === 0 && <p>No matching one-episode sessions found. Set COACH_DEMOS_DIR to the recorder output directory and use the task instruction as the dataset task text.</p>}{demos.map((demo) => <button className={`run-row ${selectedId === demo.id ? 'selected' : ''}`} key={demo.id} onClick={() => choose(demo)}><strong>{demo.source_path.split(/[\\/]/).pop()}</strong><span>{demo.frames} frames · {demo.fps} fps</span><small>{demo.decision} · {demo.findings.length} QC findings</small></button>)}</section>
       <section className="card review">{!selected ? <p>Select a demo to inspect it and decide whether to keep it.</p> : <>
         <div className="card-heading"><h2>{selected.source_path.split(/[\\/]/).pop()}</h2><span className="count">{selected.decision}</span></div>

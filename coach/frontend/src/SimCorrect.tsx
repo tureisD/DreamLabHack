@@ -21,8 +21,9 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-export default function SimCorrect({ taskId, taskPrompt, onComplete }: {
+export default function SimCorrect({ taskId, taskPrompt, onComplete, onSetupTask }: {
   taskId: string; taskPrompt: string; onComplete: () => void;
+  onSetupTask: (draft: { name: string; prompt: string; success_rule: string }) => Promise<void>;
 }) {
   const [kind, setKind] = useState<'lift' | 'bowl'>('lift');
   const [fruit, setFruit] = useState<'apple' | 'banana'>('apple');
@@ -89,6 +90,20 @@ export default function SimCorrect({ taskId, taskPrompt, onComplete }: {
     finally { setLoading(false); }
   }
 
+  async function setupTask() {
+    setLoading(true); setError('');
+    try {
+      await onSetupTask({
+        name: kind === 'bowl' ? 'Apple placement · click to correct' : `${fruit} lift · click to correct`,
+        prompt: expectedPrompt,
+        success_rule: kind === 'bowl'
+          ? 'Lift the apple, release it into the bowl, and leave it resting inside.'
+          : `Lift the ${fruit} at least 8 cm, then lower and release it.`,
+      });
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not set up the local task.'); }
+    finally { setLoading(false); }
+  }
+
   return <section className="card sim-correct">
     <h2>Click to correct in YAM simulation</h2>
     <p>Choose a supported task, click the fruit, then click the bowl for placement. The simulator plans the arm motion, checks the physical result, and exports a demo for review. No physical robot, Dream API call, or training job starts here.</p>
@@ -99,7 +114,8 @@ export default function SimCorrect({ taskId, taskPrompt, onComplete }: {
       <button className="secondary" disabled={loading || status?.state === 'recording'} onClick={() => { const next = newSeed(); setSeed(next); void loadScene(next); }}>New scene</button>
       <button className="secondary" disabled={loading || status?.state === 'recording'} onClick={() => void loadScene()}>Load scene</button>
     </div>
-    {!ready && <p className="hint">Create or select a local task whose instruction is exactly <strong>{expectedPrompt}</strong> before recording.</p>}
+    {!ready && <p className="hint">Set up the local task for <strong>{expectedPrompt}</strong> before recording.</p>}
+    {!ready && <button className="secondary" disabled={loading || status?.state === 'recording'} onClick={() => void setupTask()}>Set up this fruit task</button>}
     {preview && <div className="sim-image-wrap"><img src={preview.image} width={preview.width} height={preview.height} alt="YAM overhead simulator scene; click a fruit and optional bowl target" onClick={choosePixel} />
       {Object.entries(preview.markers).map(([name, [x, y]]) => <span key={name} className="sim-marker" style={{ left: `${x / preview.width * 100}%`, top: `${y / preview.height * 100}%` }} title={name}>{name}</span>)}
       {objectPixel && <span className="sim-click" style={{ left: `${objectPixel[0] / preview.width * 100}%`, top: `${objectPixel[1] / preview.height * 100}%` }}>1</span>}

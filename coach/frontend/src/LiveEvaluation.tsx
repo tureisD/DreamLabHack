@@ -8,6 +8,13 @@ type LiveResult = {
   report: Report;
 };
 
+type SimulatorResult = {
+  task_id: string;
+  baseline: string;
+  candidate: string;
+  report: PairedReport;
+};
+
 const refreshSeconds = 5;
 const verdicts: Record<Report['decision'], string> = {
   improved: 'Improved',
@@ -51,11 +58,14 @@ function SuccessCounts({ baseline, candidate, baselineTotal, candidateTotal }: {
   </dl>;
 }
 
-export default function LiveEvaluation({ onOpen, onOpenAudit }: {
+export default function LiveEvaluation({ taskId, simulatorActive, onOpen, onOpenAudit }: {
+  taskId: string;
+  simulatorActive: boolean;
   onOpen: (taskId?: string, evaluationId?: string) => void;
   onOpenAudit: () => void;
 }) {
   const [result, setResult] = useState<LiveResult | null | undefined>(undefined);
+  const [simulation, setSimulation] = useState<SimulatorResult | null>(null);
   const [example, setExample] = useState<PairedReport | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -67,11 +77,17 @@ export default function LiveEvaluation({ onOpen, onOpenAudit }: {
 
     async function poll() {
       try {
-        const next = await readJson<LiveResult | null>('/api/evaluations/latest', signal);
+        const sim = taskId
+          ? await readJson<SimulatorResult | null>(`/api/simulator/comparisons/${taskId}`, signal)
+          : null;
+        const next = sim ? null : await readJson<LiveResult | null>(
+          taskId ? `/api/evaluations/latest?task_id=${encodeURIComponent(taskId)}` : '/api/evaluations/latest', signal,
+        );
         if (signal.aborted) return;
+        setSimulation(sim);
         setResult(next);
         setFailed(false);
-        if (next === null && !requestedExample) {
+        if (!taskId && next === null && !requestedExample) {
           requestedExample = true;
           void readExample(signal).then((report) => {
             if (!signal.aborted) setExample(report);
@@ -84,22 +100,44 @@ export default function LiveEvaluation({ onOpen, onOpenAudit }: {
       }
     }
 
+    setResult(undefined);
+    setSimulation(null);
+    setFailed(false);
     void poll();
     return () => {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, []);
+  }, [taskId]);
+
+  const sim = simulation?.task_id === taskId ? simulation : null;
 
   return <aside className="card live-evaluation" aria-labelledby="live-evaluation-title">
     <header className="live-eval-header">
       <h2 id="live-evaluation-title">Evaluation statistics</h2>
       <p className="live-eval-refresh" data-error={failed}>
-        {failed ? (result ? 'Refresh failed · showing last result' : 'Refresh failed · retrying') : `Refreshes every ${refreshSeconds}s`}
+        {failed ? (result || sim ? 'Refresh failed · showing last result' : 'Refresh failed · retrying') : `Refreshes every ${refreshSeconds}s`}
       </p>
     </header>
     {result === undefined && !failed && <p>Loading evaluations…</p>}
-    {result === null && <p>No saved evaluations yet.</p>}
+    {result === null && !sim && <p>{taskId ? 'No evaluation for this task yet.' : 'No saved evaluations yet.'}</p>}
+    {sim && <div className="live-eval-body">
+      <h3>Apple pickup · live simulator trials</h3>
+      <SuccessCounts
+        baseline={sim.report.baseline_successes}
+        candidate={sim.report.candidate_successes}
+        baselineTotal={sim.report.baseline_attempted}
+        candidateTotal={sim.report.candidate_attempted}
+      />
+      <dl className="live-eval-details">
+        <div><dt>Usable scene pairs</dt><dd>{sim.report.usable_pairs}/{sim.report.planned_pairs}</dd></div>
+        {sim.report.observed_difference !== null && <div>
+          <dt>Observed gain</dt><dd>{percentagePoints(sim.report.observed_difference)}</dd>
+        </div>}
+      </dl>
+      <p>{sim.report.decision === 'descriptive' ? 'Descriptive result from matched simulator scenes.' : 'Comparison incomplete. Counts include recorded attempts.'}</p>
+      <details className="live-eval-checkpoints"><summary>Checkpoints</summary><p>Base · {sim.baseline}<br />Fine-tune · {sim.candidate}</p></details>
+    </div>}
     {result && <div className="live-eval-body">
       <h3>{result.task_name}</h3>
       <p className="live-eval-verdict">{result.report.decision === 'not_evaluable' && result.report.usable_pairs < result.report.target_pairs
@@ -126,7 +164,7 @@ export default function LiveEvaluation({ onOpen, onOpenAudit }: {
         Open evaluation
       </button>
     </div>}
-    {result === null && example && <div className="live-eval-body">
+    {!taskId && result === null && example && <div className="live-eval-body">
       <h3>Apple pickup · simulator example</h3>
       <SuccessCounts
         baseline={example.baseline_successes}
@@ -137,6 +175,8 @@ export default function LiveEvaluation({ onOpen, onOpenAudit }: {
       {example.observed_difference !== null && <p>Observed gain {percentagePoints(example.observed_difference)}</p>}
       <button type="button" className="secondary" onClick={onOpenAudit}>Open statistical audit</button>
     </div>}
-    {result === null && <button type="button" className="live-eval-link" onClick={() => onOpen()}>Plan an evaluation</button>}
+    {result === null && !sim && (simulatorActive
+      ? <p>Run a matched comparison from chat when a checkpoint is ready.</p>
+      : <button type="button" className="live-eval-link" onClick={() => onOpen(taskId || undefined)}>Plan a physical evaluation</button>)}
   </aside>;
 }
