@@ -14,15 +14,18 @@ RESERVED = HOLDOUT | CONFIRMATION | SECOND_CONFIRMATION
 PREVIOUS_TRAINING = set().union(*SEEDS.values())
 
 
-def score(folder: Path, *, training_candidate: bool = False) -> dict:
+def score(
+    folder: Path, *, training_candidate: bool = False, evaluation_seeds: set[int] | None = None
+) -> dict:
     info = json.loads((folder / "rollout.json").read_text(encoding="utf-8"))
     scene = info["simulation"]
+    holdout = RESERVED if evaluation_seeds is None else evaluation_seeds
     if (
         info["status"] != "complete"
         or scene["source"] != "model"
         or not isinstance(scene.get("seed"), int)
         or scene["seed"] < 0
-        or (scene["seed"] in RESERVED if training_candidate else scene["seed"] not in RESERVED)
+        or (scene["seed"] in RESERVED if training_candidate else scene["seed"] not in holdout)
         or (training_candidate and scene["seed"] in PREVIOUS_TRAINING)
         or scene["start_pose"] != "wrist-visible"
         or info["task"] != TASK

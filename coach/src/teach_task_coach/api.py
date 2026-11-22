@@ -72,6 +72,7 @@ from teach_task_coach.storage import EpisodeStore
 from teach_task_coach.tasks import Task, TaskInput, TaskStore, Trial, TrialInput, TrialStateError
 from teach_task_coach.teleop import SO101Recorder, TeleopRequest, TeleopStatus
 from teach_task_coach.trials import TrialError, TrialRunner
+from teach_task_coach.yam_workflow import YamWorkflow, yam_router
 
 
 class ImportResult(BaseModel):
@@ -219,6 +220,9 @@ def create_app(
     scene_fixture = scene_adapter or SceneAdapter()
     account = account_service or AccountService()
     simulator = simulator_setup or SimulatorSetup()
+    app.include_router(yam_router(YamWorkflow(
+        episodes.data_dir / "yam-workflow", tasks, demos, faas, simulator, preflight,
+    )))
 
     @app.get("/api/account/status", response_model=AccountStatus)
     def account_status() -> AccountStatus:
@@ -967,8 +971,8 @@ def create_app(
         return evaluations.list(task_id)
 
     @app.get("/api/evaluations/latest", response_model=LiveEvaluation | None)
-    def latest_evaluation() -> LiveEvaluation | None:
-        evaluation = evaluations.latest()
+    def latest_evaluation(task_id: str | None = None) -> LiveEvaluation | None:
+        evaluation = next(iter(evaluations.list(task_id)), None) if task_id is not None else evaluations.latest()
         if evaluation is None:
             return None
         task = tasks.get_task(evaluation.task_id)

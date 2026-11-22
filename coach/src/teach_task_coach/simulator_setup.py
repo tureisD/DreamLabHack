@@ -39,7 +39,7 @@ class SimulatorSetup:
         if self._installed():
             return SimulatorStatus(state="ready", message="YAM simulator dependencies and collection scripts are available locally.", log=log)
         if state == "failed":
-            return SimulatorStatus(state=state, message="Simulator preparation failed. Review the activity log.", log=log)
+            return SimulatorStatus(state=state, message="Simulator preparation failed. Check that uv is installed and try again.", log=log)
         return SimulatorStatus(state="missing", message="YAM simulator dependencies are not installed yet.", log=log)
 
     def prepare(self) -> SimulatorStatus:
@@ -47,9 +47,10 @@ class SimulatorSetup:
         if current.state in ("ready", "preparing"):
             return current
         with self._lock:
-            self._state = "preparing"
-            self._log = ["Starting local YAM simulator dependency setup."]
-        threading.Thread(target=self._run, daemon=True, name="coach-simulator-setup").start()
+            if self._state != "preparing":
+                self._state = "preparing"
+                self._log = ["Starting local YAM simulator dependency setup."]
+                threading.Thread(target=self._run, daemon=True, name="coach-simulator-setup").start()
         return self.status()
 
     def _run(self) -> None:

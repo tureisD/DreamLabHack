@@ -59,7 +59,7 @@ class PreflightService:
 
     def run(self) -> PreflightResult:
         station_check, station_status = self._check_station()
-        dream_check, models = self._check_dream()
+        dream_check, models = self.check_dream()
         return PreflightResult(
             station=station_check,
             dream=dream_check,
@@ -96,7 +96,7 @@ class PreflightService:
             return Check(state="blocked", message="A camera has no recent frame."), summary
         return Check(state="ready", message="Station is idle and responding."), summary
 
-    def _check_dream(self) -> tuple[Check, list[ModelSummary]]:
+    def check_dream(self) -> tuple[Check, list[ModelSummary]]:
         try:
             models = self.model_loader()
         except DreamAuthError:

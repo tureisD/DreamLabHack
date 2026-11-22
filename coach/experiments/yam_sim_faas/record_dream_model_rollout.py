@@ -1,7 +1,6 @@
 """Record Dream-1 controlling the repo's YAM simulator; requires DREAM_API_KEY."""
 
 import argparse
-import os
 import secrets
 import sys
 from pathlib import Path
@@ -25,8 +24,8 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Record the observation warm-up offline")
     parser.add_argument("--score-only", action="store_true", help="Save action/state replay without review videos")
     args = parser.parse_args()
-    if not args.dry_run and not os.getenv("DREAM_API_KEY"):
-        parser.error("Set DREAM_API_KEY in the process environment")
+    if not args.dry_run and not dream_control.settings().get("DREAM_API_KEY"):
+        parser.error("Configure a Dream Labs key in the environment or Dream credentials file")
     if args.max_requests < 1:
         parser.error("--max-requests must be positive")
     seed = args.seed if args.seed is not None else secrets.randbits(32)
