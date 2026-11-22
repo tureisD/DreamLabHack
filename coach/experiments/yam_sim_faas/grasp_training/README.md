@@ -1,5 +1,7 @@
 # Apple training on two Dream accounts
 
+[Full 20-second scene 901 comparison, synchronized video and paired Coach report](full-901/README.md)
+
 **Start here on the second PC.** This PC collects seeds 201–224 while the first PC owns a separate 24-demo dataset from seeds 41–48 and 101–116. Both PCs simulate locally without an API key or robot. The two training datasets stay independent. The first dataset mixes eight fixed-approach and sixteen varied-approach demonstrations; the second contains twenty-four varied-approach demonstrations at distinct seeded positions. Keep the same model and fine-tuning recipe on both accounts so the dataset composition is the main comparison.
 
 ## Assignments and budget
@@ -81,6 +83,39 @@ Prepare validates the archive, registers or reuses the matching YAM embodiment, 
 **Continuation works on each account independently.** Once a checkpoint finishes all its steps, its owner can submit a further job with resume_from set to that checkpoint ID, using the same embodiment, constant schedule and compatible training settings. Each continuation has a minimum of 500 new steps. At today's documented rate, a further job would require about $100 on that account. With the approximate balances above, the first owner would need about another $50 and the second about another $40 after one job each, before inference spending. Recreating the same dataset and settings on a different account starts a fresh model there. Passing a teammate's checkpoint ID does not transfer its optimizer state or ownership. [Dream SDK fine-tuning reference](https://pypi.org/project/dreamlabs-client/1.1.7/#fine-tuning)
 
 ## Compare the results
+
+The four files in [held_out](held_out/) contain the full pre-warm-up MuJoCo state for scenes 901–904. The recorder verifies the scene digest, simulator version, assets and initial state before inference. From the `coach` directory, run the offline check with a fresh output folder:
+
+~~~powershell
+python experiments/yam_sim_faas/grasp_training/preflight_heldout.py --output apple-preflight
+~~~
+
+This restores each scene twice, once with each first-account model ID. It compares the decoded videos from all three cameras, their timestamps, and the recorded state/action tables. A passing report covers eight camera warm-ups and zero model calls.
+
+For a live attempt, set `DREAM_API_KEY` locally for the checkpoint's account. These commands use scene 901 and the first account's candidate. The recorder logs every attempted call. Dream's pool-warming refusals count toward the wall-clock limit and leave the request budget available for inference. Other retries use a request slot.
+
+~~~powershell
+$experiment = 'experiments/yam_sim_faas'
+if (-not $env:COACH_ROLLOUTS_DIR) { $env:COACH_ROLLOUTS_DIR = Join-Path $env:LOCALAPPDATA 'TeachTaskCoach/sim-rollouts' }
+$scene = Get-ChildItem "$experiment/grasp_training/held_out/fdcaa847*.json"
+$candidate = (Get-Content "$experiment/grasp_training/varied-checkpoint.json" -Raw | ConvertFrom-Json).checkpoint
+python "$experiment/record_dream_model_rollout.py" --held-out-scene $scene.FullName --model $candidate --max-requests 9 --output $env:COACH_ROLLOUTS_DIR
+~~~
+
+For the baseline use `dreamlabs/dream-1-beta`. Run the first account's candidate first on 901 and 903 and the base first on 902 and 904. Keep the first attempt, even when it ends early. Review its three videos and pickup evidence in Coach. Only a person assigns the outcome.
+
+The recorder executes one returned action row per 50 ms simulator step for both models, matching the SDK's YAM station playback convention. Dream describes its native plan as 30 rows per second. At this playback speed, one full 48-row reply provides 2.4 simulated seconds. A complete attempt has 33 warm-up rows and 400 control rows. The recorder truncates the final chunk at row 400 and saves shortened attempts as partial. Compare those separately from full-budget attempts. [YAM station timing](../../../../dream_library/robots/src/robots/config.py)
+
+### First candidate pilot on scene 901
+
+On 22 November 2026 the first account restored all four scenes with MuJoCo 4.0.1 on Windows. Each pair had identical recorded states and decoded camera images throughout warm-up. A scripted reference on development seed 41 produced a measured peak lift of 14.5 cm and a 3.4-second qualifying hold.
+
+| Scene 901 recording | Dream requests | Control rows | Evidence |
+|---|---:|---:|---|
+| `yam-515ec73211924f529496b5bd1ff4407a` | 3 | 0 | Two cold-start responses, then a valid model reply rejected by the recorder. The corrected adapter replayed all 48 rows locally. |
+| `yam-3dafc8491e544936a99f9d686f875961` | 6 | 288 of 400 | Both left fingertips contacted the apple at video time 13.70 s and remained in contact through the last frame at 16.00 s. The apple rose 1.68 cm and had lost table support by 14.70 s. |
+
+The replacement used the remaining six requests and ended after 14.4 seconds of model control. Both recordings are partial, have no operator outcome, and stay outside the full-budget comparison. The team can review the original camera recordings, contact traces, and request accounting directly on GitHub. [Scene 901 findings and videos](pilot-901/README.md)
 
 Run the unmodified base and both independent 24-demo candidates on the same four held-out scenes (901–904). Match prompt, wrist-visible pose, full initial scene, and 20 seconds of simulated control after warm-up. Verify the action playback cadence for each model and record actual action rows, elapsed simulated time and incomplete attempts. Rotate controller order across scenes. Score an unassisted apple lift of at least 8 cm above settled height held for 2 continuous seconds. Keep the video and human outcome for each attempt; report descriptive counts out of four per checkpoint. Pool the **results** across PCs by scene and checkpoint ID. Never include test scenes in training. These are simulation trials; the real-trial statistical verdict has separate evidence requirements.
 

@@ -1,0 +1,34 @@
+{
+  "collection_mode": "simulation",
+  "simulation": {
+    "source": "model",
+    "seed": 901,
+    "apple_xy_m": [
+      0.1611652806243516,
+      0.1268317291183
+    ],
+    "start_pose": "wrist-visible",
+    "scene_id": "fdcaa8476c5a27b58ca25817607b96bd9426188afae21113590769764284aa57",
+    "split": "heldout",
+    "rule_hash": "7eb68f83d9c8f08338a7fc5856e48a01803768f29368b97f532fc9b858307453",
+    "action_budget": 400,
+    "simulator_hz": 20,
+    "requests_attempted": 19,
+    "model_action_rows": 400,
+    "warmup_rows": 33,
+    "pool_warming_refusals": 10,
+    "simulated_control_seconds": 20.0
+  },
+  "robot_name": "YAM simulator",
+  "body": "yam",
+  "task": "pick up the apple",
+  "checkpoint": "dream-1-ft:7820aef9-apple-varied24-500",
+  "started_at_utc": "2026-11-22T10:23:01.900741+00:00",
+  "frames": 433,
+  "fps": 20,
+  "duration_s": 21.65,
+  "status": "complete",
+  "stop_reason": "finished",
+  "error": null,
+  "has_video": true
+}

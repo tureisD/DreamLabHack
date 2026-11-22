@@ -1,0 +1,59 @@
+{
+  "status": "passed",
+  "kind": "offline camera and state preflight",
+  "model_calls": 0,
+  "scenes": [
+    {
+      "seed": 901,
+      "scene_id": "fdcaa8476c5a27b58ca25817607b96bd9426188afae21113590769764284aa57",
+      "recordings": {
+        "base": "901/base/yam-780f2bbfa5e64455894a70923ab13a10",
+        "candidate": "901/candidate/yam-b57250a4c5aa4e098e97f52069d37859"
+      },
+      "camera_sha256": {
+        "overhead": "3636599a17028cdd187e667e39692e0c222625ed2dff7bc9ba6298619536e038",
+        "wrist_l": "71475d322e51c4cb9d62311d4b0f0375d2148e2211386d18132282101e0c4290",
+        "wrist_r": "4053c1d1964b471bf41d44b74506d47caffdacd6659f2bf09d1d5ed7e9bab81a"
+      }
+    },
+    {
+      "seed": 902,
+      "scene_id": "1c7959ce5f51e1bcb27804a2477f2dd6f8626fca73518534b09fb764ff2e0d30",
+      "recordings": {
+        "base": "902/base/yam-a3c2e0a6550b4a4e9a979d3e5926f706",
+        "candidate": "902/candidate/yam-89dae276b67a40608ca0037c8be9e351"
+      },
+      "camera_sha256": {
+        "overhead": "9d753642671f1dd67cb8a8bed0c3f12112f7721709963fc2085e7f0a8f61a41b",
+        "wrist_l": "f3d961d68695f3c1d4c6b676b24d7a89c7e0a719687ec8cb934fad964c11ddb1",
+        "wrist_r": "4053c1d1964b471bf41d44b74506d47caffdacd6659f2bf09d1d5ed7e9bab81a"
+      }
+    },
+    {
+      "seed": 903,
+      "scene_id": "87fded770470468423d94127c175f7eaf3c84acaa317422d853bf2d39ac1e5f1",
+      "recordings": {
+        "base": "903/base/yam-72c4bddcb1264f16a2ee53fb876d80c8",
+        "candidate": "903/candidate/yam-950459cf0357400bb0f29fb78c7b27c1"
+      },
+      "camera_sha256": {
+        "overhead": "4e22e2c6a0a1215aab2dbc56482b05b80131f534a6e32567749eb787e57cc6d8",
+        "wrist_l": "bd52b8700b240e1a567e190bdc22148f3f2fcd398bb5cda56b5111d4beb59358",
+        "wrist_r": "4053c1d1964b471bf41d44b74506d47caffdacd6659f2bf09d1d5ed7e9bab81a"
+      }
+    },
+    {
+      "seed": 904,
+      "scene_id": "4e32873c133010bd1785d09650dbb770f3056c02216ccaa9c2ebb3bedd7fcc2b",
+      "recordings": {
+        "base": "904/base/yam-774c7e4c8cad47f49f46d9775dc1ca27",
+        "candidate": "904/candidate/yam-35e1a4d0406a4121baa0bf722f9ddb37"
+      },
+      "camera_sha256": {
+        "overhead": "4757f610ec8fd641bd23098c1ba6bbe0935bcc01bf8c9e129744f93801a6da15",
+        "wrist_l": "9ba9ef05fc8e0ba7435703a38034ba7a51299decf0a74a26224f6fe61d05a753",
+        "wrist_r": "4053c1d1964b471bf41d44b74506d47caffdacd6659f2bf09d1d5ed7e9bab81a"
+      }
+    }
+  ]
+}

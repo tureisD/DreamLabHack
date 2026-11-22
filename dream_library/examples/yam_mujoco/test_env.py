@@ -310,7 +310,8 @@ class DreamContractTests(unittest.TestCase):
         kept = []
 
         def fake_capture(env, windows, keep=True):
-            kept.append(keep)
+            if keep:
+                kept.append(env.data.time)
             for window in windows.values():
                 if keep:
                     window.append("jpeg")
@@ -320,9 +321,8 @@ class DreamContractTests(unittest.TestCase):
             patch("dream_control.capture", side_effect=fake_capture),
         ):
             main(["--dry-run", "--headless"], shared_env=env)
-        indices = [i for i, k in enumerate(kept) if k]
-        self.assertEqual(len(indices), FRAMES)
-        self.assertEqual(len(kept), FRAMES, "capture is called only on frame steps")
+        self.assertEqual(len(kept), FRAMES)
+        np.testing.assert_allclose(np.diff(kept), FRAME_EVERY_STEPS * 0.05, rtol=0, atol=1e-9)
         self.assertAlmostEqual(
             env.data.time,
             ((FRAMES - 1) * FRAME_EVERY_STEPS + 1) * 0.05,

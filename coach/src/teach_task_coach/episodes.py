@@ -11,6 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from teach_task_coach.pickup_evidence import PickupEvidence, assess_pickup
+
 
 class EpisodeError(ValueError):
     """A rollout directory is unreadable or does not follow the station format."""
@@ -39,6 +41,7 @@ class EpisodeSummary(BaseModel):
     task: str
     checkpoint: str
     simulation: dict[str, Any] | None = None
+    pickup_evidence: PickupEvidence | None = None
     run_number: int | None = None
     body: str | None
     robot_name: str | None
@@ -164,6 +167,7 @@ def read_episode(folder: Path) -> EpisodeSummary:
         task=info["task"],
         checkpoint=info["checkpoint"],
         simulation=info.get("simulation") if isinstance(info.get("simulation"), dict) else None,
+        pickup_evidence=assess_pickup(folder, info),
         run_number=info.get("run"),
         body=info.get("body"),
         robot_name=info.get("robot_name"),

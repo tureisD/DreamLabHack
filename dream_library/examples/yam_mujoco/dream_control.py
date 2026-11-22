@@ -227,6 +227,27 @@ def observation(env, windows, task, model, station=False):
     return obs
 
 
+def _joint_chunks(actions):
+    """Read YAM station chunks or the custom embodiment's joint and gripper arrays."""
+    if not isinstance(actions, dict):
+        raise ValueError("Dream must return an action dictionary.")
+    if all(key in actions for key in ("q_l_chunk", "q_r_chunk")):
+        return [np.asarray(actions[key], dtype=float) for key in ("q_l_chunk", "q_r_chunk")]
+    parts = actions.get("per_key")
+    if not isinstance(parts, dict):
+        raise ValueError("Missing YAM joint chunks or named action parts.")
+    chunks = []
+    for side in ("left", "right"):
+        arm = np.asarray(parts.get(f"action.{side}_arm"), dtype=float)
+        grip = np.asarray(parts.get(f"action.{side}_gripper"), dtype=float)
+        if grip.ndim == 1:
+            grip = grip[:, None]
+        if arm.ndim != 2 or arm.shape[1] != 6 or grip.shape != (len(arm), 1):
+            raise ValueError(f"Expected {side} arm and gripper arrays with shapes (rows, 6) and (rows, 1).")
+        chunks.append(np.concatenate((arm, grip), axis=1))
+    return chunks
+
+
 def validate_chunk(env, actions, action_limit=48, *, verbose=True, adjustments=None):
     """Validate the response; project model joint targets onto URDF bounds in the executed prefix.
     @param env Simulation environment.
@@ -236,7 +257,7 @@ def validate_chunk(env, actions, action_limit=48, *, verbose=True, adjustments=N
     @param adjustments Optional list collecting adjustment notices.
     @return The left and right rows to execute, each (rows, 7), clipped to the joint limits.
     """
-    left, right = [np.array(actions[k], dtype=float, copy=True) for k in ("q_l_chunk", "q_r_chunk")]
+    left, right = _joint_chunks(actions)
     if left.ndim != 2 or left.shape != right.shape or left.shape[1] != 7 or not 1 <= len(left) <= 48:
         raise ValueError("Dream must return matching 1–48 x 7 joint chunks.")
     if not 1 <= action_limit <= 48:
@@ -338,12 +359,15 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
     parser.add_argument("--seconds", type=float, default=120, help="Wall-clock trial duration")
     parser.add_argument("--show-side-panel", action="store_true", help="Show native MuJoCo controls")
     parser.add_argument("--max-requests", type=int, help="Maximum get_action calls, excluding pool-warming refusals")
+    parser.add_argument("--control-rows", type=int, help="Stop after this many 50 ms simulator steps after warm-up")
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Render and validate observation without calling API")
     parser.add_argument("--quiet", action="store_true", help="Compact progress and one final summary")
     args = parser.parse_args(argv)
     if args.max_requests is not None and args.max_requests < 1:
         parser.error("--max-requests must be positive")
+    if args.control_rows is not None and args.control_rows < 1:
+        parser.error("--control-rows must be positive")
     if not 1 <= args.actions <= 48 or not np.isfinite(args.seconds) or args.seconds <= 0 or not args.task.strip():
         parser.error("Use 1–48 actions, positive finite seconds, and a nonempty task.")
     config = settings()
@@ -375,6 +399,8 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
             if steps % FRAME_EVERY_STEPS == 0:
                 capture(env, windows)
             steps += 1
+        if progress is not None:
+            progress["warmup_rows"] = steps
         obs = observation(env, windows, args.task, args.model, args.model in POSE_MODELS)
         if args.dry_run:
             print(f"Dry run OK: task={args.task!r}, model={args.model}, {FRAMES} frames x 3 cameras. No API call.")
@@ -423,6 +449,11 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
             requests_attempted = 0
             warming_refusals = 0
             while active() and (args.max_requests is None or requests_started < args.max_requests):
+                remaining = args.actions
+                if args.control_rows is not None:
+                    remaining = min(remaining, args.control_rows - executed_rows)
+                    if remaining == 0:
+                        break
                 requests_started += 1
                 requests_attempted += 1
                 if progress is not None:
@@ -504,7 +535,7 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
                     break
                 try:
                     left, right = validate_chunk(
-                        env, reply, args.actions, verbose=not args.quiet, adjustments=adjustments
+                        env, reply, remaining, verbose=not args.quiet, adjustments=adjustments,
                     )
                 except ValueError:
                     from credentials import config_dir
@@ -517,7 +548,7 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
                     )
                     print(f"Rejected action details saved to {diagnostic}")
                     raise
-                for l, r in zip(left[: args.actions], right[: args.actions]):
+                for l, r in zip(left, right):
                     if not active():
                         break
                     tick = time.monotonic()

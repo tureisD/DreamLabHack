@@ -90,6 +90,88 @@ def test_simulator_pilot_budget_and_review(tmp_path, monkeypatch):
     assert client.get(path).json()["success"] is False
 
 
+def test_named_finetune_actions_and_station_chunks_preserve_archived_joint_order(monkeypatch):
+    pytest.importorskip("mujoco")
+    import io
+    import zipfile
+    import numpy as np
+    import pyarrow.parquet as pq
+
+    scripts = Path(__file__).resolve().parents[1] / "experiments/yam_sim_faas"
+    monkeypatch.syspath_prepend(str(scripts))
+    import record_dream_model_rollout as pilot
+
+    with zipfile.ZipFile(scripts / "grasp_training/varied.zip") as archive:
+        name = next(name for name in archive.namelist() if name.endswith(".parquet"))
+        rows = np.asarray(pq.read_table(io.BytesIO(archive.read(name)), columns=["action"])["action"].to_pylist())
+    close = int(np.argmin(rows[:, 13]))
+    sample = rows[max(0, close - 12):close + 12]
+    # A real one-handed grasp gives an asymmetric test of side and gripper order.
+    assert np.ptp(sample[:, 13]) > 0.5 and np.ptp(sample[:, 6]) < 0.01
+    named = {"action." + part: sample[:, lo:hi] for part, (lo, hi) in pilot.recorder.PARTS.items()}
+    station = {"q_l_chunk": sample[:, 7:], "q_r_chunk": sample[:, :7]}
+    env = pilot.recorder.YamEnv()
+    try:
+        validate = pilot.dream_control.validate_chunk
+        left, right = validate(env, station, verbose=False)
+        flat_grips = {key: (value[:, 0] if key.endswith("_gripper") else value) for key, value in named.items()}
+        for reply in ({"per_key": named}, {"per_key": flat_grips}, station | {"per_key": {}}):
+            actual = validate(env, reply, verbose=False)
+            np.testing.assert_array_equal(actual[0], left)
+            np.testing.assert_array_equal(actual[1], right)
+        for malformed in (named | {"action.left_arm": sample[:, :5]}, named | {"action.right_gripper": sample[:-1, 6:7]}):
+            with pytest.raises(ValueError):
+                validate(env, {"per_key": malformed})
+    finally:
+        env.close()
+
+
+def test_control_budget_stops_mid_chunk_without_an_extra_request(tmp_path, monkeypatch):
+    pytest.importorskip("mujoco")
+    from unittest.mock import Mock
+    import numpy as np
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "experiments/yam_sim_faas"))
+    import record_dream_model_rollout as pilot
+    control = pilot.dream_control
+    policy = Mock()
+    policy.get_action.return_value = {"per_key": {
+        "action." + part: np.ones((2, hi - lo)) * 0.5 for part, (lo, hi) in pilot.recorder.PARTS.items()
+    }}
+    monkeypatch.setattr(control, "open_policy", lambda *_: policy)
+    monkeypatch.setattr(control, "settings", lambda: {"DREAM_API_KEY": "offline-fixture"})
+    monkeypatch.setattr(control, "FRAMES", 1)
+    with pilot.recorder.recording(tmp_path, pilot.recorder.TASK, "fixture/parts", 41, "model") as (env, details):
+        rows = control.main(["--headless", "--model", "fixture/parts", "--control-rows", "3", "--max-requests", "5"],
+                            shared_env=env, progress=details)
+        assert rows == details["model_action_rows"] == 3
+        assert policy.get_action.call_count == details["requests_attempted"] == 2
+        assert details["warmup_rows"] == 1 and len(env.states) == 4
+
+
+def test_heldout_request_cap_preserves_short_attempt_for_review(tmp_path, monkeypatch):
+    pytest.importorskip("mujoco")
+    from unittest.mock import Mock
+    from teach_task_coach.episodes import read_episode
+
+    scripts = Path(__file__).resolve().parents[1] / "experiments/yam_sim_faas"
+    monkeypatch.syspath_prepend(str(scripts))
+    import record_dream_model_rollout as pilot
+
+    manifest = next((scripts / "grasp_training/held_out").glob("fdcaa847*.json"))
+    policy = Mock()
+    policy.get_action.return_value = {"q_l_chunk": [[0, 0, 0, 0, 0, 0, 1]], "q_r_chunk": [[0, 0, 0, 0, 0, 0, 1]]}
+    monkeypatch.setenv("DREAM_API_KEY", "offline-fixture")
+    monkeypatch.setattr(pilot.dream_control, "open_policy", lambda *_: policy)
+    with pytest.raises(RuntimeError, match="executed 1 of 400"):
+        pilot.main(["--output", str(tmp_path), "--held-out-scene", str(manifest), "--max-requests", "1"])
+    run = read_episode(next(tmp_path.glob("yam-*")))
+    assert run.status == "partial" and run.success is None and run.frames == 34
+    assert run.simulation["control_stop"] == "request_cap"
+    assert run.simulation["simulated_control_seconds"] == 0.05 and run.simulation["requests_attempted"] == 1
+    assert run.pickup_evidence.analyzed_frames == 1
+
+
 def test_seed41_wrist_visible_pose_keeps_apple_separate_and_in_view(tmp_path, monkeypatch):
     pytest.importorskip("mujoco")
     pytest.importorskip("PIL")

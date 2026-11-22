@@ -1,0 +1,57 @@
+{
+  "plan": {
+    "evaluation_id": "apple-500step-scene-901-20s",
+    "task": "pick up the apple",
+    "success_rule": "Lift the apple at least 0.08 m above its settled height and hold it unassisted for 2 continuous seconds.",
+    "reset_protocol": "Restore the frozen scene-901 integration state, then run 33 identical warm-up rows.",
+    "assignment_protocol": "One fresh candidate attempt followed by one fresh base attempt on previously piloted scene 901.",
+    "protocol_ref": "git:89d83f4/coach/experiments/yam_sim_faas/grasp_training/held_out/fdcaa8476c5a27b58ca25817607b96bd9426188afae21113590769764284aa57.json",
+    "baseline_checkpoint": "dreamlabs/dream-1-beta",
+    "candidate_checkpoint": "dream-1-ft:7820aef9-apple-varied24-500",
+    "collection_mode": "simulation",
+    "planned_pairs": 1,
+    "created_at": "2026-11-22T09:38:47+01:00",
+    "required_model_rows": 400,
+    "simulator_hold_threshold_m": 0.08
+  },
+  "pairs": [
+    {
+      "pair_id": "scene-901",
+      "scenario_id": "apple-seed-901",
+      "baseline": {
+        "trial_id": "yam-fb1f4aa02bc04815ad401b9cb8a7be30",
+        "episode_id": "yam-fb1f4aa02bc04815ad401b9cb8a7be30",
+        "checkpoint_id": "dreamlabs/dream-1-beta",
+        "source_uri": "local-rollout://yam-fb1f4aa02bc04815ad401b9cb8a7be30",
+        "session_id": "yam-fb1f4aa02bc04815ad401b9cb8a7be30",
+        "recorded_at": "2026-11-22T10:30:42.792866+00:00",
+        "outcome": "failure",
+        "training_exposure": "held_out",
+        "human_verified": false,
+        "model_action_rows": 400,
+        "held_lift_m": 0.00653417692618552,
+        "peak_lift_m": 0.07913249247682841,
+        "first_close_after_warmup_s": 1.5,
+        "replay_max_state_error_m": 1.513775982575627e-05,
+        "height_source": "recorded"
+      },
+      "candidate": {
+        "trial_id": "yam-10586318725f4b34bba816d0ff2d34b4",
+        "episode_id": "yam-10586318725f4b34bba816d0ff2d34b4",
+        "checkpoint_id": "dream-1-ft:7820aef9-apple-varied24-500",
+        "source_uri": "local-rollout://yam-10586318725f4b34bba816d0ff2d34b4",
+        "session_id": "yam-10586318725f4b34bba816d0ff2d34b4",
+        "recorded_at": "2026-11-22T10:23:01.900741+00:00",
+        "outcome": "success",
+        "training_exposure": "held_out",
+        "human_verified": false,
+        "model_action_rows": 400,
+        "held_lift_m": 0.08253356294916381,
+        "peak_lift_m": 0.09686435604227939,
+        "first_close_after_warmup_s": 11.5,
+        "replay_max_state_error_m": 1.074421695146377e-05,
+        "height_source": "recorded"
+      }
+    }
+  ]
+}
