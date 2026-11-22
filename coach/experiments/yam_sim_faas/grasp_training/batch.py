@@ -1,20 +1,23 @@
 """Verify a frozen simulator dataset or prepare it on the current Dream account."""
 import argparse
-from getpass import getpass
 import hashlib
 import json
 import os
+import time
+from getpass import getpass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import time
 from zipfile import ZipFile
 
 from dream import DreamClient, datasets
 
 ROOT = Path(__file__).resolve().parent
 HOLDOUT = {901, 902, 903, 904}
-SEEDS = {"control": set(range(41, 49)), "varied": set(range(41, 49)) | set(range(101, 117))}
-SEEDS["pooled"] = SEEDS["varied"] | set(range(201, 217))
+SEEDS = {
+    "control": set(range(41, 49)),
+    "varied": set(range(41, 49)) | set(range(101, 117)),
+    "independent": set(range(201, 225)),
+}
 
 
 def verify(batch, destination, bundle_dir=ROOT):

@@ -11,6 +11,16 @@ from teach_task_coach.episodes import RolloutScanner
 from teach_task_coach.storage import EpisodeStore
 
 
+def test_training_batches_are_independent(monkeypatch):
+    scripts = Path(__file__).resolve().parents[1] / "experiments/yam_sim_faas/grasp_training"
+    monkeypatch.syspath_prepend(str(scripts))
+    from batch import HOLDOUT, SEEDS
+
+    assert len(SEEDS["varied"]) == len(SEEDS["independent"]) == 24
+    assert SEEDS["varied"].isdisjoint(SEEDS["independent"])
+    assert SEEDS["independent"].isdisjoint(HOLDOUT)
+
+
 def test_simulator_pilot_budget_and_review(tmp_path, monkeypatch):
     pytest.importorskip("mujoco")
     pytest.importorskip("PIL")
@@ -94,8 +104,9 @@ def test_seed41_wrist_visible_pose_keeps_apple_separate_and_in_view(tmp_path, mo
 def test_training_export_preserves_gripper_slots_and_frame_times(tmp_path, monkeypatch):
     pytest.importorskip("mujoco")
     pytest.importorskip("PIL")
-    import av
     import json
+
+    import av
     import numpy as np
     import pyarrow.parquet as pq
 

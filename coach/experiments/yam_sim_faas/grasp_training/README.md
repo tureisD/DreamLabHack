@@ -1,24 +1,26 @@
 # Apple training on two Dream accounts
 
-**Start here on the second PC.** This PC collects seeds 201–216 while the first PC collects seeds 101–116. Both PCs simulate locally without an API key or robot. The first account's 24-demo archive is committed on the same branch. The second PC combines those exact episodes with its 16 new ones before uploading. This gives the team 40 distinct training scenes.
+**Start here on the second PC.** This PC collects seeds 201–224 while the first PC owns a separate 24-demo dataset from seeds 41–48 and 101–116. Both PCs simulate locally without an API key or robot. The two training datasets stay independent. The first dataset mixes eight fixed-approach and sixteen varied-approach demonstrations; the second contains twenty-four varied-approach demonstrations at distinct seeded positions. Keep the same model and fine-tuning recipe on both accounts so the dataset composition is the main comparison.
 
 ## Assignments and budget
 
 | | First PC | Second PC |
 |---|---|---|
 | Dream account | dima24kor, approximately $150 | Teammate's own username, approximately $160 |
-| Training dataset | **varied**, 24 demos, seeds 41–48 and 101–116 | **pooled**, the same 24 plus seeds 201–216, 40 total |
-| Proposed suffix | apple-varied24-500 | apple-pooled40-500 |
+| Training dataset | **varied**, 24 demos, seeds 41–48 and 101–116 | **independent**, 24 demos, seeds 201–224 only |
+| Proposed suffix | apple-varied24-500 | apple-independent24-500 |
 | One 500-step job at the published rate | $100, about $50 left | $100, about $60 left |
-| Current assignment | Upload and confirm processed; stop there | Collect, validate, prepare, and show the owner the price before starting |
+| Current assignment | Dataset processed; first owner handles that job | 24-demo dataset processed; one 500-step job submitted on 22 November 2026 |
 
-On 22 November 2026 Dream confirmed **processed** for the first account's dataset `dima24kor/apple-grasp-varied-3374a5388381`, ID `ds_25be44f202eb5d8c`. It contains 24 episodes and 3,871 rows at 10 Hz. The 16 additional demonstrations closed at 15 distinct times between 5.45 and 8.90 seconds. Across all 24 episodes the gripper was 4.08–6.27 mm from the apple center at first closure. No paid job was submitted by the first PC during preparation. The second PC can fetch this exact archive now.
+On 22 November 2026 Dream confirmed **processed** for the first account's dataset `dima24kor/apple-grasp-varied-3374a5388381`, ID `ds_25be44f202eb5d8c`. It contains 24 episodes and 3,871 rows at 10 Hz. The 16 varied demonstrations closed at 15 distinct times between 5.45 and 8.90 seconds. Across all 24 episodes the gripper was 4.08–6.27 mm from the apple center at first closure. No paid job was submitted by the first PC during preparation. This committed archive is a comparison reference only; it is not part of the second account's training data.
 
-All 24 archived action sequences also passed a separate 10 Hz physics replay. Every sequence held the apple at least 14.1 cm above the table for two continuous seconds and then released it. All 11,613 exported camera frames were checked against the corresponding frames in the original three camera streams. The pooled batch builder runs the exported-action replay on each new episode before packaging it.
+All 24 archived action sequences also passed a separate 10 Hz physics replay. Every sequence held the apple at least 14.1 cm above the table for two continuous seconds and then released it. All 11,613 exported camera frames were checked against the corresponding frames in the original three camera streams. The independent batch builder runs the same exported-action replay on each new episode before packaging it.
 
-Each proposed job starts independently from Dream's base model. Match training settings across accounts. The comparison tests the added value of 16 examples under the same recipe. Report the actual outcomes; additional examples do not guarantee a better checkpoint. The original eight-demo control remains available as a historical reference. If someone already submitted the earlier control experiment, record that job and keep the remaining credits for evaluation before considering another purchase.
+Each proposed job starts independently from Dream's base model. Match training settings across accounts. The comparison tests two distinct 24-example collections under the same recipe; it does not isolate one data-collection variable perfectly. Report actual outcomes. The original eight-demo control remains available as a historical reference. If someone already submitted an earlier control experiment, record that job and keep the remaining credits for evaluation before considering another purchase.
 
 The documented price is $0.20/step. Check [Billing](https://platform.dreamlabs.ai/billing) and the current quote for **500 steps** on each account. Submitting holds that job's price on the submitting account. The default 1,000-step job is about $200. Runs with the resulting models also use credits.
+
+The second account's independent archive is committed as `independent.zip` with the matching `independent.json` manifest. It contains only seeds 201–224. Dream marked dataset `mary.m.koryakina/apple-grasp-independent-779f088ac959` (`ds_dfb867a59247e07d`) processed. One 500-step job, `ftj_94b20f291e71d600`, was accepted with suffix `apple-independent24-500`, constant schedule, base share 0.5, and EEF off. It was queued at the last check; see [the run record](SECOND_ACCOUNT_RUN.md) for the verified status and limits.
 
 ## Second PC setup and collection
 
@@ -31,22 +33,21 @@ uv sync --locked --extra sim
 $exp = './experiments/yam_sim_faas'
 $g = "$exp/grasp_training"
 $raw = Join-Path $env:LOCALAPPDATA 'TeachTaskCoach/sim-rollouts'
-$out = Join-Path $env:LOCALAPPDATA 'TeachTaskCoach/apple-pooled-v1'
-uv run --locked python "$exp/record_yam_demos.py" --output "$raw" --seed 201 --episodes 16 --start-pose wrist-visible --vary-approach
+$out = Join-Path $env:LOCALAPPDATA 'TeachTaskCoach/apple-independent-v1'
+uv run --locked python "$exp/record_yam_demos.py" --output "$raw" --seed 201 --episodes 24 --start-pose wrist-visible --vary-approach
 ~~~
 
 Start recording as soon as this handoff is available. If interrupted, inspect the finished rollout sidecars and run only missing seeds. Every attempt gets a separate folder. The batch builder rejects duplicate eligible seeds; select one reviewed recording per seed in a separate input folder if needed. Leave held-out seeds 901–904 untouched.
 
-After collection, fetch the finalized 24-demo archive from the first PC:
+After collection, build and verify only this PC's 24 new episodes:
 
 ~~~powershell
-git pull --ff-only
 uv run --locked python "$g/batch.py" verify varied
-uv run --locked python "$g/build_batch.py" pooled --raw "$raw" --output "$out"
-uv run --locked python "$g/batch.py" verify pooled --bundle-dir "$out"
+uv run --locked python "$g/build_batch.py" independent --raw "$raw" --output "$out"
+uv run --locked python "$g/batch.py" verify independent --bundle-dir "$out"
 ~~~
 
-The builder copies the 24 verified episodes unchanged and audits the 16 new ones. It checks closing distance, contact with both fingers, replay agreement, the lift/hold/release outcome and synchronized 10 Hz videos. It refuses to overwrite an existing archive. The SHA-256, episode IDs and per-scene measurements are in pooled.json. Share pooled.json and pooled.zip on the team's branch if the other PC needs this exact dataset.
+The builder audits all 24 new episodes. It checks closing distance, contact with both fingers, replay agreement, the lift/hold/release outcome and synchronized 10 Hz videos. It refuses to overwrite an existing archive. The SHA-256, episode IDs and per-scene measurements are in independent.json. Share independent.json and independent.zip on the team's branch if the other PC needs this exact dataset. Neither file contains the first account's training episodes.
 
 ## Upload on the correct account
 
@@ -54,7 +55,7 @@ Open a fresh terminal without a preset DREAM_API_KEY if the machine has used ano
 
 ~~~powershell
 # Second PC
-uv run --locked python "$g/batch.py" prepare pooled --bundle-dir "$out" --account YOUR_DREAM_USERNAME
+uv run --locked python "$g/batch.py" prepare independent --bundle-dir "$out" --account YOUR_DREAM_USERNAME
 
 # First PC only, from coach, with $g set as above
 uv run --locked python "$g/batch.py" prepare varied --account dima24kor
@@ -73,8 +74,8 @@ Prepare validates the archive, registers or reuses the matching YAM embodiment, 
 
 ## Compare the results
 
-Run the unmodified base, 24-demo candidate and 40-demo candidate on the same four held-out scenes (901–904). Match prompt, wrist-visible pose, full initial scene, and 20 seconds of simulated control after warm-up. Verify the action playback cadence for each model and record actual action rows, elapsed simulated time and incomplete attempts. Rotate controller order across scenes. Score an unassisted apple lift of at least 8 cm above settled height held for 2 continuous seconds. Keep the video and human outcome for each attempt; report descriptive counts out of four per checkpoint. Pool the **results** across PCs by scene and checkpoint ID. Never include test scenes in training. These are simulation trials; the real-trial statistical verdict has separate evidence requirements.
+Run the unmodified base and both independent 24-demo candidates on the same four held-out scenes (901–904). Match prompt, wrist-visible pose, full initial scene, and 20 seconds of simulated control after warm-up. Verify the action playback cadence for each model and record actual action rows, elapsed simulated time and incomplete attempts. Rotate controller order across scenes. Score an unassisted apple lift of at least 8 cm above settled height held for 2 continuous seconds. Keep the video and human outcome for each attempt; report descriptive counts out of four per checkpoint. Pool the **results** across PCs by scene and checkpoint ID. Never include test scenes in training. These are simulation trials; the real-trial statistical verdict has separate evidence requirements.
 
 ## Copy this to the second PC's AI
 
-> Use branch codex/teach-task-coach. Read coach/experiments/yam_sim_faas/grasp_training/README.md. You own seeds 201–216. Collect and audit those demos locally, fetch the first PC's committed varied batch, build and verify the pooled 40-demo dataset, and prepare it on my Dream account. Return its processed dataset ID and show me the 500-step constant-schedule quote. Check for an existing job before submission. Start a single job only when I approve its displayed charge. Report the checkpoint ID and preserve the held-out scenes.
+> Use branch codex/teach-task-coach. Read coach/experiments/yam_sim_faas/grasp_training/README.md. You own seeds 201–224. Collect and audit those demos locally, build and verify an independent 24-demo dataset containing only your seeds, and prepare it on my Dream account. Return its processed dataset ID and the 500-step constant-schedule quote. Check for an existing job before submission. Report the checkpoint ID and preserve the held-out scenes.

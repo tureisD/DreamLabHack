@@ -2,16 +2,16 @@
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import ZIP_STORED, ZipFile
+
 import mujoco
 import numpy as np
 import pyarrow.parquet as pq
+from batch import HOLDOUT, SEEDS
 from dream import datasets
-
-from batch import HOLDOUT, ROOT, SEEDS, verify
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from record_yam_demos import CONFIG, TASK, YamEnv
@@ -93,7 +93,7 @@ def audit(folder, info):
 
 def build(batch, raw_root, output):
     selected = {}
-    required = SEEDS[batch] - SEEDS["varied"] if batch == "pooled" else SEEDS[batch]
+    required = SEEDS[batch]
     for path in raw_root.glob("*/rollout.json"):
         info = json.loads(path.read_text(encoding="utf-8"))
         scene = info.get("simulation") or {}
@@ -117,9 +117,6 @@ def build(batch, raw_root, output):
         training = (scratch / "training").resolve()
         training.mkdir()
         sessions = []
-        if batch == "pooled":
-            verify("varied", training)
-            sessions.extend(json.loads((ROOT / "varied.json").read_text(encoding="utf-8"))["sessions"])
         for seed, (folder, info) in sorted(selected.items()):
             row = audit(folder, info)
             episode = training / f"apple-seed-{seed}"
