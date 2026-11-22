@@ -277,8 +277,10 @@ class FaaSStore:
 class DreamGateway:
     """The narrow public-SDK seam; replaceable with a fake in tests."""
 
-    def __init__(self) -> None:
-        self.client = DreamClient()
+    @property
+    def client(self) -> DreamClient:
+        # Reload the SDK credentials after the local account wizard saves a key.
+        return DreamClient()
 
     def embodiments(self) -> list[Any]:
         return self.client.get_embodiments()

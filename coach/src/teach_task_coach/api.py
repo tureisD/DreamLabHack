@@ -16,6 +16,20 @@ from dreamlab.contracts import EvaluationReport as StatisticalReport
 from dreamlab.contracts import EvaluationRequest as StatisticalRequest
 from dreamlab.evaluation.engine import StatisticalEvaluator
 from dreamlab.evaluation.methods.planning import plan_fixed_horizon
+from teach_task_coach.account import AccountConnect, AccountService, AccountStatus
+from teach_task_coach.assistant import (
+    AiConnect,
+    AiStatus,
+    AssistantAnswer,
+    AssistantQuestion,
+    ChatReply,
+    ChatRequest,
+    ai_status,
+    chat,
+    connect_ai,
+)
+from teach_task_coach.assistant import answer as assistant_answer
+from teach_task_coach.benchmark import analyze as analyze_coach_effect
 from teach_task_coach.consistency import ConsistencyReview, review_task
 from teach_task_coach.coverage import CoveragePlan, plan
 from teach_task_coach.demos import Demo, DemoError, DemoScanner, DemoStore
@@ -36,10 +50,12 @@ from teach_task_coach.faas import (
     FineTuneRequest,
 )
 from teach_task_coach.guidance import Guidance, guidance
+from teach_task_coach.impact import TaskFootprint, footprint
 from teach_task_coach.paired_audit import PairedReport, PairedRequest, evaluate_paired
 from teach_task_coach.paired_planning import PairedPlanEstimate, PairedPlanInput, plan_pairs
 from teach_task_coach.paired_snapshot import export_paired_snapshot
 from teach_task_coach.preflight import PreflightResult, PreflightService
+from teach_task_coach.repair import RepairReport, RepairRequest, RepairStore, RepairStudy
 from teach_task_coach.rollout_audit import IntentAudit, audit_rollout
 from teach_task_coach.scene import PlacementResult, SceneAdapter
 from teach_task_coach.station import StationRejected, StationUnavailable
@@ -93,6 +109,22 @@ class PairedSnapshotAttestation(BaseModel):
     resets_attested: bool
 
 
+class RepairAttestation(BaseModel):
+    reset_attested: bool
+
+
+class CoachEffectInput(BaseModel):
+    plan: dict
+    outcomes: list[dict]
+
+
+class RepairTriage(BaseModel):
+    task_id: str
+    action: Literal["fix_camera", "fix_station", "fix_setup", "measure_baseline", "compare_cheap_fix", "use_fix", "collect_demos"]
+    reason: str
+    evidence: list[str]
+
+
 class AbandonReason(BaseModel):
     reason: str = Field(min_length=1, max_length=1000)
 
@@ -130,7 +162,9 @@ def create_app(
     faas_store: FaaSStore | None = None,
     dream_gateway: DreamGateway | None = None,
     evaluation_store: EvaluationStore | None = None,
+    repair_store: RepairStore | None = None,
     scene_adapter: SceneAdapter | None = None,
+    account_service: AccountService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Teach it a task", version="0.1.0")
 
@@ -157,7 +191,42 @@ def create_app(
     faas = faas_store or FaaSStore(episodes.data_dir)
     dream = dream_gateway or DreamGateway()
     evaluations = evaluation_store or EvaluationStore(episodes.data_dir)
+    repairs = repair_store or RepairStore(episodes.data_dir)
     scene_fixture = scene_adapter or SceneAdapter()
+    account = account_service or AccountService()
+
+    @app.get("/api/account/status", response_model=AccountStatus)
+    def account_status() -> AccountStatus:
+        return account.status()
+
+    @app.post("/api/account/connect", response_model=AccountStatus)
+    def connect_account(value: AccountConnect) -> AccountStatus:
+        try:
+            return account.connect(value.api_key)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/assistant/ask", response_model=AssistantAnswer)
+    def ask_assistant(value: AssistantQuestion) -> AssistantAnswer:
+        return assistant_answer(value)
+
+    @app.get("/api/assistant/status", response_model=AiStatus)
+    def get_ai_status() -> AiStatus:
+        return ai_status()
+
+    @app.post("/api/assistant/connect", response_model=AiStatus)
+    def connect_ai_account(value: AiConnect) -> AiStatus:
+        try:
+            return connect_ai(value)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/assistant/chat", response_model=ChatReply)
+    def chat_with_coach(value: ChatRequest) -> ChatReply:
+        try:
+            return chat(value)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/preflight", response_model=PreflightResult)
     def get_preflight() -> PreflightResult:
@@ -166,6 +235,30 @@ def create_app(
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.post("/api/coach-effect/analyze")
+    def analyze_operator_study(value: CoachEffectInput) -> dict:
+        try:
+            return analyze_coach_effect(value.plan, value.outcomes)
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/coach-effect/synthetic-example")
+    def synthetic_operator_study() -> CoachEffectInput:
+        import json
+
+        root = files("teach_task_coach").joinpath("examples")
+        return CoachEffectInput(
+            plan=json.loads(root.joinpath("coach_effect_plan.synthetic.json").read_text(encoding="utf-8")),
+            outcomes=json.loads(root.joinpath("coach_effect_outcomes.synthetic.json").read_text(encoding="utf-8")),
+        )
+
+    @app.get("/api/tasks/{task_id}/footprint", response_model=TaskFootprint)
+    def task_footprint(task_id: str) -> TaskFootprint:
+        try:
+            return footprint(task_id, tasks, demos, faas, evaluations, episodes, repairs)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Task not found.") from exc
 
     @app.post("/api/statistical-evaluations/analyze", response_model=StatisticalReport)
     def analyze_independent_trials(value: StatisticalRequest) -> StatisticalReport:
@@ -288,13 +381,97 @@ def create_app(
     def get_guidance(task_id: str) -> Guidance:
         if tasks.get_task(task_id) is None:
             raise HTTPException(status_code=404, detail="Task not found.")
-        return guidance(task_id, tasks, episodes, demos, faas, evaluations)
+        return guidance(task_id, tasks, episodes, demos, faas, evaluations, repairs)
 
     @app.get("/api/tasks/{task_id}/diagnosis", response_model=TaskDiagnosis)
     def get_diagnosis(task_id: str) -> TaskDiagnosis:
         if tasks.get_task(task_id) is None:
             raise HTTPException(status_code=404, detail="Task not found.")
         return diagnose(task_id, tasks, episodes)
+
+    @app.get("/api/tasks/{task_id}/repair/triage", response_model=RepairTriage)
+    def triage_repair(task_id: str) -> RepairTriage:
+        task = tasks.get_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        try:
+            status = preflight.station.status()
+        except StationUnavailable:
+            return RepairTriage(task_id=task_id, action="fix_station",
+                                reason="Robot station is unavailable; inspect it before spending on training.",
+                                evidence=["Station status request failed."])
+        cameras = status.get("cameras") or {}
+        if not cameras or any(age is None or age > 2 for age in cameras.values()):
+            return RepairTriage(task_id=task_id, action="fix_camera",
+                                reason="A camera feed is missing or stale; verify model inputs first.",
+                                evidence=[f"{name}: {age if age is not None else 'no frame'} s"
+                                          for name, age in cameras.items()] or ["No camera feeds reported."])
+        arms = status.get("arms") or {}
+        if not arms or not all(arms.values()) or status.get("last_error"):
+            return RepairTriage(task_id=task_id, action="fix_station",
+                                reason="Robot arm or station fault needs attention before testing a model.",
+                                evidence=[str(status.get("last_error") or arms)])
+        diagnosis = diagnose(task_id, tasks, episodes)
+        if diagnosis.setup_count:
+            return RepairTriage(task_id=task_id, action="fix_setup",
+                                reason="Recorded runs contain station or setup problems; inspect them first.",
+                                evidence=[f"{diagnosis.setup_count} affected runs."])
+        latest = repairs.list(task_id)
+        if latest:
+            report = repairs.report(latest[0], tasks, episodes)
+            if report.decision == "use_fix":
+                return RepairTriage(task_id=task_id, action="use_fix", reason=report.recommendation,
+                                    evidence=[f"{report.usable_pairs} paired repair trials; {report.input_sha256}."])
+            if report.decision == "consider_faas":
+                return RepairTriage(task_id=task_id, action="collect_demos", reason=report.recommendation,
+                                    evidence=[f"{report.usable_pairs} paired repair trials; {report.input_sha256}."])
+        labelled = [episodes.get(trial.episode_id) for trial in tasks.list_trials(task_id)
+                    if trial.status == "completed" and trial.episode_id]
+        if not any(episode and episode.success is False for episode in labelled):
+            return RepairTriage(task_id=task_id, action="measure_baseline",
+                                reason="Record and label baseline failures before choosing a repair.",
+                                evidence=[f"{len(labelled)} labelled baseline trials."])
+        return RepairTriage(task_id=task_id, action="compare_cheap_fix",
+                            reason="Test a prompt or setup change on matched scenes before buying a fine-tune.",
+                            evidence=[f"{sum(episode.success is False for episode in labelled if episode)} baseline failures."])
+
+    @app.post("/api/tasks/{task_id}/repair-studies", response_model=RepairStudy, status_code=201)
+    def create_repair_study(task_id: str, value: RepairRequest) -> RepairStudy:
+        try:
+            return repairs.create(task_id, value, tasks)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Task not found.") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/tasks/{task_id}/repair-studies", response_model=list[RepairStudy])
+    def list_repair_studies(task_id: str) -> list[RepairStudy]:
+        if tasks.get_task(task_id) is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        return repairs.list(task_id)
+
+    @app.get("/api/repair-studies/{study_id}/trials", response_model=list[Trial])
+    def list_repair_trials(study_id: str) -> list[Trial]:
+        if repairs.get(study_id) is None:
+            raise HTTPException(status_code=404, detail="Repair study not found.")
+        return tasks.list_repair_trials(study_id)
+
+    @app.get("/api/repair-studies/{study_id}/report", response_model=RepairReport)
+    def get_repair_report(study_id: str) -> RepairReport:
+        study = repairs.get(study_id)
+        if study is None:
+            raise HTTPException(status_code=404, detail="Repair study not found.")
+        return repairs.report(study, tasks, episodes)
+
+    @app.post("/api/repair-studies/{study_id}/audit", response_model=RepairReport)
+    def audit_repair(study_id: str, value: RepairAttestation) -> RepairReport:
+        study = repairs.get(study_id)
+        if study is None:
+            raise HTTPException(status_code=404, detail="Repair study not found.")
+        try:
+            return repairs.save_audit(study, tasks, episodes, reset_attested=value.reset_attested)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/tasks/{task_id}/consistency", response_model=ConsistencyReview)
     def get_consistency(task_id: str) -> ConsistencyReview:

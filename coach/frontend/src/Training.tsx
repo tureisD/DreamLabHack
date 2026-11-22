@@ -135,7 +135,7 @@ export default function Training({ onEvaluate }: { onEvaluate?: () => void }) {
       <label>Registered embodiment<select value={embodiment} onChange={(event) => setEmbodiment(event.target.value)}>{bodies.map((body) => <option key={body.name} value={body.name}>{body.name} · {body.video_roles.join(', ')}</option>)}</select></label>
       <button disabled={busy || !taskId || !embodiment} onClick={() => void createDataset()}>Create dataset version</button>
     </div>
-    <p className="hint">Run <code>teach-task-coach worker</code> alongside the API. Statuses update here every 10 seconds. Your Dream credentials stay in the backend.</p>
+    <p className="hint">The local server validates datasets and checks training status in the background. Statuses update here every 10 seconds. Your Dream credentials stay in the backend.</p>
     <div className="training-controls card">
       <label>Steps<input type="number" min={500} max={10000} step={100} value={steps} onChange={(event) => setSteps(Number(event.target.value))} /></label>
       <label>Learning-rate schedule<select value={schedule} onChange={(event) => setSchedule(event.target.value as 'cosine' | 'constant')}><option value="cosine">Cosine · single-task specialization</option><option value="constant">Constant · supports later resume</option></select></label>

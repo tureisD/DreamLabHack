@@ -6,6 +6,9 @@ import Training from './Training';
 import EvaluationPage from './Evaluation';
 import StatisticalAudit from './StatisticalAudit';
 import Guide from './Guide';
+import Repair from './Repair';
+import CoachEffect from './CoachEffect';
+import CoachChat from './CoachChat';
 
 type Check = { state: 'ready' | 'blocked' | 'unavailable'; message: string };
 type Model = {
@@ -113,12 +116,14 @@ function Preflight() {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<'guide' | 'preflight' | 'runs' | 'tasks' | 'demos' | 'training' | 'evaluation' | 'statistical'>('guide');
+  const [screen, setScreen] = useState<'start' | 'guide' | 'repair' | 'preflight' | 'runs' | 'tasks' | 'demos' | 'training' | 'evaluation' | 'statistical' | 'effect'>('start');
   return (
     <>
       <nav className="top-nav" aria-label="Coach sections">
         <span className="brand">Teach it a task</span>
+        <button className={screen === 'start' ? 'nav-active' : ''} onClick={() => setScreen('start')}>Start here</button>
         <button className={screen === 'guide' ? 'nav-active' : ''} onClick={() => setScreen('guide')}>Guide</button>
+        <button className={screen === 'repair' ? 'nav-active' : ''} onClick={() => setScreen('repair')}>Repair first</button>
         <button className={screen === 'preflight' ? 'nav-active' : ''} onClick={() => setScreen('preflight')}>Preflight</button>
         <button className={screen === 'tasks' ? 'nav-active' : ''} onClick={() => setScreen('tasks')}>Tasks</button>
         <button className={screen === 'runs' ? 'nav-active' : ''} onClick={() => setScreen('runs')}>Run review</button>
@@ -126,8 +131,9 @@ export default function App() {
         <button className={screen === 'training' ? 'nav-active' : ''} onClick={() => setScreen('training')}>Training</button>
         <button className={screen === 'evaluation' ? 'nav-active' : ''} onClick={() => setScreen('evaluation')}>Evaluation</button>
         <button className={screen === 'statistical' ? 'nav-active' : ''} onClick={() => setScreen('statistical')}>Statistical audit</button>
+        <button className={screen === 'effect' ? 'nav-active' : ''} onClick={() => setScreen('effect')}>Coach effect</button>
       </nav>
-      {screen === 'guide' ? <Guide /> : screen === 'preflight' ? <Preflight /> : screen === 'tasks' ? <Tasks /> : screen === 'demos' ? <Demos /> : screen === 'training' ? <Training onEvaluate={() => setScreen('evaluation')} /> : screen === 'evaluation' ? <EvaluationPage /> : screen === 'statistical' ? <StatisticalAudit /> : <Runs />}
+      {screen === 'start' ? <CoachChat open={setScreen} /> : screen === 'guide' ? <Guide onRepair={() => setScreen('repair')} /> : screen === 'repair' ? <Repair onDemos={() => setScreen('demos')} onTraining={() => setScreen('training')} /> : screen === 'preflight' ? <Preflight /> : screen === 'tasks' ? <Tasks /> : screen === 'demos' ? <Demos /> : screen === 'training' ? <Training onEvaluate={() => setScreen('evaluation')} /> : screen === 'evaluation' ? <EvaluationPage /> : screen === 'statistical' ? <StatisticalAudit /> : screen === 'effect' ? <CoachEffect /> : <Runs />}
     </>
   );
 }

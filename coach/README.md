@@ -2,13 +2,21 @@
 
 A local companion for the [Dream Labs public library](../dream_library/README.md). It checks the robot station, reviews saved rollouts and demonstrations, submits a Dream FaaS job, and guides a paired before/after evaluation. Robot runs and paid fine-tuning require explicit operator actions.
 
+**Start here** opens a conversational AI coach. It asks one question at a time about your task and hardware, reads the current local workflow state, and points you to the next action. When it has enough task detail, it proposes a task that you explicitly confirm before saving. It can guide account setup, preflight, baseline trials, demonstrations, FaaS, and held-out evaluation. It does not itself start a robot or paid job. To connect Dream, sign in at [Dream Labs platform](https://platform.dreamlabs.ai/), create an API key in the account UI, and enter it in the masked field inside the chat. The backend validates it with the Dream SDK and writes it to the SDK credentials file (`DREAM_CREDENTIALS` or `~/.dreamlabs/credentials`), never browser storage. A `DREAM_API_KEY` environment variable overrides that file; remove the override and restart before using the connect field. The key file is local plaintext, with owner-only file mode requested when written; protect your OS account and do not commit it.
+
+The chat requires an OpenAI API key, separate from the Dream key. Set `OPENAI_API_KEY` on the coach server or enter the key in the masked AI connection field. A key entered in the UI is validated and held only in server memory until restart. The AI sees your chat messages and a compact account/task/progress snapshot; Dream credentials, rollouts, and videos are excluded. The frontend blocks recognized API keys in ordinary chat. Conversation text is retained in this browser tab's session storage so you can leave for another screen and come back. If the AI key is absent, the app asks you to connect AI rather than presenting fixed guidance as an agent. The older `/api/assistant/ask` helper remains available for compatibility.
+
 See [why this coach matters](WHY_THIS_COACH.md) for the operator decision loop, the measured apple checkpoint comparison, and the limits of the time and cost claims.
+
+The [repair-first path](REPAIR_FIRST.md) compares a prompt or setup change on matched diagnostic scenes before a paid fine-tune. It recommends keeping the cheap fix only when the frozen gain bound clears and all planned outcomes are reviewed.
 
 The [Statistical audit](STATISTICAL_AUDIT.md) adds the separate evaluator from the team's `codex/stat-eval-implementation` branch for prospective independent real-world trials. It does not replace the paired Evaluation tab or reclassify simulator rollouts as independent robot evidence.
 
 The [matched-scene evidence path](PAIRED_EVIDENCE.md) adds the authoritative paired audit and a one-click replay of the measured 500-step apple comparison. Simulator outcomes remain descriptive; eligible physical pairs use a separate conservative interval. The [coach-effectiveness benchmark](benchmark/README.md) is a prospective study template; its included results are synthetic, not evidence of savings.
 
 For the apple experiment, use the [two-account training handoff and verified datasets](experiments/yam_sim_faas/grasp_training/README.md).
+
+For robot-free collection targeted at fresh model failures, use [failure-conditioned YAM demonstrations](experiments/yam_sim_faas/FAILURE_CONDITIONED_SIM.md). Its local collector writes reviewable LeRobot episodes into the coach Demos folder and refuses the reserved evaluation seeds. It has not yet been compared with random collection under equal FaaS budget.
 
 ## Run locally
 
@@ -30,7 +38,7 @@ npm run dev
 
 Open the URL printed by Vite. The frontend proxies `/api` to `127.0.0.1:8765`.
 
-For one local web server, run `npm run build` in `frontend/` and open `http://127.0.0.1:8765` after starting `teach-task-coach serve`. Once you create a dataset version, start `uv run teach-task-coach worker` in another terminal. Only one worker can run against a data directory.
+For one local web server, run `npm run build` in `frontend/` and open `http://127.0.0.1:8765` after starting `teach-task-coach serve`. The local server starts the dataset and FaaS status worker automatically. Use `teach-task-coach serve --no-worker` if you run `teach-task-coach worker` separately. Only one worker can run against a data directory.
 
 The coach connects to the Dream station at `http://127.0.0.1:8091` by default. Set `COACH_STATION_URL` if the station uses another local address. The Dream client uses its normal `DREAM_API_KEY`, `DREAM_CREDENTIALS`, or `~/.dreamlabs/credentials` configuration; no credential is stored in this repo.
 
