@@ -42,12 +42,18 @@ class CoachDatabase:
                     success INTEGER,
                     failure_stage TEXT,
                     note TEXT,
-                    reviewer_id TEXT
+                    reviewer_id TEXT,
+                    interventions INTEGER NOT NULL DEFAULT 0,
+                    first_response_s REAL
                 )"""
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(episodes)")}
             if "reviewer_id" not in columns:
                 connection.execute("ALTER TABLE episodes ADD COLUMN reviewer_id TEXT")
+            if "interventions" not in columns:
+                connection.execute("ALTER TABLE episodes ADD COLUMN interventions INTEGER NOT NULL DEFAULT 0")
+            if "first_response_s" not in columns:
+                connection.execute("ALTER TABLE episodes ADD COLUMN first_response_s REAL")
             yield connection
             connection.commit()
         finally:
@@ -60,7 +66,9 @@ class EpisodeStore:
         self.data_dir = self.db.data_dir
 
     def upsert(self, episode: EpisodeSummary) -> None:
-        payload = episode.model_dump(exclude={"success", "failure_stage", "note", "reviewer_id"})
+        payload = episode.model_dump(exclude={
+            "success", "failure_stage", "note", "reviewer_id", "interventions", "first_response_s",
+        })
         with self.db.connect() as connection:
             connection.execute(
                 """INSERT INTO episodes (id, source_path, summary_json)
@@ -84,11 +92,15 @@ class EpisodeStore:
     def label(
         self, episode_id: str, success: bool | None, failure_stage: str | None, note: str | None,
         reviewer_id: str | None = None,
+        interventions: int = 0,
+        first_response_s: float | None = None,
     ) -> EpisodeSummary | None:
         with self.db.connect() as connection:
             cursor = connection.execute(
-                "UPDATE episodes SET success = ?, failure_stage = ?, note = ?, reviewer_id = ? WHERE id = ?",
-                (None if success is None else int(success), failure_stage, note, reviewer_id, episode_id),
+                """UPDATE episodes SET success = ?, failure_stage = ?, note = ?, reviewer_id = ?,
+                   interventions = ?, first_response_s = ? WHERE id = ?""",
+                (None if success is None else int(success), failure_stage, note, reviewer_id,
+                 interventions, first_response_s, episode_id),
             )
             changed = cursor.rowcount
         return self.get(episode_id) if changed else None
@@ -102,5 +114,7 @@ class EpisodeStore:
                 "failure_stage": row["failure_stage"],
                 "note": row["note"],
                 "reviewer_id": row["reviewer_id"],
+                "interventions": row["interventions"],
+                "first_response_s": row["first_response_s"],
             }
         )

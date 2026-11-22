@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import math
 import random
 import sqlite3
 import uuid
@@ -18,8 +17,9 @@ from teach_task_coach.tasks import HeldoutScene, TaskStore, Trial
 
 class EvaluationRequest(BaseModel):
     fine_tune_job_id: str
-    minimum_effect: float = Field(default=0.15, ge=0, le=1)
+    minimum_effect: float = Field(default=0.15, ge=0, lt=1, allow_inf_nan=False)
     auto_promote: bool = False
+    planned_pairs: int = Field(default=30, ge=1, le=512)
 
 
 class Evaluation(BaseModel):
@@ -31,6 +31,7 @@ class Evaluation(BaseModel):
     minimum_effect: float
     created_at: str
     auto_promote: bool = False
+    planned_pairs: int = 30
 
 
 class EvaluationReport(BaseModel):
@@ -47,29 +48,21 @@ class EvaluationReport(BaseModel):
     exact_p_value: float | None
     baseline_safety_stops: int
     candidate_safety_stops: int
-    decision: Literal["improved", "inconclusive", "worse"]
+    decision: Literal["improved", "inconclusive", "worse", "not_evaluable"]
     reason: str
+    problems: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    input_sha256: str | None = None
+    baseline_interventions: int = 0
+    candidate_interventions: int = 0
+    baseline_mean_duration_s: float | None = None
+    candidate_mean_duration_s: float | None = None
+    baseline_mean_first_response_s: float | None = None
+    candidate_mean_first_response_s: float | None = None
 
 
 def _now() -> str:
     return dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
-
-
-def _paired_interval(differences: list[int], seed: int) -> tuple[float, float]:
-    rng = random.Random(seed)
-    n = len(differences)
-    samples = sorted(
-        sum(differences[rng.randrange(n)] for _ in range(n)) / n for _ in range(10000)
-    )
-    return samples[249], samples[9749]
-
-
-def _exact_mcnemar(candidate_only: int, baseline_only: int) -> float:
-    discordant = candidate_only + baseline_only
-    if discordant == 0:
-        return 1.0
-    tail = sum(math.comb(discordant, k) for k in range(min(candidate_only, baseline_only) + 1))
-    return min(1.0, 2 * tail / (2**discordant))
 
 
 class EvaluationStore:
@@ -87,12 +80,24 @@ class EvaluationStore:
                 candidate_checkpoint TEXT NOT NULL,
                 minimum_effect REAL NOT NULL,
                 created_at TEXT NOT NULL,
-                auto_promote INTEGER NOT NULL DEFAULT 0
+                auto_promote INTEGER NOT NULL DEFAULT 0,
+                planned_pairs INTEGER NOT NULL DEFAULT 30
             )"""
         )
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(evaluations)")}
         if "auto_promote" not in columns:
             connection.execute("ALTER TABLE evaluations ADD COLUMN auto_promote INTEGER NOT NULL DEFAULT 0")
+        if "planned_pairs" not in columns:
+            connection.execute("ALTER TABLE evaluations ADD COLUMN planned_pairs INTEGER NOT NULL DEFAULT 30")
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS evaluation_audits (
+                id TEXT PRIMARY KEY,
+                evaluation_id TEXT NOT NULL REFERENCES evaluations(id),
+                snapshot_json TEXT NOT NULL,
+                report_json TEXT NOT NULL,
+                audited_at TEXT NOT NULL
+            )"""
+        )
 
     def create(
         self,
@@ -102,13 +107,12 @@ class EvaluationStore:
         minimum_effect: float,
         tasks: TaskStore,
         auto_promote: bool = False,
+        planned_pairs: int = 30,
     ) -> Evaluation:
         task = tasks.get_task(task_id)
         if task is None:
             raise KeyError(task_id)
-        scenes = tasks.heldout_scenes(task_id)
-        if len(scenes) != 30:
-            raise ValueError("This task has no predeclared 30-scene evaluation manifest; create a new task.")
+        scenes = tasks.ensure_heldout_scenes(task_id, planned_pairs)
         if candidate_checkpoint == task.baseline_checkpoint:
             raise ValueError("Candidate and baseline checkpoints must differ.")
         evaluation = Evaluation(
@@ -120,10 +124,11 @@ class EvaluationStore:
             minimum_effect=minimum_effect,
             created_at=_now(),
             auto_promote=auto_promote,
+            planned_pairs=planned_pairs,
         )
         rng = random.Random(int(evaluation.id[:16], 16))
         rng.shuffle(scenes)
-        candidate_first = [True] * 15 + [False] * 15
+        candidate_first = [True] * (planned_pairs // 2) + [False] * (planned_pairs - planned_pairs // 2)
         rng.shuffle(candidate_first)
         with self.db.connect() as connection:
             tasks._schema(connection)
@@ -131,11 +136,11 @@ class EvaluationStore:
             connection.execute(
                 """INSERT INTO evaluations
                    (id, task_id, fine_tune_job_id, baseline_checkpoint, candidate_checkpoint,
-                    minimum_effect, created_at, auto_promote) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    minimum_effect, created_at, auto_promote, planned_pairs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     evaluation.id, task_id, fine_tune_job_id,
                     evaluation.baseline_checkpoint, candidate_checkpoint,
-                    minimum_effect, evaluation.created_at, int(auto_promote),
+                    minimum_effect, evaluation.created_at, int(auto_promote), planned_pairs,
                 ),
             )
             sequence = 0
@@ -178,80 +183,99 @@ class EvaluationStore:
             ).fetchall()
         return [Evaluation.model_validate(dict(row)) for row in rows]
 
+    def audit(
+        self, evaluation: Evaluation, tasks: TaskStore, episodes: EpisodeStore,
+        *, heldout_attested: bool, resets_attested: bool,
+    ):
+        """Append an auditable snapshot; never start or promote a robot run."""
+        from teach_task_coach.paired_audit import evaluate_paired
+        from teach_task_coach.paired_snapshot import export_paired_snapshot
+
+        if not heldout_attested or not resets_attested:
+            raise ValueError("Confirm training holdout and scene resets before final audit.")
+        snapshot = export_paired_snapshot(
+            evaluation, tasks, episodes,
+            heldout_attested=heldout_attested, resets_attested=resets_attested,
+        )
+        report = evaluate_paired(snapshot)
+        with self.db.connect() as connection:
+            self._schema(connection)
+            connection.execute(
+                "INSERT INTO evaluation_audits VALUES (?, ?, ?, ?, ?)",
+                (uuid.uuid4().hex, evaluation.id, snapshot.model_dump_json(),
+                 report.model_dump_json(), _now()),
+            )
+        return report
+
+    def latest_audit(self, evaluation_id: str):
+        from teach_task_coach.paired_audit import PairedReport, PairedRequest
+
+        with self.db.connect() as connection:
+            self._schema(connection)
+            row = connection.execute(
+                """SELECT snapshot_json, report_json FROM evaluation_audits
+                   WHERE evaluation_id = ? ORDER BY rowid DESC LIMIT 1""",
+                (evaluation_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return (PairedRequest.model_validate_json(row["snapshot_json"]),
+                PairedReport.model_validate_json(row["report_json"]))
+
     def report(
         self, evaluation: Evaluation, tasks: TaskStore, episodes: EpisodeStore
     ) -> EvaluationReport:
-        trials = tasks.list_evaluation_trials(evaluation.id)
-        pairs: dict[int, dict[str, Trial]] = {}
-        safety = {"base": 0, "candidate": 0}
-        for trial in trials:
-            if trial.scene_index is None:
-                continue
-            role = "candidate" if trial.checkpoint == evaluation.candidate_checkpoint else "base"
-            pairs.setdefault(trial.scene_index, {})[role] = trial
-            if trial.episode_id:
-                episode = episodes.get(trial.episode_id)
-                if episode is not None and episode.stop_reason == "SafetyStop":
-                    safety[role] += 1
+        from teach_task_coach.paired_audit import evaluate_paired
+        from teach_task_coach.paired_snapshot import export_paired_snapshot
 
-        outcomes: list[tuple[bool, bool]] = []
-        for pair in pairs.values():
-            if "base" not in pair or "candidate" not in pair:
-                continue
-            base, candidate = pair["base"], pair["candidate"]
-            if base.status != "completed" or candidate.status != "completed":
-                continue
-            left = episodes.get(base.episode_id) if base.episode_id else None
-            right = episodes.get(candidate.episode_id) if candidate.episode_id else None
-            if (
-                left is None or right is None or left.status != "complete" or right.status != "complete"
-                or left.stop_reason == "ModelReady" or right.stop_reason == "ModelReady"
-                or left.success is None or right.success is None
-            ):
-                continue
-            outcomes.append((left.success, right.success))
-
-        n = len(outcomes)
-        baseline_successes = sum(base for base, _ in outcomes)
-        candidate_successes = sum(candidate for _, candidate in outcomes)
-        candidate_only = sum(not base and candidate for base, candidate in outcomes)
-        baseline_only = sum(base and not candidate for base, candidate in outcomes)
-        difference = None
-        low = high = p_value = None
-        decision: Literal["improved", "inconclusive", "worse"] = "inconclusive"
-        reason = f"{n} of 30 held-out setup pairs have usable labels."
-        if n:
-            changes = [int(candidate) - int(base) for base, candidate in outcomes]
-            difference = sum(changes) / n
-            low, high = _paired_interval(changes, int(evaluation.id[:16], 16))
-            p_value = _exact_mcnemar(candidate_only, baseline_only)
-        if n == 30 and difference is not None and low is not None and high is not None and p_value is not None:
-            if safety["candidate"] > safety["base"]:
-                reason = "Candidate had more safety stops than baseline; review them before switching."
-            elif difference >= evaluation.minimum_effect and low > 0 and p_value < 0.05:
-                decision = "improved"
-                reason = "Candidate cleared the predeclared improvement threshold on held-out paired trials."
-            elif difference < 0 and high < 0 and p_value < 0.05:
-                decision = "worse"
-                reason = "Candidate performed worse on the held-out paired trials."
-            else:
-                reason = "The measured difference does not clear the predeclared evidence threshold."
+        saved = self.latest_audit(evaluation.id)
+        if saved is None:
+            snapshot = export_paired_snapshot(
+                evaluation, tasks, episodes, heldout_attested=False, resets_attested=False,
+            )
+            audit = evaluate_paired(snapshot)
+            problems = [*audit.problems, "No reviewed paired audit has been saved."]
+        else:
+            original, stored_report = saved
+            snapshot = export_paired_snapshot(
+                evaluation, tasks, episodes,
+                heldout_attested=original.plan.heldout_attested,
+                resets_attested=original.plan.resets_attested,
+            )
+            audit = evaluate_paired(snapshot)
+            problems = list(audit.problems)
+            if audit.input_sha256 != stored_report.input_sha256:
+                problems.append("Evidence changed since the saved audit; run the audit again.")
+        decision = audit.decision if not problems else "not_evaluable"
+        interval = audit.difference_interval if decision != "not_evaluable" else None
         return EvaluationReport(
             evaluation_id=evaluation.id,
-            target_pairs=30,
-            usable_pairs=n,
-            baseline_successes=baseline_successes,
-            candidate_successes=candidate_successes,
-            baseline_only=baseline_only,
-            candidate_only=candidate_only,
-            paired_difference=difference,
-            ci_low=low,
-            ci_high=high,
-            exact_p_value=p_value,
-            baseline_safety_stops=safety["base"],
-            candidate_safety_stops=safety["candidate"],
-            decision=decision,
-            reason=reason,
+            target_pairs=evaluation.planned_pairs,
+            usable_pairs=audit.usable_pairs,
+            baseline_successes=audit.baseline_successes,
+            candidate_successes=audit.candidate_successes,
+            baseline_only=audit.baseline_only,
+            candidate_only=audit.candidate_only,
+            paired_difference=audit.observed_difference if interval else None,
+            ci_low=interval[0] if interval else None,
+            ci_high=interval[1] if interval else None,
+            exact_p_value=None,
+            baseline_safety_stops=audit.baseline_safety_stops,
+            candidate_safety_stops=audit.candidate_safety_stops,
+            decision="worse" if decision == "regressed" else decision,
+            reason=("Saved audit verified a useful improvement." if decision == "improved"
+                    else "Saved audit found regression." if decision == "regressed"
+                    else "The evidence does not clear the predeclared improvement threshold."
+                    if decision == "inconclusive" else "; ".join(problems)),
+            problems=problems,
+            warnings=list(audit.warnings),
+            input_sha256=audit.input_sha256 if saved else None,
+            baseline_interventions=audit.baseline_interventions,
+            candidate_interventions=audit.candidate_interventions,
+            baseline_mean_duration_s=audit.baseline_mean_duration_s,
+            candidate_mean_duration_s=audit.candidate_mean_duration_s,
+            baseline_mean_first_response_s=audit.baseline_mean_first_response_s,
+            candidate_mean_first_response_s=audit.candidate_mean_first_response_s,
         )
 
 

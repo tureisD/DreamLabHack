@@ -172,6 +172,31 @@ class TaskStore:
             ).fetchall()
         return [HeldoutScene.model_validate(dict(row)) for row in rows]
 
+    def ensure_heldout_scenes(self, task_id: str, count: int) -> list[HeldoutScene]:
+        """Extend a task's deterministic reserved scene manifest before evaluation starts."""
+        if not 1 <= count <= 512:
+            raise ValueError("A comparison needs between 1 and 512 held-out scenes.")
+        if self.get_task(task_id) is None:
+            raise KeyError(task_id)
+        existing = self.heldout_scenes(task_id)
+        if len(existing) >= count:
+            return existing[:count]
+        with self.db.connect() as connection:
+            self._schema(connection)
+            rng = random.Random(int(task_id[:16], 16))
+            for scene_index in range(count):
+                cell = scene_index % 9
+                column, row = cell % 3, cell // 3
+                x = round((column + 0.2 + rng.random() * 0.6) / 3, 4)
+                y = round((row + 0.2 + rng.random() * 0.6) / 3, 4)
+                angle = rng.choice((0, 90, 180, 270))
+                if scene_index >= len(existing):
+                    connection.execute(
+                        "INSERT INTO heldout_scenes VALUES (?, ?, ?, ?, ?, ?)",
+                        (task_id, scene_index, cell, x, y, angle),
+                    )
+        return self.heldout_scenes(task_id)[:count]
+
     def list_tasks(self) -> list[Task]:
         with self.db.connect() as connection:
             self._schema(connection)

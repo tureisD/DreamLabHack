@@ -57,6 +57,8 @@ class EpisodeSummary(BaseModel):
     failure_stage: str | None = None
     note: str | None = None
     reviewer_id: str | None = None
+    interventions: int = 0
+    first_response_s: float | None = None
 
 
 def episode_id(path: Path) -> str:

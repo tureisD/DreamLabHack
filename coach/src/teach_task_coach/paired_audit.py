@@ -30,6 +30,8 @@ class PairPlan(FrozenModel):
     created_at: AwareDatetime
     required_model_rows: int = Field(default=0, ge=0)
     simulator_hold_threshold_m: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    heldout_attested: bool = False
+    resets_attested: bool = False
 
     @model_validator(mode="after")
     def distinct_checkpoints(self) -> PairPlan:
@@ -47,6 +49,7 @@ class PairAttempt(FrozenModel):
     episode_id: str = Field(min_length=1)
     checkpoint_id: str = Field(min_length=1)
     source_uri: str = Field(min_length=1)
+    source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     session_id: str = Field(min_length=1)
     recorded_at: AwareDatetime | None = None
     outcome: Literal["success", "failure", "unknown", "invalid"]
@@ -54,6 +57,9 @@ class PairAttempt(FrozenModel):
     human_verified: bool = False
     reviewer_id: str | None = None
     safety_stops: int = Field(default=0, ge=0)
+    interventions: int = Field(default=0, ge=0)
+    duration_s: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    first_response_s: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     model_action_rows: int | None = Field(default=None, ge=0)
     held_lift_m: float | None = Field(default=None, allow_inf_nan=False)
     peak_lift_m: float | None = Field(default=None, allow_inf_nan=False)
@@ -113,6 +119,12 @@ class PairedReport(FrozenModel):
     candidate_only: int
     baseline_safety_stops: int
     candidate_safety_stops: int
+    baseline_interventions: int
+    candidate_interventions: int
+    baseline_mean_duration_s: float | None
+    candidate_mean_duration_s: float | None
+    baseline_mean_first_response_s: float | None
+    candidate_mean_first_response_s: float | None
     observed_difference: float | None
     difference_interval: tuple[float, float] | None
     interval_method: str | None
@@ -144,8 +156,12 @@ def evaluate_paired(request: PairedRequest) -> PairedReport:
     if any(trial.outcome not in {"success", "failure"} for trial in attempts):
         problems.add("Unknown or invalid attempts cannot be dropped from the comparison.")
     if plan.collection_mode == "prospective":
+        if not plan.heldout_attested or not plan.resets_attested:
+            problems.add("Training holdout and scene reset attestations are required.")
         if any(not trial.human_verified or not trial.reviewer_id for trial in attempts):
             problems.add("Physical outcomes need a named human reviewer.")
+        if any(trial.source_sha256 is None for trial in attempts):
+            problems.add("Physical attempts need a digest of their recorded rollout metadata.")
     else:
         for trial in attempts:
             if (trial.height_source != "recorded" or trial.held_lift_m is None or
@@ -199,6 +215,12 @@ def evaluate_paired(request: PairedRequest) -> PairedReport:
     )
     if plan.collection_mode == "simulation":
         warnings += ("Simulator results are descriptive and cannot establish real-robot performance.",)
+    def mean_metric(role: str, field: str) -> float | None:
+        values = [value for pair in request.pairs
+                  if (trial := getattr(pair, role)) is not None
+                  if (value := getattr(trial, field)) is not None]
+        return sum(values) / len(values) if values else None
+
     return PairedReport(
         evaluation_id=plan.evaluation_id, decision=decision,
         planned_pairs=plan.planned_pairs, submitted_pairs=len(request.pairs), usable_pairs=len(usable),
@@ -210,6 +232,14 @@ def evaluate_paired(request: PairedRequest) -> PairedReport:
                                   if (trial := pair.baseline) is not None),
         candidate_safety_stops=sum(trial.safety_stops for pair in request.pairs
                                    if (trial := pair.candidate) is not None),
+        baseline_interventions=sum(trial.interventions for pair in request.pairs
+                                   if (trial := pair.baseline) is not None),
+        candidate_interventions=sum(trial.interventions for pair in request.pairs
+                                    if (trial := pair.candidate) is not None),
+        baseline_mean_duration_s=mean_metric("baseline", "duration_s"),
+        candidate_mean_duration_s=mean_metric("candidate", "duration_s"),
+        baseline_mean_first_response_s=mean_metric("baseline", "first_response_s"),
+        candidate_mean_first_response_s=mean_metric("candidate", "first_response_s"),
         observed_difference=difference, difference_interval=interval, interval_method=method,
         input_sha256=hashlib.sha256(payload).hexdigest(), problems=tuple(sorted(problems)),
         warnings=warnings, pairs=request.pairs,

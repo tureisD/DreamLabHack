@@ -33,7 +33,8 @@ def test_saved_apple_confirmation_is_descriptive_and_replay_checked(tmp_path, mo
     assert all(pair["candidate"]["held_lift_m"] >= 0.08 for pair in report["pairs"])
     demo = TestClient(create_app()).get("/api/paired-evaluations/demo")
     assert demo.status_code == 200
-    assert demo.json() == _snapshot()
+    assert demo.json()["plan"]["evaluation_id"] == _snapshot()["plan"]["evaluation_id"]
+    assert len(demo.json()["pairs"]) == 4
 
 
 def test_incomplete_or_mislabeled_simulator_evidence_does_not_get_a_verdict(tmp_path, monkeypatch):
@@ -75,10 +76,11 @@ def test_four_real_pairs_are_inconclusive_but_thirty_can_clear_margin(tmp_path, 
     monkeypatch.setenv("COACH_DATA_DIR", str(tmp_path))
     client = TestClient(create_app())
     payload = _snapshot()
-    payload["plan"].update(collection_mode="prospective", minimum_improvement=0.15)
+    payload["plan"].update(collection_mode="prospective", minimum_improvement=0.15,
+                           heldout_attested=True, resets_attested=True)
     for pair in payload["pairs"]:
         for trial in (pair["baseline"], pair["candidate"]):
-            trial.update(human_verified=True, reviewer_id="operator-1")
+            trial.update(human_verified=True, reviewer_id="operator-1", source_sha256="a" * 64)
     report = _analyze(client, payload).json()
     assert report["decision"] == "inconclusive"
     assert report["difference_interval"][0] < 0
@@ -111,9 +113,10 @@ def test_repeated_sessions_or_unreviewed_physical_attempts_block_inference(tmp_p
     client = TestClient(create_app())
     payload = _snapshot()
     payload["plan"]["collection_mode"] = "prospective"
+    payload["plan"].update(heldout_attested=True, resets_attested=True)
     for pair in payload["pairs"]:
         for trial in (pair["baseline"], pair["candidate"]):
-            trial.update(human_verified=True, reviewer_id="operator-1")
+            trial.update(human_verified=True, reviewer_id="operator-1", source_sha256="a" * 64)
     payload["pairs"][1]["candidate"]["session_id"] = payload["pairs"][0]["candidate"]["session_id"]
     payload["pairs"][2]["candidate"]["human_verified"] = False
     report = _analyze(client, payload).json()

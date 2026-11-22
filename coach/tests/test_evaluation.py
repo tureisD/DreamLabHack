@@ -1,5 +1,6 @@
 import datetime as dt
 import json
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 from test_trials import FakeStation
@@ -123,18 +124,25 @@ def test_partial_rollout_can_be_abandoned_and_comparison_restarted(tmp_path):
     assert replacement.status_code == 201
 
 
-def populate_report(tasks, episodes, evaluation, base_results, candidate_results):
+def populate_report(tasks, episodes, evaluation, base_results, candidate_results, reviewed=False):
+    started = (dt.datetime.fromisoformat(evaluation.created_at) + dt.timedelta(seconds=1)).isoformat()
     for trial in tasks.list_evaluation_trials(evaluation.id):
         success = (candidate_results if trial.checkpoint == "candidate" else base_results)[trial.scene_index]
+        folder = tasks.db.data_dir / "rollouts" / trial.id
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "rollout.json").write_text(json.dumps({
+            "task": "put block in bin", "checkpoint": trial.checkpoint,
+            "started_at_utc": started, "status": "complete",
+        }), encoding="utf-8")
         episode = EpisodeSummary(
-            id=trial.id, source_path=f"/test/{trial.id}", status="complete",
+            id=trial.id, source_path=str(folder), status="complete",
             task="put block in bin", checkpoint=trial.checkpoint,
-            body=None, robot_name=None, started_at_utc=None, frames=100, fps=20,
+            body=None, robot_name=None, started_at_utc=started, frames=100, fps=20,
             duration_s=5, stop_reason="stopped", error=None, stalls=None, clamps=None,
             videos={}, findings=[], events=[], success=success,
         )
         episodes.upsert(episode)
-        episodes.label(episode.id, success, None, None)
+        episodes.label(episode.id, success, None, None, "operator-1" if reviewed else None)
         tasks.transition(trial.id, "planned", "completed", episode_id=episode.id)
 
 
@@ -174,6 +182,56 @@ def test_paired_snapshot_preserves_incomplete_and_requires_review_provenance(tmp
     assert report["difference_interval"][0] > 0.15
 
 
+def test_variable_scene_budget_and_paired_planner(tmp_path):
+    client, tasks, _episodes, _evaluations, task, job, _station = setup_comparison(tmp_path)
+    estimate = client.post("/api/paired-evaluations/plan", json={
+        "expected_gain": 0.8, "minimum_improvement": 0.15,
+        "max_pairs": 64, "minutes_per_pair": 12,
+    })
+    assert estimate.status_code == 200
+    assert estimate.json()["feasible"]
+    assert estimate.json()["recommended_pairs"] == 18
+    created = client.post(f"/api/tasks/{task.id}/evaluations", json={
+        "fine_tune_job_id": job.id, "planned_pairs": 40,
+    })
+    assert created.status_code == 201
+    assert created.json()["planned_pairs"] == 40
+    assert len(tasks.heldout_scenes(task.id)) == 40
+    trials = client.get(f"/api/evaluations/{created.json()['id']}/trials").json()
+    assert len(trials) == 80
+    assert sum(trial["checkpoint"] == "candidate" for trial in trials[::2]) == 20
+    assert client.post("/api/paired-evaluations/plan", json={
+        "expected_gain": 0.4, "minimum_improvement": 0.15, "max_pairs": 40,
+    }).json()["feasible"] is False
+
+
+def test_saved_audit_invalidates_when_recorded_metadata_changes(tmp_path):
+    client, tasks, episodes, evaluations, task, job, _station = setup_comparison(tmp_path)
+    evaluation_id = client.post(f"/api/tasks/{task.id}/evaluations", json={
+        "fine_tune_job_id": job.id,
+    }).json()["id"]
+    evaluation = evaluations.get(evaluation_id)
+    assert evaluation is not None
+    populate_report(tasks, episodes, evaluation, [False] * 30, [True] * 30, reviewed=True)
+    assert client.post(f"/api/evaluations/{evaluation_id}/paired-snapshot", json={
+        "heldout_attested": True, "resets_attested": True,
+    }).status_code == 200
+    assert client.get(f"/api/evaluations/{evaluation_id}/report").json()["decision"] == "improved"
+    trial = tasks.list_evaluation_trials(evaluation_id)[0]
+    episode = episodes.get(trial.episode_id)
+    assert episode is not None
+    (Path(episode.source_path) / "rollout.json").write_text("{\"changed\":true}", encoding="utf-8")
+    report = client.get(f"/api/evaluations/{evaluation_id}/report").json()
+    assert report["decision"] == "not_evaluable"
+    assert client.post(f"/api/evaluations/{evaluation_id}/promote").status_code == 409
+    assert client.post(f"/api/evaluations/{evaluation_id}/paired-snapshot", json={
+        "heldout_attested": True, "resets_attested": True,
+    }).status_code == 200
+    rerun = client.get(f"/api/evaluations/{evaluation_id}/audit").json()
+    assert rerun["decision"] == "not_evaluable"
+    assert any("digest" in problem for problem in rerun["problems"])
+
+
 def test_paired_report_distinguishes_improvement_and_inconclusive_result(tmp_path):
     client, tasks, episodes, evaluations, task, job, _station = setup_comparison(tmp_path)
     created = client.post(
@@ -181,27 +239,39 @@ def test_paired_report_distinguishes_improvement_and_inconclusive_result(tmp_pat
     ).json()
     evaluation = evaluations.get(created["id"])
     assert evaluation is not None
-    assert client.get(f"/api/evaluations/{evaluation.id}/report").json()["decision"] == "inconclusive"
-    populate_report(tasks, episodes, evaluation, [False] * 30, [True] * 24 + [False] * 6)
+    assert client.get(f"/api/evaluations/{evaluation.id}/report").json()["decision"] == "not_evaluable"
+    populate_report(tasks, episodes, evaluation, [False] * 30, [True] * 24 + [False] * 6,
+                    reviewed=True)
+    assert client.get(f"/api/evaluations/{evaluation.id}/report").json()["decision"] == "not_evaluable"
+    assert client.post(f"/api/evaluations/{evaluation.id}/paired-snapshot", json={
+        "heldout_attested": True, "resets_attested": True,
+    }).status_code == 200
     report = client.get(f"/api/evaluations/{evaluation.id}/report").json()
     assert report["usable_pairs"] == 30
     assert report["baseline_successes"] == 0
     assert report["candidate_successes"] == 24
     assert report["decision"] == "improved"
     assert report["ci_low"] > 0
-    assert report["exact_p_value"] < 0.05
+    assert report["exact_p_value"] is None
 
     for trial in tasks.list_evaluation_trials(evaluation.id):
         success = trial.scene_index < (15 if trial.checkpoint == "candidate" else 12)
-        episodes.label(trial.episode_id, success, None, None)
+        episodes.label(trial.episode_id, success, None, None, "operator-1")
     report = client.get(f"/api/evaluations/{evaluation.id}/report").json()
-    assert report["decision"] == "inconclusive"
+    assert report["decision"] == "not_evaluable"
     assert report["candidate_successes"] == 15
     assert report["baseline_successes"] == 12
+    assert client.post(f"/api/evaluations/{evaluation.id}/paired-snapshot", json={
+        "heldout_attested": True, "resets_attested": True,
+    }).status_code == 200
+    assert client.get(f"/api/evaluations/{evaluation.id}/report").json()["decision"] == "inconclusive"
 
     for trial in tasks.list_evaluation_trials(evaluation.id):
         success = trial.checkpoint == "base" and trial.scene_index < 20
-        episodes.label(trial.episode_id, success, None, None)
+        episodes.label(trial.episode_id, success, None, None, "operator-1")
+    assert client.post(f"/api/evaluations/{evaluation.id}/paired-snapshot", json={
+        "heldout_attested": True, "resets_attested": True,
+    }).status_code == 200
     report = client.get(f"/api/evaluations/{evaluation.id}/report").json()
     assert report["decision"] == "worse"
 
@@ -210,12 +280,17 @@ def test_verified_candidate_promotes_future_runs_and_can_roll_back(tmp_path):
     client, tasks, episodes, evaluations, task, job, _station = setup_comparison(tmp_path)
     created = client.post(
         f"/api/tasks/{task.id}/evaluations",
-        json={"fine_tune_job_id": job.id, "auto_promote": True},
+        json={"fine_tune_job_id": job.id},
     ).json()
     evaluation = evaluations.get(created["id"])
     assert evaluation is not None
     assert client.post(f"/api/evaluations/{evaluation.id}/promote").status_code == 409
-    populate_report(tasks, episodes, evaluation, [False] * 30, [True] * 24 + [False] * 6)
+    populate_report(tasks, episodes, evaluation, [False] * 30, [True] * 24 + [False] * 6,
+                    reviewed=True)
+    assert client.post(f"/api/evaluations/{evaluation.id}/promote").status_code == 409
+    assert client.post(f"/api/evaluations/{evaluation.id}/paired-snapshot", json={
+        "heldout_attested": True, "resets_attested": True,
+    }).status_code == 200
     assert client.post(f"/api/evaluations/{evaluation.id}/promote").json()["checkpoint"] == "candidate"
     deployed = client.post(
         f"/api/tasks/{task.id}/deployed-trials", json={"start_cell": 2}

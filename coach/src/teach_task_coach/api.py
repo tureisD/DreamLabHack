@@ -37,6 +37,7 @@ from teach_task_coach.faas import (
 )
 from teach_task_coach.guidance import Guidance, guidance
 from teach_task_coach.paired_audit import PairedReport, PairedRequest, evaluate_paired
+from teach_task_coach.paired_planning import PairedPlanEstimate, PairedPlanInput, plan_pairs
 from teach_task_coach.paired_snapshot import export_paired_snapshot
 from teach_task_coach.preflight import PreflightResult, PreflightService
 from teach_task_coach.rollout_audit import IntentAudit, audit_rollout
@@ -83,6 +84,8 @@ class TrialLabel(BaseModel):
     failure_stage: Literal["approach", "grasp", "transport", "release", "other"] | None = None
     note: str | None = Field(default=None, max_length=2000)
     reviewer_id: str | None = Field(default=None, min_length=1, max_length=120)
+    interventions: int = Field(default=0, ge=0)
+    first_response_s: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
 class PairedSnapshotAttestation(BaseModel):
@@ -182,6 +185,10 @@ def create_app(
     def analyze_matched_scenes(value: PairedRequest) -> PairedReport:
         """Audit predeclared matched scenes without robot or Dream API calls."""
         return evaluate_paired(value)
+
+    @app.post("/api/paired-evaluations/plan", response_model=PairedPlanEstimate)
+    def plan_matched_scenes(value: PairedPlanInput) -> PairedPlanEstimate:
+        return plan_pairs(value)
 
     @app.get("/api/paired-evaluations/demo", response_model=PairedRequest)
     def apple_confirmation_demo() -> PairedRequest:
@@ -399,13 +406,10 @@ def create_app(
     @app.post("/api/trials/{trial_id}/label", response_model=Trial)
     def label_trial(trial_id: str, label: TrialLabel) -> Trial:
         try:
-            result = runner.label(trial_id, label.success, label.failure_stage, label.note, label.reviewer_id)
-            if result.evaluation_id:
-                evaluation = evaluations.get(result.evaluation_id)
-                if evaluation is not None and evaluation.auto_promote:
-                    report = evaluations.report(evaluation, tasks, episodes)
-                    if report.decision == "improved":
-                        tasks.set_deployment(evaluation.task_id, evaluation.candidate_checkpoint, evaluation.id)
+            result = runner.label(
+                trial_id, label.success, label.failure_stage, label.note,
+                label.reviewer_id, label.interventions, label.first_response_s,
+            )
             return result
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Trial not found.") from exc
@@ -628,6 +632,8 @@ def create_app(
 
     @app.post("/api/tasks/{task_id}/evaluations", response_model=Evaluation, status_code=201)
     def create_evaluation(task_id: str, value: EvaluationRequest) -> Evaluation:
+        if value.auto_promote:
+            raise HTTPException(status_code=409, detail="Automatic promotion is disabled; complete an audit and promote explicitly.")
         if tasks.get_task(task_id) is None:
             raise HTTPException(status_code=404, detail="Task not found.")
         job = faas.get_finetune(value.fine_tune_job_id)
@@ -647,7 +653,10 @@ def create_app(
             ):
                 raise HTTPException(status_code=409, detail="A replacement is allowed only after an unusable trial and no active run.")
         try:
-            return evaluations.create(task_id, job.id, job.checkpoint, value.minimum_effect, tasks, value.auto_promote)
+            return evaluations.create(
+                task_id, job.id, job.checkpoint, value.minimum_effect, tasks,
+                value.auto_promote, value.planned_pairs,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -675,7 +684,14 @@ def create_app(
         evaluation = evaluations.get(evaluation_id)
         if evaluation is None:
             raise HTTPException(status_code=404, detail="Evaluation not found.")
+        if not value.heldout_attested or not value.resets_attested:
+            raise HTTPException(status_code=409, detail="Confirm training holdout and scene resets before final audit.")
         try:
+            evaluations.audit(
+                evaluation, tasks, episodes,
+                heldout_attested=value.heldout_attested,
+                resets_attested=value.resets_attested,
+            )
             return export_paired_snapshot(
                 evaluation, tasks, episodes,
                 heldout_attested=value.heldout_attested,
@@ -683,6 +699,28 @@ def create_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/evaluations/{evaluation_id}/audit", response_model=PairedReport)
+    def get_saved_paired_audit(evaluation_id: str) -> PairedReport:
+        evaluation = evaluations.get(evaluation_id)
+        if evaluation is None:
+            raise HTTPException(status_code=404, detail="Evaluation not found.")
+        saved = evaluations.latest_audit(evaluation_id)
+        if saved is None:
+            raise HTTPException(status_code=404, detail="No paired audit has been saved.")
+        snapshot, stored = saved
+        current = evaluate_paired(export_paired_snapshot(
+            evaluation, tasks, episodes,
+            heldout_attested=snapshot.plan.heldout_attested,
+            resets_attested=snapshot.plan.resets_attested,
+        ))
+        if current.input_sha256 != stored.input_sha256:
+            return current.model_copy(update={
+                "decision": "not_evaluable", "observed_difference": None,
+                "difference_interval": None, "interval_method": None,
+                "problems": (*current.problems, "Evidence changed since the saved audit; run it again."),
+            })
+        return stored
 
     @app.get("/api/scene-adapter/status")
     def scene_adapter_status() -> dict[str, bool]:

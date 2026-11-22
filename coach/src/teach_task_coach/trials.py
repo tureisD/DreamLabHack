@@ -152,6 +152,8 @@ class TrialRunner:
     def label(
         self, trial_id: str, success: bool, failure_stage: str | None, note: str | None,
         reviewer_id: str | None = None,
+        interventions: int = 0,
+        first_response_s: float | None = None,
     ) -> Trial:
         trial = self.tasks.get_trial(trial_id)
         if trial is None:
@@ -161,7 +163,10 @@ class TrialRunner:
         episode = self.episodes.get(trial.episode_id)
         if episode is None or episode.status != "complete":
             raise TrialError("An incomplete rollout cannot be labelled; mark the trial unusable.")
-        self.episodes.label(trial.episode_id, success, failure_stage, note, reviewer_id)
+        self.episodes.label(
+            trial.episode_id, success, failure_stage, note, reviewer_id,
+            interventions, first_response_s,
+        )
         return self.tasks.transition(trial_id, "awaiting_label", "completed")
 
     def abandon(self, trial_id: str, reason: str) -> Trial:
