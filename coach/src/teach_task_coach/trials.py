@@ -140,6 +140,11 @@ class TrialRunner:
         self.episodes.upsert(episode)
         if episode.stop_reason == "ModelReady":
             return self.tasks.record_warmup(trial_id, episode.id)
+        if episode.status != "complete":
+            return self.tasks.transition(
+                trial_id, "awaiting_rollout", "awaiting_rollout",
+                last_error="Rollout is incomplete; mark this trial unusable before retrying.",
+            )
         return self.tasks.transition(
             trial_id, "awaiting_rollout", "awaiting_label", episode_id=episode.id
         )
@@ -152,6 +157,9 @@ class TrialRunner:
             raise KeyError(trial_id)
         if trial.status != "awaiting_label" or trial.episode_id is None:
             raise TrialError("Attach a finished rollout before labelling the trial.")
+        episode = self.episodes.get(trial.episode_id)
+        if episode is None or episode.status != "complete":
+            raise TrialError("An incomplete rollout cannot be labelled; mark the trial unusable.")
         self.episodes.label(trial.episode_id, success, failure_stage, note)
         return self.tasks.transition(trial_id, "awaiting_label", "completed")
 
@@ -159,13 +167,17 @@ class TrialRunner:
         trial = self.tasks.get_trial(trial_id)
         if trial is None:
             raise KeyError(trial_id)
-        if trial.status != "awaiting_rollout":
-            raise TrialError("Only a stopped trial without a rollout can be abandoned.")
+        if trial.status not in ("awaiting_rollout", "awaiting_label"):
+            raise TrialError("Only a stopped trial with no usable rollout can be abandoned.")
+        if trial.status == "awaiting_label":
+            episode = self.episodes.get(trial.episode_id) if trial.episode_id else None
+            if episode is not None and episode.status == "complete":
+                raise TrialError("A complete rollout must be labelled.")
         station_status = self.station.status()
         if station_status["state"] in ("starting", "running", "stopping"):
             raise TrialError("Stop the station run before abandoning this trial.")
         return self.tasks.transition(
-            trial_id, "awaiting_rollout", "abandoned", last_error=reason
+            trial_id, trial.status, "abandoned", last_error=reason
         )
 
     def reconcile_start(self, trial_id: str) -> Trial:

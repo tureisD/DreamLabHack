@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 from test_trials import FakeStation
 
@@ -89,6 +91,35 @@ def test_unusable_trial_allows_new_comparison_but_blocks_old_sequence(tmp_path):
     assert second.status_code == 201
     assert second.json()["id"] != first["id"]
     assert client.post(f"/api/tasks/{task.id}/evaluations", json={"fine_tune_job_id": job.id}).status_code == 409
+
+
+def test_partial_rollout_can_be_abandoned_and_comparison_restarted(tmp_path):
+    client, tasks, _episodes, _evaluations, task, job, station = setup_comparison(tmp_path)
+    first = client.post(
+        f"/api/tasks/{task.id}/evaluations", json={"fine_tune_job_id": job.id}
+    ).json()
+    trial = tasks.list_evaluation_trials(first["id"])[0]
+    assert client.post(f"/api/trials/{trial.id}/start").status_code == 200
+    assert client.post(f"/api/trials/{trial.id}/stop").status_code == 200
+    folder = tmp_path / "rollouts" / "partial_run1"
+    folder.mkdir()
+    (folder / "rollout.json").write_text(json.dumps({
+        "status": "partial", "task": task.prompt, "checkpoint": trial.checkpoint,
+        "run": station.run_number, "started_at_utc": "2026-11-21T10:00:05+00:00",
+        "frames": 10, "fps": 20, "stop_reason": "stopped",
+    }))
+    synced = client.post(f"/api/trials/{trial.id}/sync")
+    assert synced.status_code == 200
+    assert synced.json()["status"] == "awaiting_rollout"
+    assert "incomplete" in synced.json()["last_error"]
+    assert client.post(f"/api/trials/{trial.id}/label", json={"success": False}).status_code == 409
+    assert client.post(
+        f"/api/trials/{trial.id}/abandon", json={"reason": "partial recording"}
+    ).status_code == 200
+    replacement = client.post(
+        f"/api/tasks/{task.id}/evaluations", json={"fine_tune_job_id": job.id}
+    )
+    assert replacement.status_code == 201
 
 
 def populate_report(tasks, episodes, evaluation, base_results, candidate_results):
