@@ -1,0 +1,66 @@
+import { useState } from 'react';
+
+type Snapshot = { plan: object; outcomes: object[] };
+type Arm = { participants: number; validated_by_horizon: number; validation_rate: number;
+  mean_restricted_minutes: number; mean_demos_recorded: number; mean_faas_jobs: number;
+  mean_faas_steps: number; mean_operator_minutes: number; mean_faas_cost_usd: number | null };
+type Report = { study_id: string; data_kind: 'synthetic' | 'observed'; horizon_minutes: number;
+  standard: Arm; coach: Arm; snapshot_sha256: string; warnings: string[];
+  coach_minus_standard_validation_rate: number; coach_minus_standard_mean_restricted_minutes: number;
+  coach_minus_standard_mean_demos: number; coach_minus_standard_mean_faas_jobs: number;
+  coach_minus_standard_mean_faas_steps: number; coach_minus_standard_mean_operator_minutes: number;
+  coach_minus_standard_mean_faas_cost_usd: number | null; fisher_two_sided_p: number };
+
+const fmt = (value: number | null, suffix = '') => value === null ? 'Unknown' : `${value.toFixed(1)}${suffix}`;
+
+export default function CoachEffect() {
+  const [plan, setPlan] = useState('');
+  const [outcomes, setOutcomes] = useState('');
+  const [report, setReport] = useState<Report | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function example() {
+    setBusy(true); setError(''); setReport(null);
+    try {
+      const response = await fetch('/api/coach-effect/synthetic-example');
+      if (!response.ok) throw new Error(`Could not load example (${response.status}).`);
+      const value = (await response.json()) as Snapshot;
+      setPlan(JSON.stringify(value.plan, null, 2));
+      setOutcomes(JSON.stringify(value.outcomes, null, 2));
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not load example.'); }
+    finally { setBusy(false); }
+  }
+
+  async function analyze() {
+    setBusy(true); setError(''); setReport(null);
+    try {
+      const payload: Snapshot = { plan: JSON.parse(plan) as object, outcomes: JSON.parse(outcomes) as object[] };
+      const response = await fetch('/api/coach-effect/analyze', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const value = await response.json() as Report & { detail?: string };
+      if (!response.ok) throw new Error(value.detail ?? `Analysis failed (${response.status}).`);
+      setReport(value);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not analyze study.'); }
+    finally { setBusy(false); }
+  }
+
+  const rows: [string, number | null, number | null, number | null, string][] = report ? [
+    ['Validated by horizon', report.standard.validation_rate * 100, report.coach.validation_rate * 100, report.coach_minus_standard_validation_rate * 100, '%'],
+    ['Restricted time to validation', report.standard.mean_restricted_minutes, report.coach.mean_restricted_minutes, report.coach_minus_standard_mean_restricted_minutes, ' min'],
+    ['Demos recorded', report.standard.mean_demos_recorded, report.coach.mean_demos_recorded, report.coach_minus_standard_mean_demos, ''],
+    ['FaaS jobs', report.standard.mean_faas_jobs, report.coach.mean_faas_jobs, report.coach_minus_standard_mean_faas_jobs, ''],
+    ['FaaS steps', report.standard.mean_faas_steps, report.coach.mean_faas_steps, report.coach_minus_standard_mean_faas_steps, ''],
+    ['Operator time', report.standard.mean_operator_minutes, report.coach.mean_operator_minutes, report.coach_minus_standard_mean_operator_minutes, ' min'],
+    ['Actual FaaS bill', report.standard.mean_faas_cost_usd, report.coach.mean_faas_cost_usd, report.coach_minus_standard_mean_faas_cost_usd, ' USD'],
+  ] : [];
+
+  return <main className="page">
+    <header className="header"><div><p className="eyebrow">Operator study</p><h1>Does the coach save work?</h1><p className="subtitle">Compare real operator sessions against the ordinary workflow on one frozen task and time horizon.</p></div></header>
+    <section className="card"><h2>Evidence needed</h2><p>Randomize operators before starting, use the same robot, task, budget, and held-out success rule, then count every assigned operator. Record demos, FaaS jobs and steps, operator minutes, and the actual bill when available. Validate successful outcomes with independent evaluation reports.</p><p>The current repo contains only a <strong>synthetic example</strong>. It exercises this analysis but provides no observed time, demo, or spend savings.</p><button className="secondary" disabled={busy} onClick={() => void example()}>Load synthetic example</button></section>
+    <section className="card"><h2>Analyze a fixed-horizon study</h2><label className="audit-file">Frozen plan JSON<input type="file" accept=".json,application/json" onChange={async (event) => { const file = event.target.files?.[0]; if (file) { setPlan(await file.text()); setReport(null); } }} /><textarea value={plan} onChange={(event) => { setPlan(event.target.value); setReport(null); }} spellCheck={false} /></label><label className="audit-file">All participant outcomes JSON<input type="file" accept=".json,application/json" onChange={async (event) => { const file = event.target.files?.[0]; if (file) { setOutcomes(await file.text()); setReport(null); } }} /><textarea value={outcomes} onChange={(event) => { setOutcomes(event.target.value); setReport(null); }} spellCheck={false} /></label><button disabled={busy || !plan.trim() || !outcomes.trim()} onClick={() => void analyze()}>{busy ? 'Checking…' : 'Analyze operator study'}</button></section>
+    {error && <div className="alert" role="alert">{error}</div>}
+    {report && <section className="card evaluation-report" aria-live="polite"><p className="eyebrow">{report.data_kind === 'synthetic' ? 'Synthetic demonstration — no measured savings' : 'Operator-reported study — verify source logs'}</p><h2>{report.study_id}</h2><p>{report.coach.validated_by_horizon}/{report.coach.participants} coach operators versus {report.standard.validated_by_horizon}/{report.standard.participants} standard operators reached validation within {report.horizon_minutes} minutes.</p><div className="audit-table-wrap"><table className="audit-table"><thead><tr><th>Outcome per operator</th><th>Standard</th><th>Coach</th><th>Coach − standard</th></tr></thead><tbody>{rows.map(([label, standard, coached, delta, suffix]) => <tr key={label}><td>{label}</td><td>{fmt(standard, suffix)}</td><td>{fmt(coached, suffix)}</td><td>{fmt(delta, suffix)}</td></tr>)}</tbody></table></div><p>Two-sided Fisher p-value for validation: {report.fisher_two_sided_p.toFixed(3)}. Snapshot SHA-256: <code>{report.snapshot_sha256}</code>.</p><ul>{report.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul><button className="secondary" onClick={() => { const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' })); const link = document.createElement('a'); link.href = url; link.download = 'coach-effect-report.json'; link.click(); URL.revokeObjectURL(url); }}>Download report JSON</button></section>}
+  </main>;
+}

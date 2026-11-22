@@ -4,6 +4,9 @@ import runpy
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+
+from teach_task_coach.api import create_app
 
 FIXTURES = Path(__file__).parents[1] / "benchmark"
 analyze = runpy.run_path(str(FIXTURES / "coach_benchmark.py"))["analyze"]
@@ -24,7 +27,25 @@ def test_synthetic_demo_is_descriptive_and_accounts_for_all_participants():
     assert report["coach_minus_standard_mean_restricted_minutes"] < 0
     assert report["coach"]["mean_faas_cost_usd"] is None
     assert report["fisher_two_sided_p"] > 0.05
+    assert report["data_kind"] == "synthetic"
+    assert report["coach_minus_standard_mean_demos"] < 0
+    assert report["coach_minus_standard_mean_faas_steps"] < 0
+    assert report["coach_minus_standard_mean_faas_cost_usd"] is None
     assert len(report["snapshot_sha256"]) == 64
+
+
+def test_browser_analyzer_keeps_synthetic_example_explicit(tmp_path, monkeypatch):
+    monkeypatch.setenv("COACH_DATA_DIR", str(tmp_path))
+    client = TestClient(create_app())
+    example = client.get("/api/coach-effect/synthetic-example")
+    assert example.status_code == 200
+    report = client.post("/api/coach-effect/analyze", json=example.json())
+    assert report.status_code == 200
+    assert report.json()["data_kind"] == "synthetic"
+    assert "no" in report.json()["warnings"][0].lower()
+    altered = example.json()
+    altered["plan"].pop("data_kind")
+    assert client.post("/api/coach-effect/analyze", json=altered).status_code == 422
 
 
 @pytest.mark.parametrize("mutation", [
