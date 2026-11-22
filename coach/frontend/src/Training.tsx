@@ -30,7 +30,7 @@ async function json<T>(url: string, method = 'GET', body?: unknown): Promise<T> 
   return (await response.json()) as T;
 }
 
-export default function Training() {
+export default function Training({ onEvaluate }: { onEvaluate?: () => void }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [taskId, setTaskId] = useState('');
   const [bodies, setBodies] = useState<Embodiment[]>([]);
@@ -43,6 +43,10 @@ export default function Training() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const selectedTask = tasks.find((task) => task.id === taskId);
+  const readyDataset = datasets.find((version) => version.status === 'validated');
+  const readyJob = jobs.find((job) => job.status === 'succeeded' && job.checkpoint);
+  const activeJob = jobs.find((job) => ['pending_upload', 'processing', 'pending_training', 'training'].includes(job.status));
 
   useEffect(() => {
     void json<Task[]>('/api/tasks').then((values) => { setTasks(values); if (values.length) setTaskId(values[0].id); }).catch((caught: Error) => setError(caught.message));
@@ -116,9 +120,16 @@ export default function Training() {
   }
 
   return <main className="page">
-    <header className="header"><div><p className="eyebrow">Dream Labs FaaS</p><h1>Dataset and training</h1><p className="subtitle">Freeze kept demos, validate locally, then explicitly submit a paid fine-tune.</p></div></header>
+    <header className="header"><div><p className="eyebrow">Dream Labs FaaS</p><h1>Fine-tune workspace</h1><p className="subtitle">Collect reviewed demos, freeze a dataset, train through FaaS, then compare the candidate on held-out scenes.</p></div></header>
     {error && <div className="alert" role="alert">{error}</div>}
     {message && <div className="notice" role="status">{message}</div>}
+    <section className="card pipeline-steps" aria-label="Fine-tuning steps">
+      <div className={taskId ? 'pipeline-done' : ''}><span>1</span><strong>Define task</strong><small>{selectedTask?.name ?? 'Choose a task'}</small></div>
+      <div className={readyDataset ? 'pipeline-done' : ''}><span>2</span><strong>Validate demos</strong><small>{readyDataset ? `${readyDataset.demo_ids.length} demos frozen` : 'Create a dataset version'}</small></div>
+      <div className={readyJob ? 'pipeline-done' : activeJob ? 'pipeline-active' : ''}><span>3</span><strong>Fine-tune</strong><small>{readyJob ? 'Checkpoint ready' : activeJob ? `Job ${activeJob.status.replaceAll('_', ' ')}` : 'Submit FaaS job'}</small></div>
+      <div><span>4</span><strong>Evaluate</strong><small>Matched held-out scenes</small></div>
+    </section>
+    {readyJob && <section className="card training-next"><div><h2>Candidate checkpoint ready</h2><p>{readyJob.checkpoint} can now be compared with the task baseline. Plan the evaluation before running either model.</p></div><button type="button" onClick={onEvaluate} disabled={!onEvaluate}>Plan evaluation</button></section>}
     <div className="training-controls card">
       <label>Task<select value={taskId} onChange={(event) => setTaskId(event.target.value)}>{tasks.map((task) => <option key={task.id} value={task.id}>{task.name}</option>)}</select></label>
       <label>Registered embodiment<select value={embodiment} onChange={(event) => setEmbodiment(event.target.value)}>{bodies.map((body) => <option key={body.name} value={body.name}>{body.name} · {body.video_roles.join(', ')}</option>)}</select></label>
@@ -130,7 +141,7 @@ export default function Training() {
       <label>Learning-rate schedule<select value={schedule} onChange={(event) => setSchedule(event.target.value as 'cosine' | 'constant')}><option value="cosine">Cosine · single-task specialization</option><option value="constant">Constant · supports later resume</option></select></label>
       <label>Training data<select value={baseShare} onChange={(event) => setBaseShare(Number(event.target.value) as 0 | 0.5)}><option value={0.5}>Mix in Dream Labs data (0.5)</option><option value={0}>My demos only (0.0)</option></select></label>
     </div>
-    <p className="hint">Dream charges by training step; this app has no price quote API. Confirm the charge in your Dream account before submitting. The initial recipe is 1,000 steps, cosine, and a 0.5 data mix.</p>
+    <p className="hint">Dream charges by training step; this app has no price quote API. Confirm the charge in your Dream account before submitting. Record the dataset and settings so later evaluations can identify the checkpoint. The initial recipe is 1,000 steps, cosine, and a 0.5 data mix.</p>
     <section className="card training-list"><h2>Dataset versions</h2>
       {datasets.length === 0 && <p>No versions yet. Keep at least one valid demo, then create a version.</p>}
       {datasets.map((version) => <div className="training-row" key={version.id}>

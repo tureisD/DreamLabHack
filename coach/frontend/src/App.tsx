@@ -127,7 +127,7 @@ export default function App() {
         <button className={screen === 'evaluation' ? 'nav-active' : ''} onClick={() => setScreen('evaluation')}>Evaluation</button>
         <button className={screen === 'statistical' ? 'nav-active' : ''} onClick={() => setScreen('statistical')}>Statistical audit</button>
       </nav>
-      {screen === 'guide' ? <Guide /> : screen === 'preflight' ? <Preflight /> : screen === 'tasks' ? <Tasks /> : screen === 'demos' ? <Demos /> : screen === 'training' ? <Training /> : screen === 'evaluation' ? <EvaluationPage /> : screen === 'statistical' ? <StatisticalAudit /> : <Runs />}
+      {screen === 'guide' ? <Guide /> : screen === 'preflight' ? <Preflight /> : screen === 'tasks' ? <Tasks /> : screen === 'demos' ? <Demos /> : screen === 'training' ? <Training onEvaluate={() => setScreen('evaluation')} /> : screen === 'evaluation' ? <EvaluationPage /> : screen === 'statistical' ? <StatisticalAudit /> : <Runs />}
     </>
   );
 }

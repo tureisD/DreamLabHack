@@ -139,3 +139,26 @@ button.secondary { background: #e6eef2; color: #23546a; }
 .audit-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .audit-table th, .audit-table td { text-align: left; padding: 10px; border-bottom: 1px solid #dce5e9; white-space: nowrap; }
 .audit-table th { color: #536872; background: #f1f6f8; }
+.pipeline-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+.pipeline-steps > div { border: 1px solid #e3e9ec; border-radius: 12px; padding: 12px; background: #f8fafb; min-width: 0; }
+.pipeline-steps span { display: inline-grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; background: #dce8ec; color: #355667; font-weight: 750; font-size: 13px; margin-bottom: 8px; }
+.pipeline-steps strong, .pipeline-steps small { display: block; overflow-wrap: anywhere; }
+.pipeline-steps strong { font-size: 14px; }
+.pipeline-steps small { color: #697c85; margin-top: 4px; }
+.pipeline-steps .pipeline-done { border-color: #b9ddca; background: #f0faf4; }
+.pipeline-steps .pipeline-done span { background: #caecd9; color: #176144; }
+.pipeline-steps .pipeline-active { border-color: #b5dbe7; background: #edf7fa; }
+.pipeline-steps .pipeline-active span { background: #ccebf3; color: #176883; }
+.training-next { display: flex; gap: 24px; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.training-next p { margin-bottom: 0; overflow-wrap: anywhere; }
+.evaluation-workflow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 18px; padding: 16px 22px; }
+.evaluation-workflow span { color: #355667; background: #eef5f7; padding: 8px 11px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.evaluation-report details { margin: 16px 0; color: #536872; }
+.evaluation-report summary { cursor: pointer; font-weight: 700; }
+.evaluation-secondary-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.evaluation-secondary-metrics div { border: 1px solid #e0e8ed; border-radius: 10px; padding: 12px; }
+.evaluation-secondary-metrics strong, .evaluation-secondary-metrics span { display: block; }
+.evaluation-secondary-metrics strong { font-size: 12px; color: #355667; }
+.evaluation-secondary-metrics span { font-size: 13px; margin-top: 6px; }
+@media (max-width: 700px) { .evaluation-secondary-metrics { grid-template-columns: 1fr; } }
+@media (max-width: 780px) { .pipeline-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } .training-next { align-items: flex-start; flex-direction: column; } }

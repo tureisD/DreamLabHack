@@ -5,7 +5,7 @@ type Job = { id: string; status: string; checkpoint: string | null };
 type Evaluation = {
   id: string; task_id: string; fine_tune_job_id: string; baseline_checkpoint: string;
   candidate_checkpoint: string; minimum_effect: number; created_at: string;
-  auto_promote: boolean;
+  planned_pairs: number;
 };
 type Deployment = { checkpoint: string; baseline_checkpoint: string };
 type Trial = {
@@ -18,7 +18,16 @@ type Report = {
   baseline_only: number; candidate_only: number; paired_difference: number | null;
   ci_low: number | null; ci_high: number | null; exact_p_value: number | null;
   baseline_safety_stops: number; candidate_safety_stops: number;
-  decision: 'improved' | 'inconclusive' | 'worse'; reason: string;
+  decision: 'improved' | 'inconclusive' | 'worse' | 'not_evaluable'; reason: string;
+  problems?: string[]; warnings?: string[]; observed_difference?: number | null;
+  difference_interval?: [number, number] | null; input_sha256?: string;
+  baseline_interventions?: number; candidate_interventions?: number;
+  baseline_mean_duration_s?: number | null; candidate_mean_duration_s?: number | null;
+  baseline_mean_first_response_s?: number | null; candidate_mean_first_response_s?: number | null;
+};
+type PairPlan = {
+  required_pairs: number | null; feasible: boolean; recommended_pairs: number | null;
+  estimated_robot_hours: number | null; explanation: string;
 };
 
 async function json<T>(url: string, method = 'GET', body?: unknown): Promise<T> {
@@ -46,7 +55,11 @@ export default function EvaluationPage() {
   const [trials, setTrials] = useState<Trial[]>([]);
   const [report, setReport] = useState<Report | null>(null);
   const [minimumEffect, setMinimumEffect] = useState(0.15);
-  const [autoPromote, setAutoPromote] = useState(false);
+  const [plannedPairs, setPlannedPairs] = useState(30);
+  const [expectedGain, setExpectedGain] = useState(0.6);
+  const [maxPairs, setMaxPairs] = useState(100);
+  const [minutesPerPair, setMinutesPerPair] = useState(12);
+  const [pairPlan, setPairPlan] = useState<PairPlan | null>(null);
   const [deployment, setDeployment] = useState<Deployment | null>(null);
   const [sceneAdapter, setSceneAdapter] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -59,6 +72,14 @@ export default function EvaluationPage() {
   const [heldoutAttested, setHeldoutAttested] = useState(false);
   const [resetsAttested, setResetsAttested] = useState(false);
   const [auditDecision, setAuditDecision] = useState('');
+  const [interventions, setInterventions] = useState(0);
+  const [firstResponseS, setFirstResponseS] = useState('');
+
+  useEffect(() => {
+    setAuditDecision('');
+    setHeldoutAttested(false);
+    setResetsAttested(false);
+  }, [selectedId]);
 
   useEffect(() => {
     void json<Task[]>('/api/tasks').then((values) => {
@@ -121,11 +142,22 @@ export default function EvaluationPage() {
     if (!taskId || !jobId) return;
     void act(async () => {
       const result = await json<Evaluation>(`/api/tasks/${taskId}/evaluations`, 'POST', {
-        fine_tune_job_id: jobId, minimum_effect: minimumEffect, auto_promote: autoPromote,
+        fine_tune_job_id: jobId, minimum_effect: minimumEffect, planned_pairs: plannedPairs,
       });
       setEvaluations(await json<Evaluation[]>(`/api/tasks/${taskId}/evaluations`));
       setSelectedId(result.id);
       setMessage('Evaluation planned. Follow the displayed scene order and reset the setup between runs.');
+    });
+  }
+
+  function planPairs() {
+    void act(async () => {
+      const value = await json<PairPlan>('/api/paired-evaluations/plan', 'POST', {
+        expected_gain: expectedGain, minimum_improvement: minimumEffect,
+        max_pairs: maxPairs, minutes_per_pair: minutesPerPair,
+      });
+      setPairPlan(value);
+      if (value.recommended_pairs !== null) setPlannedPairs(value.recommended_pairs);
     });
   }
 
@@ -154,9 +186,11 @@ export default function EvaluationPage() {
         success: outcome === 'success', failure_stage: outcome === 'failure' && stage ? stage : null,
         note: note.trim() || null,
         reviewer_id: reviewerId.trim(),
+        interventions,
+        first_response_s: firstResponseS.trim() ? Number(firstResponseS) : null,
       });
       await refreshEvaluation(selectedId);
-      setOutcome('success'); setStage(''); setNote('');
+      setOutcome('success'); setStage(''); setNote(''); setInterventions(0); setFirstResponseS('');
       setMessage('Outcome saved. Reset the scene for the next run.');
     });
   }
@@ -168,14 +202,15 @@ export default function EvaluationPage() {
         heldout_attested: heldoutAttested, resets_attested: resetsAttested,
       });
       const audit = await json<{ decision: string; problems: string[]; usable_pairs: number }>(
-        '/api/paired-evaluations/analyze', 'POST', snapshot,
+        `/api/evaluations/${selectedId}/audit`, 'GET',
       );
-      setAuditDecision(`${audit.decision}: ${audit.usable_pairs}/30 usable pairs${audit.problems.length ? `; ${audit.problems.join(' ')}` : ''}`);
+      setAuditDecision(`${audit.decision}: ${audit.usable_pairs}/${selected?.planned_pairs ?? plannedPairs} usable pairs${audit.problems.length ? `; ${audit.problems.join(' ')}` : ''}`);
+      await refreshEvaluation(selectedId);
       const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
       const link = document.createElement('a');
       link.href = url; link.download = `paired-evaluation-${selectedId}.json`; link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setMessage('Paired evidence downloaded. Open Statistical evaluation to inspect the full audit.');
+      setMessage('The reviewed audit is saved and its evidence snapshot has been downloaded.');
     });
   }
 
@@ -213,44 +248,69 @@ export default function EvaluationPage() {
   const candidates = jobs.filter((job) => job.status === 'succeeded' && job.checkpoint);
 
   return <main className="page">
-    <header className="header"><div><p className="eyebrow">Before and after</p><h1>Evaluate the fine-tune</h1><p className="subtitle">Run both checkpoints on the same 30 held-out setups, then read the paired result.</p></div></header>
+    <header className="header"><div><p className="eyebrow">Before and after</p><h1>Evaluate the fine-tune</h1><p className="subtitle">Plan matched held-out scenes, review every outcome, then audit the candidate against the base.</p></div></header>
     {error && <div className="alert" role="alert">{error}</div>}
     {message && <div className="notice" role="status">{message}</div>}
+    <section className="card evaluation-workflow" aria-label="Evaluation steps">
+      <span>1 · Plan scenes</span><span>2 · Run both models</span><span>3 · Review rollouts</span><span>4 · Audit and decide</span>
+    </section>
+    <section className="card">
+      <h2>Choose the trial budget</h2>
+      <p>Estimate how many matched scenes could clear your minimum useful gain under the conservative paired rule. The expected gain is an assumption, not a measurement.</p>
+      <div className="training-controls">
+        <label>Expected gain (%)<input type="number" min={0} max={100} step={5} value={Math.round(expectedGain * 100)} onChange={(event) => { setExpectedGain(Number(event.target.value) / 100); setPairPlan(null); }} /></label>
+        <label>Minimum useful gain (%)<input type="number" min={0} max={99} step={1} value={Math.round(minimumEffect * 100)} onChange={(event) => { setMinimumEffect(Number(event.target.value) / 100); setPairPlan(null); }} /></label>
+        <label>Maximum pairs<input type="number" min={1} max={512} step={1} value={maxPairs} onChange={(event) => { setMaxPairs(Number(event.target.value)); setPairPlan(null); }} /></label>
+        <label>Minutes per pair<input type="number" min={1} max={1000} step={1} value={minutesPerPair} onChange={(event) => { setMinutesPerPair(Number(event.target.value)); setPairPlan(null); }} /></label>
+        <button disabled={busy || !Number.isFinite(expectedGain) || expectedGain <= minimumEffect || expectedGain > 1 || !Number.isInteger(maxPairs) || maxPairs < 1 || maxPairs > 512 || !Number.isFinite(minutesPerPair) || minutesPerPair <= 0} onClick={planPairs}>Estimate pairs</button>
+      </div>
+      {pairPlan && <div className={pairPlan.feasible ? 'notice' : 'alert'} role="status">
+        <strong>{pairPlan.feasible ? `${pairPlan.recommended_pairs} pairs recommended` : 'Budget may be too small'}</strong>
+        <p>{pairPlan.explanation} {pairPlan.estimated_robot_hours !== null && `About ${pairPlan.estimated_robot_hours.toFixed(1)} robot hours at your timing assumption.`}</p>
+      </div>}
+    </section>
     <section className="card">
       <div className="training-controls">
         <label>Task<select value={taskId} onChange={(event) => { setTaskId(event.target.value); setSelectedId(''); }}><option value="">Choose a task</option>{tasks.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}</select></label>
         <label>Fine-tuned checkpoint<select value={jobId} onChange={(event) => setJobId(event.target.value)}><option value="">Choose a completed job</option>{candidates.map((job) => <option key={job.id} value={job.id}>{job.checkpoint}</option>)}</select></label>
-        <label>Minimum useful gain<input type="number" min="0" max="100" step="1" value={Math.round(minimumEffect * 100)} onChange={(event) => setMinimumEffect(Number(event.target.value) / 100)} />%</label>
-        <label>After a verified improvement<select value={autoPromote ? 'yes' : 'no'} onChange={(event) => setAutoPromote(event.target.value === 'yes')}><option value="no">Review before switching</option><option value="yes">Automatically use candidate for future coach runs</option></select></label>
-        <button disabled={busy || !taskId || !jobId || !Number.isFinite(minimumEffect) || minimumEffect < 0 || minimumEffect > 1} onClick={create}>Plan comparison</button>
+        <label>Planned scene pairs<input type="number" min="1" max="512" step="1" value={plannedPairs} onChange={(event) => setPlannedPairs(Number(event.target.value))} /></label>
+        <button disabled={busy || !taskId || !jobId || !Number.isFinite(minimumEffect) || minimumEffect < 0 || minimumEffect >= 1 || !Number.isInteger(plannedPairs) || plannedPairs < 1 || plannedPairs > 512} onClick={create}>Freeze comparison plan</button>
       </div>
-      <p className="hint">The gain threshold is fixed when you plan the evaluation. Each setup is specified as a position on your marked table and a rotation. Use the same object, lighting, and success rule for both runs in a pair. Keep these setups out of training.</p>
+      <p className="hint">The scene count and gain threshold are fixed when you create the comparison. Use the same object, lighting, and success rule for both models in a pair. Keep these scenes out of training. The estimate does not guarantee statistical power.</p>
       {task && <p><strong>Success rule:</strong> {task.success_rule}</p>}
       {deployment && <p><strong>Checkpoint for future task runs:</strong> {deployment.checkpoint} {deployment.checkpoint !== deployment.baseline_checkpoint && <button className="secondary" disabled={busy} onClick={rollback}>Roll back to baseline</button>}</p>}
       {evaluations.length > 0 && <label className="evaluation-select">Comparison<select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>{evaluations.map((item) => <option key={item.id} value={item.id}>{item.candidate_checkpoint} · {item.created_at}</option>)}</select></label>}
     </section>
 
     {selected && report && <section className="card evaluation-report">
-      <h2>Verdict: {report.decision}</h2>
+      <h2>Audited verdict: {report.decision.replace('_', ' ')}</h2>
       <p>{report.reason}</p>
       <div className="evaluation-metrics">
         <div><strong>{report.usable_pairs}/{report.target_pairs}</strong><span>usable pairs</span></div>
         <div><strong>{report.baseline_successes}/{report.usable_pairs}</strong><span>baseline successes</span></div>
         <div><strong>{report.candidate_successes}/{report.usable_pairs}</strong><span>candidate successes</span></div>
-        <div><strong>{percent(report.paired_difference)}</strong><span>paired gain</span></div>
+        <div><strong>{percent(report.observed_difference ?? report.paired_difference)}</strong><span>paired gain</span></div>
       </div>
-      <p className="hint">95% paired bootstrap interval: {percent(report.ci_low)} to {percent(report.ci_high)}. Exact paired test p={report.exact_p_value?.toFixed(4) ?? '—'}. Candidate-only wins: {report.candidate_only}; baseline-only wins: {report.baseline_only}. Safety stops: {report.baseline_safety_stops} baseline, {report.candidate_safety_stops} candidate.</p>
+      <p className="hint">Conservative paired interval: {percent(report.difference_interval?.[0] ?? report.ci_low)} to {percent(report.difference_interval?.[1] ?? report.ci_high)}. Candidate-only wins: {report.candidate_only}; baseline-only wins: {report.baseline_only}. Safety stops: {report.baseline_safety_stops} baseline, {report.candidate_safety_stops} candidate.</p>
+      <div className="evaluation-secondary-metrics">
+        <div><strong>Human interventions</strong><span>Base {report.baseline_interventions ?? '—'} · candidate {report.candidate_interventions ?? '—'}</span></div>
+        <div><strong>Mean run duration</strong><span>Base {report.baseline_mean_duration_s?.toFixed(1) ?? '—'}s · candidate {report.candidate_mean_duration_s?.toFixed(1) ?? '—'}s</span></div>
+        <div><strong>Mean first response</strong><span>Base {report.baseline_mean_first_response_s?.toFixed(1) ?? '—'}s · candidate {report.candidate_mean_first_response_s?.toFixed(1) ?? '—'}s</span></div>
+      </div>
+      {report.problems && report.problems.length > 0 && <div className="alert"><strong>Evidence needed</strong><ul>{report.problems.map((problem) => <li key={problem}>{problem}</li>)}</ul></div>}
+      {report.warnings && report.warnings.length > 0 && <details><summary>Audit limits</summary><ul>{report.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}
+      {report.input_sha256 && <p className="hint">Evidence checksum: <code>{report.input_sha256}</code></p>}
       {report.decision === 'improved' && deployment?.checkpoint !== selected.candidate_checkpoint && <button disabled={busy} onClick={promote}>Use verified candidate</button>}
       <p className="hint">Checkpoint changes affect future coach runs only. Review the rollouts and safety stops before any robot motion.</p>
-      <p className="hint">Auto promotion for this comparison: {selected.auto_promote ? 'on' : 'off'}. It only changes the checkpoint used by future coach runs after an improved verdict; it never starts robot motion.</p>
+      <p className="hint">A completed audit is required before checkpoint promotion. Promotion affects future coach task runs only and never starts robot motion.</p>
     </section>}
 
     {selected && <section className="card">
       <h2>Paired statistical audit</h2>
-      <p>Export all observed runs for the stricter statistical check. Older labels without a reviewer and unfinished scenes remain in the snapshot but cannot earn an improvement verdict.</p>
+      <p>Save the authoritative statistical check. Older labels without a reviewer and unfinished scenes remain in the snapshot but cannot earn an improvement verdict.</p>
       <label><input type="checkbox" checked={heldoutAttested} onChange={(event) => setHeldoutAttested(event.target.checked)} /> I checked that these scenes were kept out of training.</label>
       <label><input type="checkbox" checked={resetsAttested} onChange={(event) => setResetsAttested(event.target.checked)} /> I checked that the scene was reset between runs.</label>
-      <button disabled={busy || !heldoutAttested || !resetsAttested} onClick={auditSnapshot}>Analyze and download paired evidence</button>
+      <button disabled={busy || !heldoutAttested || !resetsAttested} onClick={auditSnapshot}>Save audit and download evidence</button>
       {auditDecision && <p role="status">{auditDecision}</p>}
     </section>}
 
@@ -274,7 +334,9 @@ export default function EvaluationPage() {
         {outcome === 'failure' && <label>Failure stage<select value={stage} onChange={(event) => setStage(event.target.value)}><option value="">Unknown</option><option value="approach">Approach</option><option value="grasp">Grasp</option><option value="transport">Transport</option><option value="release">Release</option><option value="other">Other</option></select></label>}
         <label>Note<textarea maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} /></label>
         <label>Reviewer name or ID<input maxLength={120} value={reviewerId} onChange={(event) => setReviewerId(event.target.value)} /></label>
-        <button disabled={busy || !reviewerId.trim()} onClick={() => label(nextTrial)}>Save outcome</button>
+        <label>Human interventions<input type="number" min={0} max={999} step={1} value={interventions} onChange={(event) => setInterventions(Number(event.target.value))} /></label>
+        <label>Time to first model response (seconds, if measured)<input type="number" min={0} step="0.1" value={firstResponseS} onChange={(event) => setFirstResponseS(event.target.value)} placeholder="Optional" /></label>
+        <button disabled={busy || !reviewerId.trim() || !Number.isInteger(interventions) || interventions < 0 || (firstResponseS.trim() !== '' && (!Number.isFinite(Number(firstResponseS)) || Number(firstResponseS) < 0))} onClick={() => label(nextTrial)}>Save outcome</button>
       </div>}
     </section>}
     {selected && trials.length > 0 && !nextTrial && <section className="card"><h2>{unusable ? 'This comparison has an unusable run' : 'All planned runs are finished'}</h2><p>{unusable ? 'Plan a fresh comparison with the same fine-tune. The incomplete result stays in the record.' : 'Read the verdict above before deciding whether to deploy the candidate.'}</p></section>}

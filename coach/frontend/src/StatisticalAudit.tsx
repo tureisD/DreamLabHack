@@ -18,6 +18,7 @@ type SamplePlan = {
 type PairAttempt = {
   outcome: string; held_lift_m: number | null; first_close_after_warmup_s: number | null;
   model_action_rows: number | null; replay_max_state_error_m: number | null;
+  interventions?: number; duration_s?: number | null; first_response_s?: number | null;
 };
 type Pair = { pair_id: string; baseline: PairAttempt | null; candidate: PairAttempt | null };
 type PairedReport = {
@@ -27,6 +28,9 @@ type PairedReport = {
   baseline_successes: number; candidate_successes: number; observed_difference: number | null;
   difference_interval: [number, number] | null; interval_method: string | null;
   input_sha256: string; problems: string[]; warnings: string[]; pairs: Pair[];
+  baseline_interventions?: number; candidate_interventions?: number;
+  baseline_mean_duration_s?: number | null; candidate_mean_duration_s?: number | null;
+  baseline_mean_first_response_s?: number | null; candidate_mean_first_response_s?: number | null;
 };
 
 function percent(value: number | null) {
@@ -177,19 +181,25 @@ export default function StatisticalAudit() {
         <div><strong>{percent(pairedReport.observed_difference)}</strong><span>Observed paired gain</span></div>
         <div><strong>{pairedReport.difference_interval ? `${percent(pairedReport.difference_interval[0])} to ${percent(pairedReport.difference_interval[1])}` : '—'}</strong><span>Physical-trial interval</span></div>
       </div>
+      <div className="evaluation-secondary-metrics">
+        <div><strong>Human interventions</strong><span>Base {pairedReport.baseline_interventions ?? '—'} · candidate {pairedReport.candidate_interventions ?? '—'}</span></div>
+        <div><strong>Mean run duration</strong><span>Base {pairedReport.baseline_mean_duration_s?.toFixed(1) ?? '—'}s · candidate {pairedReport.candidate_mean_duration_s?.toFixed(1) ?? '—'}s</span></div>
+        <div><strong>Mean first response</strong><span>Base {pairedReport.baseline_mean_first_response_s?.toFixed(1) ?? '—'}s · candidate {pairedReport.candidate_mean_first_response_s?.toFixed(1) ?? '—'}s</span></div>
+      </div>
       <p>{pairedReport.decision === 'descriptive'
         ? 'These simulator outcomes show task performance on the submitted scenes. They do not establish physical-robot success or statistical improvement.'
         : pairedReport.decision === 'not_evaluable' ? 'The evidence is incomplete or inconsistent; review the problems below.'
           : `Method: ${pairedReport.interval_method}. This result still needs independent verification of scene resets, labels, and safety.`}</p>
       {pairedReport.problems.length > 0 && <><h3>Problems</h3><ul>{pairedReport.problems.map((item) => <li key={item}>{item}</li>)}</ul></>}
       <div className="audit-table-wrap"><table className="audit-table">
-        <thead><tr><th>Scene</th><th>Base held lift</th><th>Fine-tune held lift</th><th>Base close</th><th>Fine-tune close</th><th>Base</th><th>Fine-tune</th></tr></thead>
+        <thead><tr><th>Scene</th><th>Base held lift</th><th>Fine-tune held lift</th><th>Base close</th><th>Fine-tune close</th><th>Base</th><th>Fine-tune</th><th>Interventions (base / fine-tune)</th></tr></thead>
         <tbody>{pairedReport.pairs.map((pair) => <tr key={pair.pair_id}>
           <td>{pair.pair_id}</td><td>{pair.baseline?.held_lift_m == null ? '—' : `${(pair.baseline.held_lift_m * 100).toFixed(1)} cm`}</td>
           <td>{pair.candidate?.held_lift_m == null ? '—' : `${(pair.candidate.held_lift_m * 100).toFixed(1)} cm`}</td>
           <td>{pair.baseline?.first_close_after_warmup_s == null ? '—' : `${pair.baseline.first_close_after_warmup_s.toFixed(1)} s`}</td>
           <td>{pair.candidate?.first_close_after_warmup_s == null ? '—' : `${pair.candidate.first_close_after_warmup_s.toFixed(1)} s`}</td>
           <td>{pair.baseline?.outcome ?? 'missing'}</td><td>{pair.candidate?.outcome ?? 'missing'}</td>
+          <td>{pair.baseline?.interventions ?? '—'} / {pair.candidate?.interventions ?? '—'}</td>
         </tr>)}</tbody>
       </table></div>
       <p className="hint">All {pairedReport.submitted_pairs} submitted pairs are retained. Snapshot SHA-256: <code>{pairedReport.input_sha256}</code>.</p>
