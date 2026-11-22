@@ -7,12 +7,13 @@ type CheckpointOption = {
   steps: number | null;
 };
 
-export default function ChatCheckpointPicker({ onClose, onCompare }: {
+export default function ChatCheckpointPicker({ onClose, onCompare, preferredCheckpoint }: {
   onClose: () => void;
   onCompare: (checkpoint: string) => Promise<boolean>;
+  preferredCheckpoint?: string;
 }) {
   const [options, setOptions] = useState<CheckpointOption[] | null>(null);
-  const [checkpoint, setCheckpoint] = useState('');
+  const [checkpoint, setCheckpoint] = useState(preferredCheckpoint ?? '');
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [starting, setStarting] = useState(false);
@@ -67,7 +68,7 @@ export default function ChatCheckpointPicker({ onClose, onCompare }: {
     {options?.length === 0 && <p>No completed fine-tunes in the connected Dream account are ready for this YAM apple pickup comparison.</p>}
     {!!options?.length && <>
       <label className="chat-workspace-field chat-tool-body">Training dataset and checkpoint
-        <select value={checkpoint} disabled={starting} onChange={(event) => { setCheckpoint(event.target.value); setError(''); }}>
+        <select value={selection?.checkpoint ?? ''} disabled={starting} onChange={(event) => { setCheckpoint(event.target.value); setError(''); }}>
           <option value="">Choose a completed fine-tune</option>
           {options.map((option) => <option key={option.checkpoint} value={option.checkpoint}>
             {option.dataset}{option.steps !== null ? ` · ${option.steps.toLocaleString()} steps` : ''} · {option.checkpoint}

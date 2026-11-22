@@ -23,7 +23,7 @@ type WorkSurface =
   | { kind: 'training'; taskId: string }
   | { kind: 'scene'; preset?: ScenePreset }
   | { kind: 'fruit' }
-  | { kind: 'checkpoints' }
+  | { kind: 'checkpoints'; preferredCheckpoint?: string }
   | { kind: 'tool'; tool: ChatTool };
 const hosted = Boolean(document.querySelector('meta[name="dreamcoach-mode"][content="hosted"]'));
 
@@ -494,6 +494,7 @@ export default function CoachChat({
   }
 
   const hostedGuide = hosted && ai?.configured === false;
+  const comparedCheckpoint = evaluation.simulation?.candidate;
   const currentTask = activeTaskId && workflowTask?.id === activeTaskId ? workflowTask : undefined;
   const currentPipeline = pipeline?.taskId === activeTaskId ? pipeline : null;
   const simulatorRequested = begun && (hostedGuide || showSimulator || currentYamJob || simulatorMode !== 'apple'
@@ -517,11 +518,12 @@ export default function CoachChat({
       case 'tool':
         return <ChatToolPanel tool={surface.tool} onClose={closeWork} />;
       case 'checkpoints':
-        return <ChatCheckpointPicker onClose={closeWork} onCompare={async (checkpoint) => {
-          const started = await runYamAction('/api/simulator/compare-existing', { checkpoint });
-          if (started) closeWork();
-          return started;
-        }} />;
+        return <ChatCheckpointPicker onClose={closeWork} preferredCheckpoint={surface.preferredCheckpoint}
+          onCompare={async (checkpoint) => {
+            const started = await runYamAction('/api/simulator/compare-existing', { checkpoint });
+            if (started) closeWork();
+            return started;
+          }} />;
       case 'scene':
       case 'fruit': {
         const props = {
@@ -596,12 +598,9 @@ export default function CoachChat({
         stop={quitYam}
         review={() => openWork('demos')}
         training={() => openWork('training')}
-        explainComparison={hostedGuide ? undefined : () => {
-          if (busy) return;
-          const history: Message[] = [...messages, { role: 'user', content: 'Explain this simulator comparison and suggest what to do next.' }];
-          setMessages(history);
-          void turn(history);
-        }}
+        planFreshComparison={comparedCheckpoint ? () => showWork({
+          kind: 'checkpoints', preferredCheckpoint: comparedCheckpoint,
+        }) : undefined}
       />}
       {begun && reply?.task_draft && reply.setup_help !== 'simulator' && <div className="chat-action"><strong>Ready to save this task?</strong><p>{reply.task_draft.name} · {reply.task_draft.prompt}<br />Success: {reply.task_draft.success_rule}</p><button disabled={busy} onClick={() => void saveTask(reply.task_draft!)}>Confirm and save task</button></div>}
       {begun && reply?.suggested_screen && reply.suggested_screen !== 'tasks' && !(simulatorRequested

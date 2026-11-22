@@ -298,6 +298,16 @@ button.secondary:hover { background: #cfe2ea; color: #153d50; }
 .yam-comparison-explanation { display: grid; gap: 6px; min-width: 0; }
 .yam-comparison-explanation p { margin: 0; }
 .yam-next > .yam-comparison-explanation { flex: 1 1 220px; }
+.yam-comparison-review {
+  display: grid;
+  flex: 1 0 100%;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid #ede2d8;
+}
+.yam-comparison-review > button { justify-self: start; }
+.yam-comparison-review .audit-table caption { text-align: left; padding: 6px 0; color: #63554a; }
 .yam-scene-count { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; }
 .yam-scene-count select { border: 1px solid #dec8b7; background: #fffaf5; padding: 5px 7px; border-radius: 8px; font: inherit; }
 @container yam-card (max-width: 405px) {

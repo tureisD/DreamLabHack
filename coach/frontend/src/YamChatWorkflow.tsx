@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ScenePreset } from './SceneTask';
 import type { PairedReport } from './StatisticalAudit';
 import { YamComparisonPlan, YamComparisonProgress } from './YamComparisonExplanation';
+import YamComparisonReview from './YamComparisonReview';
 
 export type YamJob = {
   id: string;
@@ -37,7 +38,7 @@ const sceneChoices: { id: ScenePreset; title: string; target: string }[] = [
 
 export default function YamChatWorkflow({
   setup, dreamReady, job, pipeline, comparisonReport, mode, setMode, openRecorder, openExistingCheckpoints,
-  prepare, collect, reuseDemos, compare, stop, review, training, explainComparison,
+  prepare, collect, reuseDemos, compare, stop, review, training, planFreshComparison,
 }: {
   setup: { state: string; message: string } | null;
   dreamReady: boolean;
@@ -55,7 +56,7 @@ export default function YamChatWorkflow({
   stop: () => Promise<unknown>;
   review: () => void;
   training: () => void;
-  explainComparison?: () => void;
+  planFreshComparison?: () => void;
 }) {
   const [scenes, setScenes] = useState(4);
   const [busy, setBusy] = useState(false);
@@ -113,6 +114,8 @@ export default function YamChatWorkflow({
         </>}
       </div>
       {running && <button type="button" className="yam-secondary" disabled={busy} onClick={() => void act(stop)}>Quit run</button>}
+      {job.kind === 'comparison' && job.state === 'completed' && <YamComparisonReview
+        key={job.id} job={job} report={comparisonReport} onConfirmFresh={ready && dreamReady ? planFreshComparison : undefined} />}
     </div>}
 
     {mode === 'scene' && <div className="yam-panel">
@@ -178,9 +181,6 @@ export default function YamChatWorkflow({
           {job?.kind === 'comparison' && job.state === 'completed' ? 'Run comparison again' : 'Run simulator comparison'}
         </button>
       </div>}
-      {job?.kind === 'comparison' && job.state === 'completed' && explainComparison && <button type="button" className="yam-secondary" onClick={explainComparison}>
-        Explain comparison results
-      </button>}
     </div>}
   </section>;
 }
