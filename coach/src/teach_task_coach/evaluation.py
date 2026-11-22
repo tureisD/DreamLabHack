@@ -35,6 +35,10 @@ class Evaluation(BaseModel):
 
 
 class EvaluationReport(BaseModel):
+    rule_version: str = 'coach-paired-audit-v1'
+    population: str = 'station'
+    completeness: Literal['incomplete', 'complete']
+    missing_pairs: int
     evaluation_id: str
     target_pairs: int
     usable_pairs: int
@@ -266,6 +270,8 @@ class EvaluationStore:
         interval = audit.difference_interval if decision != "not_evaluable" else None
         return EvaluationReport(
             evaluation_id=evaluation.id,
+            completeness="complete" if audit.usable_pairs == evaluation.planned_pairs else "incomplete",
+            missing_pairs=max(0, evaluation.planned_pairs - audit.usable_pairs),
             target_pairs=evaluation.planned_pairs,
             usable_pairs=audit.usable_pairs,
             baseline_successes=audit.baseline_successes,

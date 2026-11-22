@@ -47,16 +47,22 @@ Open **http://127.0.0.1:8765** and select **Runs → Scan rollouts**. Open the *
 For free scripted apple pickup demonstrations, reuse the same root:
 
 ```powershell
-uv run --locked --extra sim python .\experiments\yam_sim_faas\record_yam_demos.py --output "$env:COACH_ROLLOUTS_DIR" --episodes 2 --seed 101
+uv run --locked --extra sim python .\experiments\yam_sim_faas\record_yam_demos.py --output "$env:COACH_ROLLOUTS_DIR" --episodes 2 --seed 101 --start-pose wrist-visible
 ```
 
-This samples the apple's initial X and Y positions within 2.5 cm of the original placement. Seeds 101 and 102 give two reproducible scenes. Omit the seed to choose a fresh starting seed. Repeating a seed repeats the placement and creates a separate run. Run **Scan rollouts** again after collection. Each finished run keeps its videos, state/action rows and an atomic `rollout.json` beside them. The sidecar records simulation provenance and the actual starting position. The scripted pickup check lives in `simulation.script_result`; the operator label is entered separately. Review failures before selecting training examples. An interruption during capture can produce a partial recording, and abrupt process termination can leave an unfinished directory that Coach skips.
+`--start-pose` accepts `home` (the default) or `wrist-visible`. The scripted controller preserves the selected arm pose during its settling period, so a wrist-visible demonstration remains wrist-visible before the grasp. This is a scripted simulation, not a Dream-1 model result. This samples the apple's initial X and Y positions within 2.5 cm of the original placement. Seeds 101 and 102 give two reproducible scenes. Omit the seed to choose a fresh starting seed. Repeating a seed repeats the placement and creates a separate run. Run **Scan rollouts** again after collection. Each finished run keeps its videos, state/action rows and an atomic `rollout.json` beside them. The sidecar records simulation provenance and the actual starting position. The scripted pickup check lives in `simulation.script_result`; the operator label is entered separately. Review failures before selecting training examples. An interruption during capture can produce a partial recording, and abrupt process termination can leave an unfinished directory that Coach skips.
 
 Add `--start-pose wrist-visible` to collect scripted reach, close, lift and release examples from the same initial arm posture as a wrist-visible model pilot. Use a common seed to compare grasps at the same apple location. Reserve separate seeds for evaluating a trained checkpoint.
 
 For the first wrist-visible grasp dataset, training uses scene seeds 41 through 48. Seeds 901 through 904 are reserved for matched base and fine-tuned simulator trials. Use the same prompt, start pose and simulated time allowance for both checkpoints. Check how each checkpoint's action rows map to simulated time before running the comparison. Score a pickup when the unassisted apple rises at least 8 cm above its settled height and stays there for 2 continuous seconds. Confirm each outcome in the video and report any incomplete runs. The scripted training examples also include a release after the hold.
 
 Review and label the original 20 Hz recordings. For training, select reviewed scripted successes in a separate source directory before using the 10 Hz conversion in the [experiment notes](README.md). The standalone statistical evaluator requires eligible physical trials for its real-world verdict.
+
+## Review one simulated apple pickup
+
+In **Run review**, scan the recordings and open `pick up the apple`. Under the video, **Simulator evidence** distinguishes a scripted reference, a model run, and a camera-only recording. Select **View evidence** to pause the current camera at the supporting frame. The observer does not grade other tasks or hardware. It never writes the operator label or supplies results to training or statistical inference.
+
+The 20 Hz `apple-evidence-v1.csv` records the apple center height and actual contact with each hand's fingertips before each control step, at the same time as the corresponding video frame. Finger masks `1` and `2` identify individual tips; `3` means both on that hand. `other_contact` marks contact with anything else, including the table. Height is relative to the first analyzed sample. Model warm-up frames are excluded using the recorded `warmup_rows` and `model_action_rows` counters. A verified hold requires both tips of the same hand, no other contact, and height **over 8 cm** across at least **2 seconds** (41 consecutive samples). Release is not required for this task. Sub-frame contacts can be missed; findings apply only to the recorded window. Missing, malformed or unsupported traces remain unassessed, not failed. Old imports can be rescanned without changing human labels.
 
 ## Save your key on Windows
 

@@ -16,6 +16,7 @@ type Trial = {
 };
 export type Report = {
   usable_pairs: number; target_pairs: number; baseline_successes: number; candidate_successes: number;
+  rule_version?: string; completeness?: 'incomplete' | 'complete'; missing_pairs?: number;
   baseline_reviewed: number; candidate_reviewed: number;
   baseline_only: number; candidate_only: number; paired_difference: number | null;
   ci_low: number | null; ci_high: number | null; exact_p_value: number | null;
@@ -301,8 +302,9 @@ export default function EvaluationPage({ initialTaskId = '', initialEvaluationId
     </section>
 
     {selected && report && <section className="card evaluation-report">
-      <h2>Audited verdict: {report.decision.replace('_', ' ')}</h2>
+      <h2>{report.completeness === 'incomplete' ? 'Incomplete comparison' : `Audited verdict: ${report.decision.replace('_', ' ')}`}</h2>
       <p>{report.reason}</p>
+      {report.rule_version && <p className="hint">Decision rule <code>{report.rule_version}</code></p>}
       <div className="evaluation-metrics">
         <div><strong>{report.usable_pairs}/{report.target_pairs}</strong><span>usable pairs</span></div>
         <div><strong>{report.baseline_successes}/{report.usable_pairs}</strong><span>baseline successes</span></div>

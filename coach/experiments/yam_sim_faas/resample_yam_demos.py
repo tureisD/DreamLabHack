@@ -1,6 +1,7 @@
 """Export single-episode YAM simulator recordings as 10 Hz LeRobot v2.1 training sessions."""
 
 import argparse
+import hashlib
 import json
 import sys
 import tempfile
@@ -89,22 +90,80 @@ def export_session(session, output):
     return n
 
 
+def reviewed_source(store, source, task_id, demo_id):
+    from teach_task_coach.demos import read_demo
+
+    demo = store.get(demo_id)
+    if demo and demo.origin == "offline_fixture":
+        raise ValueError("Offline fixture demos are never eligible for training conversion.")
+    origins = {"human", "scripted_reference"}
+    if not demo or demo.task_id != task_id or demo.decision != "keep" or not demo.valid or demo.origin not in origins:
+        raise ValueError(f"Choose a kept, valid demonstration for this task: {demo_id}")
+    session = Path(demo.source_path).resolve()
+    if session.parent != source:
+        raise ValueError("Selected demo is outside the specified source directory.")
+    current = read_demo(session, demo.task_id)
+    if (
+        not current.valid or current.origin != demo.origin or current.offline_task_id is not None
+        or current.evidence_sha256 != demo.evidence_sha256
+    ):
+        raise ValueError("Selected demo evidence changed or belongs to an offline fixture. Rescan the source.")
+    conversion = session / "meta/conversion.json"
+    if conversion.is_file():
+        existing = json.loads(conversion.read_text(encoding="utf-8"))
+        if existing.get("origin") == "offline_fixture" or existing.get("offline_task_id"):
+            raise ValueError("Offline fixture conversions are never eligible for training resampling.")
+    raw_sidecar = (session / "rollout.json").read_bytes()
+    sidecar = json.loads(raw_sidecar)
+    simulation = sidecar.get("simulation") or {}
+    if sidecar.get("status") != "complete" or simulation.get("source") != "scripted":
+        raise ValueError("Choose a complete, explicitly scripted recording.")
+    if simulation.get("policy_origin") == "offline_fixture":
+        raise ValueError("Offline fixture recordings are never eligible for training conversion.")
+    return session, {
+        "source_demo_id": demo.id,
+        "source_task_id": demo.task_id,
+        "source_recording_id": sidecar.get("recording_id"),
+        "source_sidecar_sha256": hashlib.sha256(raw_sidecar).hexdigest(),
+        "source": simulation["source"],
+        "origin": demo.origin,
+        "source_fps": 20,
+        "output_fps": FPS,
+        "selection": "even source frames",
+        "start_cell": demo.start_cell,
+    }
+
+
 def main():
+    from teach_task_coach.demos import DemoStore, read_demo
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, default=Path.cwd() / "yam_sim_dataset_20hz")
     parser.add_argument("--output", type=Path, default=Path.cwd() / "yam_sim_dataset_10hz")
+    parser.add_argument("--task-id", required=True)
+    parser.add_argument("--kept-demo", action="append", required=True,
+                        help="Coach ID of a reviewed and kept scripted demo. Repeat to select more.")
     args = parser.parse_args()
     source, target = args.source.resolve(), args.output.resolve()
     if target == source or target.is_relative_to(source):
         parser.error("Choose a separate output directory outside the source")
+    store = DemoStore()
+    try:
+        selected = [reviewed_source(store, source, args.task_id, item)
+                    for item in dict.fromkeys(args.kept_demo)]
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
     target.mkdir(parents=True, exist_ok=True)
-    for session in sorted(path for path in source.iterdir() if path.is_dir()):
+    for session, provenance in selected:
         output = target / session.name
         if output.exists():
             parser.error(f"Output session already exists: {output}. Choose a fresh output directory.")
         with tempfile.TemporaryDirectory(dir=target.parent) as tmp:
             stage = Path(tmp) / session.name
             n = export_session(session, stage)
+            (stage / "meta/conversion.json").write_text(json.dumps(provenance, indent=2), encoding="utf-8")
+            if not read_demo(stage, args.task_id).valid:
+                raise ValueError(f"Converted session failed media validation: {output}")
             stage.rename(output)
         print(f"resampled {session.name}: {n} frames at {FPS} Hz")
 

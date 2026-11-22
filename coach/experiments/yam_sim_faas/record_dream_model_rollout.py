@@ -52,6 +52,7 @@ def main(argv=None) -> None:
     source = "observation dry run" if args.dry_run else "model"
     with recorder.recording(args.output, args.task, args.model, seed, source,
                             start_pose=pose, videos=not args.score_only) as (env, details):
+        details["policy_origin"] = "observation_only" if args.dry_run else "dream_model"
         options = ["--headless", "--quiet", "--seconds", str(args.seconds), "--task", args.task,
                    "--model", args.model, "--max-requests", str(args.max_requests)]
         if args.dry_run:
@@ -72,7 +73,11 @@ def main(argv=None) -> None:
         finally:
             details["simulated_control_seconds"] = details["model_action_rows"] / recorder.FPS
         if args.held_out_scene is not None and not args.dry_run and rows != control_rows:
-            budgeted_calls = details["requests_attempted"] - details.get("pool_warming_refusals", 0)
+            budgeted_calls = (
+                details["requests_attempted"]
+                - details.get("pool_warming_refusals", 0)
+                - details.get("session_replacements", 0)
+            )
             details["control_stop"] = "request_cap" if budgeted_calls >= args.max_requests else "wall_clock_limit"
             raise RuntimeError(f"Incomplete held-out trial: executed {rows} of {control_rows} control rows")
         if not args.dry_run and not rows:

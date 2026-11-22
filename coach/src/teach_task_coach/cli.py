@@ -27,6 +27,9 @@ def main() -> None:
     audit.add_argument("folder", type=Path)
     all_audits = subcommands.add_parser("audit-rollouts", help="Audit all finalized rollout folders without writing")
     all_audits.add_argument("root", type=Path)
+    offline = subcommands.add_parser("offline-demo", help="Run an isolated local fixture walkthrough without Dream or station access")
+    offline.add_argument("--directory", type=Path, help="Create data in this new directory")
+    offline.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
 
     if args.command == "preflight":
@@ -48,6 +51,19 @@ def main() -> None:
         print(audit_rollout(args.folder).model_dump_json(indent=2))
     elif args.command == "audit-rollouts":
         print(audit_many(args.root).model_dump_json(indent=2))
+    elif args.command == "offline-demo":
+        from teach_task_coach.offline_app import main as offline_main
+        argv = []
+        if args.directory:
+            argv.extend(["--directory", str(args.directory)])
+        argv.extend(["--port", str(args.port)])
+        import sys
+        original = sys.argv
+        try:
+            sys.argv = ["teach-task-coach offline-demo", *argv]
+            offline_main()
+        finally:
+            sys.argv = original
     else:
         data_dir = default_data_dir()
         run_worker(FaaSStore(data_dir), TaskStore(data_dir), DemoStore(data_dir), args.interval)

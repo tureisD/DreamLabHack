@@ -54,7 +54,7 @@ def solve(env, side, target, rotation, seed):
 
 
 def run_trial(fruit, yaw=0, lift=0.15, *, env=None, snapshot_dir=None,
-              approach_steps=60, descent_steps=60, approach_height=None):
+              approach_steps=60, descent_steps=60, approach_height=None, settle_steps=30):
     """Run one scripted physical pickup and release trial.
     @param fruit Scene fruit name.
     @param yaw Grasp yaw in radians.
@@ -67,7 +67,7 @@ def run_trial(fruit, yaw=0, lift=0.15, *, env=None, snapshot_dir=None,
     try:
         home = np.r_[np.zeros(6), 1.0]
         start = env.state()
-        for _ in range(30):
+        for _ in range(settle_steps):
             env.step(start["left"], start["right"])
         p = env.data.body(fruit).xpos.copy()
         initial_z = p[2]

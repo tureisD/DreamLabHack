@@ -83,7 +83,11 @@ def export_paired_snapshot(
             "unknown" if trial.status != "completed" or episode.status != "complete"
             or episode.success is None else "success" if episode.success else "failure"
         )
-        if episode.checkpoint != trial.checkpoint or episode.task != task.prompt:
+        if (
+            episode.checkpoint != trial.checkpoint or episode.task != task.prompt
+            or episode.collection_mode == "simulation" or episode.simulation is not None
+            or episode.stop_reason == "ModelReady"
+        ):
             outcome = "invalid"
         observed_response = [event.elapsed_s for event in episode.events
                              if event.kind == "inference" and event.elapsed_s is not None]

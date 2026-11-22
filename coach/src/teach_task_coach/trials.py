@@ -25,7 +25,7 @@ def _parse_time(value: str | None) -> dt.datetime | None:
 
 
 def _matches(trial: Trial, episode: EpisodeSummary, prompt: str, checkpoint: str) -> bool:
-    if episode.simulation is not None or episode.run_number != trial.station_run:
+    if episode.collection_mode == "simulation" or episode.simulation is not None or episode.run_number != trial.station_run:
         return False
     if episode.task != prompt or episode.checkpoint != checkpoint:
         return False
@@ -163,19 +163,12 @@ class TrialRunner:
         interventions: int = 0,
         first_response_s: float | None = None,
     ) -> Trial:
-        trial = self.tasks.get_trial(trial_id)
-        if trial is None:
-            raise KeyError(trial_id)
-        if trial.status != "awaiting_label" or trial.episode_id is None:
-            raise TrialError("Attach a finished rollout before labelling the trial.")
-        episode = self.episodes.get(trial.episode_id)
-        if episode is None or episode.status != "complete":
-            raise TrialError("An incomplete rollout cannot be labelled; mark the trial unusable.")
-        self.episodes.label(
-            trial.episode_id, success, failure_stage, note, reviewer_id,
-            interventions, first_response_s,
-        )
-        return self.tasks.transition(trial_id, "awaiting_label", "completed")
+        try:
+            return self.tasks.complete_review(
+                trial_id, success, failure_stage, note, reviewer_id, interventions, first_response_s,
+            )
+        except TrialStateError as exc:
+            raise TrialError(str(exc)) from exc
 
     def abandon(self, trial_id: str, reason: str) -> Trial:
         trial = self.tasks.get_trial(trial_id)

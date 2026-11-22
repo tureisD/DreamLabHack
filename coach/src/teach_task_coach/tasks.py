@@ -28,6 +28,7 @@ class TaskInput(BaseModel):
 class Task(TaskInput):
     id: str
     created_at: str
+    offline_mode: bool = False
 
 
 class TrialInput(BaseModel):
@@ -84,7 +85,8 @@ class TaskStore:
                 prompt TEXT NOT NULL,
                 baseline_checkpoint TEXT NOT NULL,
                 success_rule TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                offline_mode INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS trials (
                 id TEXT PRIMARY KEY,
@@ -108,6 +110,21 @@ class TaskStore:
                 ,prompt_override TEXT
             );
             CREATE INDEX IF NOT EXISTS trials_task_id ON trials(task_id);
+            CREATE TABLE IF NOT EXISTS sim_baselines (
+                recording_key TEXT PRIMARY KEY,
+                trial_id TEXT NOT NULL UNIQUE REFERENCES trials(id)
+            );
+            CREATE TABLE IF NOT EXISTS workflow_findings (
+                id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id),
+                episode_id TEXT NOT NULL REFERENCES episodes(id), kind TEXT NOT NULL,
+                message TEXT NOT NULL, reviewed_at TEXT, reason TEXT
+            );
+            CREATE TRIGGER IF NOT EXISTS sim_baseline_label_status
+            AFTER UPDATE OF success ON episodes
+            BEGIN
+                UPDATE trials SET status = CASE WHEN NEW.success IS NULL THEN 'awaiting_label' ELSE 'completed' END
+                WHERE episode_id=NEW.id AND id IN (SELECT trial_id FROM sim_baselines);
+            END;
             CREATE TABLE IF NOT EXISTS heldout_scenes (
                 task_id TEXT NOT NULL REFERENCES tasks(id),
                 scene_index INTEGER NOT NULL,
@@ -131,6 +148,9 @@ class TaskStore:
             );
             """
         )
+        task_columns = {row["name"] for row in connection.execute("PRAGMA table_info(tasks)")}
+        if "offline_mode" not in task_columns:
+            connection.execute("ALTER TABLE tasks ADD COLUMN offline_mode INTEGER NOT NULL DEFAULT 0")
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(trials)")}
         for name, sql_type in (
             ("checkpoint", "TEXT"), ("evaluation_id", "TEXT"),
@@ -141,12 +161,12 @@ class TaskStore:
             if name not in columns:
                 connection.execute(f"ALTER TABLE trials ADD COLUMN {name} {sql_type}")
 
-    def create_task(self, value: TaskInput) -> Task:
-        task = Task(id=uuid.uuid4().hex, created_at=_utc_now(), **value.model_dump())
+    def create_task(self, value: TaskInput, *, offline_mode: bool = False) -> Task:
+        task = Task(id=uuid.uuid4().hex, created_at=_utc_now(), offline_mode=offline_mode, **value.model_dump())
         with self.db.connect() as connection:
             self._schema(connection)
             connection.execute(
-                "INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO tasks (id, name, prompt, baseline_checkpoint, success_rule, created_at, offline_mode) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     task.id,
                     task.name,
@@ -154,6 +174,7 @@ class TaskStore:
                     task.baseline_checkpoint,
                     task.success_rule,
                     task.created_at,
+                    int(task.offline_mode),
                 ),
             )
             rng = random.Random(int(task.id[:16], 16))
@@ -349,6 +370,48 @@ class TaskStore:
             self._schema(connection)
             row = connection.execute("SELECT * FROM trials WHERE id = ?", (trial_id,)).fetchone()
         return None if row is None else Trial.model_validate(dict(row))
+
+    def complete_review(
+        self, trial_id: str, success: bool, failure_stage: str | None, note: str | None,
+        reviewer_id: str | None = None, interventions: int = 0, first_response_s: float | None = None,
+    ) -> Trial:
+        """Save the operator's initial trial verdict and finish the trial in one transaction."""
+        with self.db.connect() as connection:
+            self._schema(connection)
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM trials WHERE id = ?", (trial_id,)).fetchone()
+            if row is None:
+                raise KeyError(trial_id)
+            if row["episode_id"] is None or row["status"] not in ("awaiting_label", "completed"):
+                raise TrialStateError("Attach a finished rollout before labelling the trial.")
+            episode = connection.execute(
+                """SELECT success, failure_stage, note, review_revision, reviewer_id, interventions, first_response_s,
+                          json_extract(summary_json, '$.status') AS status FROM episodes WHERE id = ?""",
+                (row["episode_id"],),
+            ).fetchone()
+            if episode is None:
+                raise TrialStateError("Attached episode is missing.")
+            if episode["status"] != "complete":
+                raise TrialStateError("An incomplete rollout cannot be labelled; mark the trial unusable.")
+            verdict = (int(success), failure_stage, note, reviewer_id, interventions, first_response_s)
+            matches = tuple(episode[key] for key in (
+                "success", "failure_stage", "note", "reviewer_id", "interventions", "first_response_s",
+            )) == verdict
+            if not matches and (episode["review_revision"] != 0 or row["status"] == "completed"):
+                raise TrialStateError("A review already exists. Open Run review to compare or correct it.")
+            if row["status"] == "completed":
+                raise TrialStateError("This trial has already been completed.")
+            if not matches:
+                connection.execute(
+                    """UPDATE episodes SET success = ?, failure_stage = ?, note = ?,
+                       reviewer_id = ?, interventions = ?, first_response_s = ?,
+                       review_revision = review_revision + 1 WHERE id = ?""",
+                    (*verdict, row["episode_id"]),
+                )
+            # Imported simulation baselines also mirror Run review edits through a trigger.
+            connection.execute("UPDATE trials SET status = 'completed', last_error = NULL WHERE id = ?", (trial_id,))
+            saved = connection.execute("SELECT * FROM trials WHERE id = ?", (trial_id,)).fetchone()
+            return Trial.model_validate(dict(saved))
 
     def warmup_episode_ids(self, trial_id: str) -> list[str]:
         with self.db.connect() as connection:

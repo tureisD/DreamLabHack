@@ -8,6 +8,7 @@ import numpy as np
 import pyarrow.parquet as pq
 from pydantic import BaseModel
 
+from teach_task_coach.baseline_workflow import WorkflowFinding, findings, scoreable
 from teach_task_coach.storage import EpisodeStore
 from teach_task_coach.tasks import TaskStore
 
@@ -30,9 +31,14 @@ class TaskDiagnosis(BaseModel):
     unknown_count: int
     failure_stages: dict[str, int]
     recommendation: str
+    findings: list[WorkflowFinding]
+    open_finding_count: int
 
 
 def diagnose(task_id: str, tasks: TaskStore, episodes: EpisodeStore) -> TaskDiagnosis:
+    history = findings(task_id, tasks, episodes)
+    open_count = sum(f.reviewed_at is None for f in history)
+    setup_ids = {f.episode_id for f in history}
     runs = []
     stages: Counter[str] = Counter()
     for trial in tasks.list_trials(task_id):
@@ -55,11 +61,11 @@ def diagnose(task_id: str, tasks: TaskStore, episodes: EpisodeStore) -> TaskDiag
             except (OSError, ValueError, KeyError, TypeError):
                 pass
         problems = [finding.message for finding in episode.findings if finding.severity == "problem"]
-        if episode.status != "complete" or episode.stop_reason in ("SafetyStop", "ModelReady") or problems:
+        if episode.id in setup_ids:
             category: Literal["setup", "data", "unknown"] = "setup"
-            reason = "Station or recording issue needs review before this run informs training."
+            reason = "Station or recording issue. Excluded from task failures even after review."
             evidence.extend(problems)
-        elif outcome == "failure":
+        elif outcome == "failure" and scoreable(episode, trial.status):
             category = "data"
             reason = (
                 "Arm never left its starting pose; check initiation before collecting more examples."
@@ -87,11 +93,12 @@ def diagnose(task_id: str, tasks: TaskStore, episodes: EpisodeStore) -> TaskDiag
     data = sum(run.category == "data" for run in runs)
     unknown = len(runs) - setup - data
     recommendation = (
-        "Review station and recording issues first." if setup else
+        "Review open station and recording issues first." if open_count else
         "Collect demonstrations at confirmed failure positions." if data else
         "Label baseline outcomes before deciding what to collect."
     )
     return TaskDiagnosis(
         task_id=task_id, runs=runs, setup_count=setup, data_count=data,
         unknown_count=unknown, failure_stages=dict(stages), recommendation=recommendation,
+        findings=history, open_finding_count=open_count,
     )

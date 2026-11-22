@@ -21,6 +21,8 @@ This shows why the coach checks execution and evaluation settings before recomme
 fine-tune. It is a narrow simulator result. The [operator-study benchmark](coach/benchmark/README.md) is still
 prospective; we have **not** measured reductions in operator time, demonstration count, or FaaS spend.
 
+For a key-free demonstration, start with the [offline apple pickup walkthrough](coach/README.md#offline-apple-pickup-walkthrough), which uses scripted fixtures and verified saved video.
+
 ## Standalone statistical evaluation
 
 Evaluate whether a candidate robot checkpoint improves task success over a

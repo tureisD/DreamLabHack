@@ -23,7 +23,7 @@ The scripts use the adjacent Dream Labs `dream_library/examples/yam_mujoco` sour
 
 ```bash
 python path/to/coach/experiments/yam_sim_faas/record_yam_demos.py --output yam_sim_dataset_20hz
-python path/to/coach/experiments/yam_sim_faas/resample_yam_demos.py --source yam_sim_dataset_20hz --output yam_sim_dataset_10hz
+python path/to/coach/experiments/yam_sim_faas/resample_yam_demos.py --source reviewed-scripted-20hz --output yam_sim_dataset_10hz --task-id TASK_ID --kept-demo DEMO_ID
 ```
 
 To make a separate model-controlled rollout, set `DREAM_API_KEY` in the process environment and run `record_dream_model_rollout.py --output yam_dream1_rollout`. The scripts never write the key into the dataset. The model rollout is not a successful expert demonstration and should not be mixed into the training data without review.

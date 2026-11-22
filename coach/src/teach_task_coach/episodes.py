@@ -41,6 +41,9 @@ class EpisodeSummary(BaseModel):
     task: str
     checkpoint: str
     simulation: dict[str, Any] | None = None
+    collection_mode: str | None = None
+    recording_key: str | None = None
+    evidence_sha256: str | None = None
     pickup_evidence: PickupEvidence | None = None
     run_number: int | None = None
     body: str | None
@@ -56,6 +59,7 @@ class EpisodeSummary(BaseModel):
     videos: dict[str, str]
     findings: list[Finding]
     events: list[InferenceEvent]
+    review_revision: int = 0
     success: bool | None = None
     failure_stage: str | None = None
     note: str | None = None
@@ -66,6 +70,42 @@ class EpisodeSummary(BaseModel):
 
 def episode_id(path: Path) -> str:
     return hashlib.sha256(os.fsencode(path.resolve())).hexdigest()[:20]
+
+
+def recording_key(folder: Path, info: dict) -> str | None:
+    if info.get('collection_mode') != 'simulation':
+        return None
+    uid = info.get('recording_id')
+    if isinstance(uid, str) and len(uid) == 32 and all(c in '0123456789abcdef' for c in uid):
+        return 'yam:' + uid
+    # Legacy pilots have no immutable recording ID. Combine capture time and action bytes,
+    # never a folder name or seed. Without either component the run stays review-only.
+    if not info.get('started_at_utc'):
+        return None
+    file = folder / 'data/chunk-000/episode_000000.parquet'
+    if not file.is_file() or not file.resolve().is_relative_to(folder):
+        return None
+    h = hashlib.sha256(json.dumps([info['started_at_utc'], info.get('task'), info.get('checkpoint')]).encode())
+    with file.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            h.update(block)
+    return 'legacy-yam:' + h.hexdigest()
+
+
+def evidence_hash(folder: Path) -> str:
+    """Digest immutable rollout artifacts, excluding the editable operator-review label."""
+    folder = folder.resolve()
+    digest = hashlib.sha256()
+    for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+        if path.name == "operator-review.json":
+            continue
+        if not path.resolve().is_relative_to(folder):
+            raise EpisodeError("Episode evidence leaves its recording directory.")
+        digest.update(path.relative_to(folder).as_posix().encode("utf-8") + b"\0")
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+    return digest.hexdigest()
 
 
 def _json_object(path: Path) -> dict[str, Any]:
@@ -168,6 +208,9 @@ def read_episode(folder: Path) -> EpisodeSummary:
         checkpoint=info["checkpoint"],
         simulation=info.get("simulation") if isinstance(info.get("simulation"), dict) else None,
         pickup_evidence=assess_pickup(folder, info),
+        collection_mode=info.get('collection_mode'),
+        recording_key=recording_key(folder, info),
+        evidence_sha256=evidence_hash(folder),
         run_number=info.get("run"),
         body=info.get("body"),
         robot_name=info.get("robot_name"),

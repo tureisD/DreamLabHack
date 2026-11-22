@@ -27,12 +27,20 @@ from teach_task_coach.tasks import TaskInput, TaskStore
 class FakeDream:
     def __init__(self):
         self.body = SimpleNamespace(
-            name="pilot/robot", id="emb_1", embodiment_config={"state": {}, "action": {}, "video": {"overhead": "observation.images.overhead"}}
+            name="pilot/robot",
+            id="emb_1",
+            embodiment_config={
+                "state": {},
+                "action": {},
+                "video": {"overhead": "observation.images.overhead"},
+            },
         )
         self.remote_dataset = None
         self.remote_job = None
         self.upload_calls = 0
         self.submit_calls = 0
+        self.retry_calls = 0
+        self.retry_timeout_after_accept = False
 
     def embodiments(self):
         return [self.body]
@@ -46,12 +54,28 @@ class FakeDream:
     def upload(self, _path, name, embodiment):
         self.upload_calls += 1
         self.remote_dataset = SimpleNamespace(
-            id="ds_1", name=f"pilot/{name}", embodiment=embodiment, status="ready_to_process", error=None
+            id="ds_1",
+            name=f"pilot/{name}",
+            embodiment=embodiment,
+            status="ready_to_process",
+            error=None,
         )
         return self.remote_dataset
 
-    def dataset_status(self, _id):
-        return SimpleNamespace(status="processed", error=None)
+    def dataset_status(self, dataset_id):
+        assert self.remote_dataset and dataset_id == self.remote_dataset.id
+        if self.remote_dataset.status == "ready_to_process":
+            self.remote_dataset.status = "processed"
+        return self.remote_dataset
+
+    def retry_dataset(self, dataset_id):
+        assert self.remote_dataset and dataset_id == self.remote_dataset.id
+        self.retry_calls += 1
+        self.remote_dataset.status = "ready_to_process"
+        if self.retry_timeout_after_accept:
+            self.retry_timeout_after_accept = False
+            raise TimeoutError("fake timeout after remote acceptance")
+        return self.remote_dataset
 
     def finetunes(self):
         return [] if self.remote_job is None else [self.remote_job]
@@ -68,7 +92,12 @@ class FakeDream:
 def setup_dataset(tmp_path):
     task_store = TaskStore(tmp_path / "data")
     task = task_store.create_task(
-        TaskInput(name="Block", prompt="put block in bin", baseline_checkpoint="base", success_rule="in bin")
+        TaskInput(
+            name="Block",
+            prompt="put block in bin",
+            baseline_checkpoint="base",
+            success_rule="in bin",
+        )
     )
     source = tmp_path / "source"
     source.mkdir()
@@ -85,8 +114,13 @@ def test_worker_validates_uploads_and_publishes_checkpoint(tmp_path):
     dream = FakeDream()
     client = TestClient(
         create_app(
-            PreflightService(FakeStation(), list), EpisodeStore(tmp_path / "data"),
-            RolloutScanner(tmp_path), tasks, demo_store=demos, faas_store=store, dream_gateway=dream,
+            PreflightService(FakeStation(), list),
+            EpisodeStore(tmp_path / "data"),
+            RolloutScanner(tmp_path),
+            tasks,
+            demo_store=demos,
+            faas_store=store,
+            dream_gateway=dream,
         )
     )
     version_response = client.post(
@@ -128,15 +162,102 @@ def test_worker_validates_uploads_and_publishes_checkpoint(tmp_path):
     assert dream.submit_calls == 1
 
 
+def test_processing_retry_reuses_dataset_and_submits_approved_training_once(tmp_path):
+    tasks, task, demos, store = setup_dataset(tmp_path)
+    dream = FakeDream()
+    client = TestClient(
+        create_app(
+            PreflightService(FakeStation(), list),
+            EpisodeStore(tmp_path / "data"),
+            RolloutScanner(tmp_path),
+            tasks,
+            demo_store=demos,
+            faas_store=store,
+            dream_gateway=dream,
+        )
+    )
+    version = client.post(
+        f"/api/tasks/{task.id}/datasets", json={"embodiment_name": "pilot/robot"}
+    ).json()
+    worker = FaaSWorker(store, tasks, demos, dream)
+    worker.tick()
+    job_response = client.post(
+        f"/api/datasets/{version['id']}/finetunes", json=FineTuneRequest().model_dump()
+    )
+    assert job_response.status_code == 201
+    job_id = job_response.json()["id"]
+    worker.tick()
+    assert dream.upload_calls == 1 and store.get_finetune(job_id).status == "processing"
+    dream.remote_dataset.status = "failed"
+    dream.remote_dataset.error = "temporary processing fault"
+    worker.tick()
+    failed = store.get_finetune(job_id)
+    assert failed.status == "failed" and failed.failed_phase == "processing" and failed.failed_at
+    retried = client.post(f"/api/finetunes/{job_id}/retry-processing")
+    assert retried.status_code == 200 and retried.json()["status"] == "retry_requested"
+    assert retried.json()["failure_reason"] == "temporary processing fault"
+    assert client.post(f"/api/finetunes/{job_id}/retry-processing").status_code == 409
+    worker.tick()
+    assert dream.retry_calls == 1 and dream.upload_calls == 1
+    dream.remote_dataset.status = "processed"
+    worker.tick()
+    assert store.get_finetune(job_id).status == "pending_training"
+    worker.tick()
+    assert store.get_finetune(job_id).status == "training"
+    worker.tick()
+    assert store.get_finetune(job_id).status == "succeeded"
+    assert dream.retry_calls == 1 and dream.upload_calls == 1 and dream.submit_calls == 1
+
+
+def test_processing_retry_timeout_reconciles_existing_remote_dataset_without_repeating(tmp_path):
+    tasks, task, demos, store = setup_dataset(tmp_path)
+    dream = FakeDream()
+    client = TestClient(
+        create_app(
+            PreflightService(FakeStation(), list),
+            EpisodeStore(tmp_path / "data"),
+            RolloutScanner(tmp_path),
+            tasks,
+            demo_store=demos,
+            faas_store=store,
+            dream_gateway=dream,
+        )
+    )
+    version = client.post(
+        f"/api/tasks/{task.id}/datasets", json={"embodiment_name": "pilot/robot"}
+    ).json()
+    worker = FaaSWorker(store, tasks, demos, dream)
+    worker.tick()
+    job_id = client.post(
+        f"/api/datasets/{version['id']}/finetunes", json=FineTuneRequest().model_dump()
+    ).json()["id"]
+    worker.tick()
+    dream.remote_dataset.status = "failed"
+    worker.tick()
+    assert client.post(f"/api/finetunes/{job_id}/retry-processing").status_code == 200
+    dream.retry_timeout_after_accept = True
+    worker.tick()
+    assert dream.retry_calls == 1 and store.get_finetune(job_id).status == "retry_reconcile"
+    worker.tick()
+    assert dream.retry_calls == 1 and store.get_finetune(job_id).status == "pending_training"
+    assert dream.upload_calls == 1 and dream.submit_calls == 0
+
+
 def test_worker_reconciles_existing_remote_dataset_and_job(tmp_path):
     tasks, task, demos, store = setup_dataset(tmp_path)
     dream = FakeDream()
-    version = store.create_dataset(task.id, "pilot/robot", [demo.id for demo in demos.list(task.id)])
+    version = store.create_dataset(
+        task.id, "pilot/robot", [demo.id for demo in demos.list(task.id)]
+    )
     worker = FaaSWorker(store, tasks, demos, dream)
     worker.tick()
     job = store.create_finetune(version.id, FineTuneRequest())
     dream.remote_dataset = SimpleNamespace(
-        id="ds_existing", name=f"pilot/{version.remote_slug}", embodiment="pilot/robot", status="processed", error=None
+        id="ds_existing",
+        name=f"pilot/{version.remote_slug}",
+        embodiment="pilot/robot",
+        status="processed",
+        error=None,
     )
     worker.tick()
     assert dream.upload_calls == 0
@@ -164,20 +285,24 @@ def test_failed_remote_processing_can_retry_without_duplicate_training(tmp_path)
     worker.tick()
     assert store.get_finetune(job["id"]).status == "processing"
 
-    dream.dataset_status = lambda _: SimpleNamespace(status="failed", error="processor unavailable")
+    dream.remote_dataset.status = "failed"
+    dream.remote_dataset.error = "processor unavailable"
     worker.tick()
     assert store.get_finetune(job["id"]).status == "failed"
     assert store.get_finetune(job["id"]).failure_phase == "dataset_processing"
     assert store.get_finetune(job["id"]).remote_status == "failed"
-    dream.retry_dataset = Mock(return_value=SimpleNamespace(status="ready_to_process", error=None))
+    dream.retry_dataset = Mock(wraps=dream.retry_dataset)
     response = client.post(f"/api/finetunes/{job['id']}/retry-processing")
     assert response.status_code == 200
-    assert response.json()["status"] == "processing"
-    assert response.json()["failure_phase"] is None
-    assert response.json()["remote_status"] == "ready_to_process"
-    dream.retry_dataset.assert_called_once_with("ds_1")
+    assert response.json()["status"] == "retry_requested"
+    dream.retry_dataset.assert_not_called()
     assert client.post(f"/api/finetunes/{job['id']}/retry-processing").status_code == 409
-    dream.dataset_status = lambda _: SimpleNamespace(status="processed", error=None)
+    worker.tick()
+    retried = store.get_finetune(job["id"])
+    assert retried.status == "processing"
+    assert retried.remote_status == "ready_to_process"
+    dream.retry_dataset.assert_called_once_with("ds_1")
+    dream.remote_dataset.status = "processed"
     worker.tick()
     assert store.get_finetune(job["id"]).status == "pending_training"
     worker.tick()
@@ -222,9 +347,21 @@ def test_existing_finetune_table_gains_recovery_columns(tmp_path):
 def test_copied_dataset_passes_real_dream_client_validation(tmp_path):
     """The worker's directory layout is accepted by the SDK used for the real upload."""
     config = {
-        "state": {"right_arm": [0, 6], "right_gripper": [6, 7], "left_arm": [7, 13], "left_gripper": [13, 14]},
-        "action": {"right_arm": [0, 6], "right_gripper": [6, 7], "left_arm": [7, 13], "left_gripper": [13, 14]},
-        "video": {role: f"observation.images.{role}" for role in ("overhead", "wrist_l", "wrist_r")},
+        "state": {
+            "right_arm": [0, 6],
+            "right_gripper": [6, 7],
+            "left_arm": [7, 13],
+            "left_gripper": [13, 14],
+        },
+        "action": {
+            "right_arm": [0, 6],
+            "right_gripper": [6, 7],
+            "left_arm": [7, 13],
+            "left_gripper": [13, 14],
+        },
+        "video": {
+            role: f"observation.images.{role}" for role in ("overhead", "wrist_l", "wrist_r")
+        },
     }
     task_store = TaskStore(tmp_path / "data")
     task = task_store.create_task(
@@ -247,20 +384,38 @@ def test_copied_dataset_passes_real_dream_client_validation(tmp_path):
     data_file = folder / "data/chunk-000/episode_000000.parquet"
     data_file.parent.mkdir(parents=True)
     pq.write_table(table, data_file)
-    feature = {"dtype": "float32", "shape": [dim], "names": [f"joint_{index}" for index in range(dim - 1)] + ["gripper"]}
-    video_feature = {"dtype": "video", "shape": [48, 64, 3], "names": ["height", "width", "channels"]}
+    feature = {
+        "dtype": "float32",
+        "shape": [dim],
+        "names": [f"joint_{index}" for index in range(dim - 1)] + ["gripper"],
+    }
+    video_feature = {
+        "dtype": "video",
+        "shape": [48, 64, 3],
+        "names": ["height", "width", "channels"],
+    }
     info = {
-        "codebase_version": "v2.1", "total_episodes": 1, "total_frames": frames, "fps": 30,
+        "codebase_version": "v2.1",
+        "total_episodes": 1,
+        "total_frames": frames,
+        "fps": 30,
         "chunks_size": 1000,
         "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
         "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
         "features": {"action": feature, "observation.state": feature}
-        | {f"observation.images.{role}": video_feature for role in ("overhead", "wrist_l", "wrist_r")},
+        | {
+            f"observation.images.{role}": video_feature
+            for role in ("overhead", "wrist_l", "wrist_r")
+        },
     }
     (folder / "meta/info.json").write_text(json.dumps(info))
     (folder / "meta/tasks.jsonl").write_text('{"task_index":0,"task":"fold"}\n')
-    (folder / "meta/episodes.jsonl").write_text('{"episode_index":0,"tasks":["fold"],"length":49}\n')
-    sample_video = (Path(__file__).resolve().parents[2] / "dream_library/dream_client/tests/fixtures/avc1.mp4").read_bytes()
+    (folder / "meta/episodes.jsonl").write_text(
+        '{"episode_index":0,"tasks":["fold"],"length":49}\n'
+    )
+    sample_video = (
+        Path(__file__).resolve().parents[2] / "dream_library/dream_client/tests/fixtures/avc1.mp4"
+    ).read_bytes()
     for role in ("overhead", "wrist_l", "wrist_r"):
         path = folder / f"videos/chunk-000/observation.images.{role}/episode_000000.mp4"
         path.parent.mkdir(parents=True)
@@ -311,14 +466,22 @@ def test_finetune_submission_queues_only_one_job_for_a_dataset(tmp_path):
 
 def test_resume_settings_persist_and_api_rejects_unevaluated_parent(tmp_path):
     tasks, task, demos, store = setup_dataset(tmp_path)
-    version = store.create_dataset(task.id, "pilot/robot", [demo.id for demo in demos.list(task.id)])
+    version = store.create_dataset(
+        task.id, "pilot/robot", [demo.id for demo in demos.list(task.id)]
+    )
     store.update_dataset(version.id, status="validated")
     parent = store.create_finetune(version.id, FineTuneRequest(steps=500, lr_schedule="constant"))
     store.update_finetune(parent.id, status="succeeded", checkpoint="dream-1-ft:pilot-parent")
-    client = TestClient(create_app(
-        PreflightService(FakeStation(), list), EpisodeStore(tmp_path / "data"),
-        RolloutScanner(tmp_path), tasks, demo_store=demos, faas_store=store,
-    ))
+    client = TestClient(
+        create_app(
+            PreflightService(FakeStation(), list),
+            EpisodeStore(tmp_path / "data"),
+            RolloutScanner(tmp_path),
+            tasks,
+            demo_store=demos,
+            faas_store=store,
+        )
+    )
     request = FineTuneRequest(
         steps=500, lr_schedule="constant", resume_from="dream-1-ft:pilot-parent"
     )

@@ -54,6 +54,7 @@ def test_session_replacements_leave_all_twelve_action_requests_available(control
 
     assert run(progress) == 12 * 48
     assert progress == {
+        "warmup_rows": 33,
         "requests_attempted": 18,
         "model_action_rows": 576,
         "session_replacements": 6,

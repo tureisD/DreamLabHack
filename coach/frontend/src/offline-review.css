@@ -1,0 +1,53 @@
+
+.offline-review-page { max-width: 1180px; }
+.offline-review-page .offline-banner { padding: 14px 16px; margin: 14px 0; border: 1px solid #d9aa56; background: #fff5df; color: #5d4311; }
+.offline-review-page .offline-banner strong { margin-right: 8px; }
+.offline-review-page .offline-summary { display:grid; grid-template-columns:repeat(3,minmax(100px,1fr)); gap:1px; margin:20px 0; background:#dce2dd; border:1px solid #dce2dd; }
+.offline-review-page .offline-summary > div { padding:18px; background:#fff; }
+.offline-review-page .offline-summary strong,.offline-review-page .offline-summary span { display:block; }
+.offline-review-page .offline-summary strong { font-size:25px; font-variant-numeric:tabular-nums; }
+.offline-review-page .offline-summary span,.offline-review-page .offline-summary p { font-size:12px; color:#52615a; }
+.offline-review-page .offline-summary p { grid-column:1/-1; margin:0; padding:9px 14px; background:#f6f8f5; }
+.offline-review-page .offline-flow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:20px 0 28px; color:#64736a; font-size:13px; }
+.offline-review-page .offline-flow span { padding:8px 10px; background:#eef2ed; border-radius:4px; }
+.offline-review-page .offline-flow .active { background:#dcefe0; color:#155641; font-weight:700; }
+.offline-review-page .offline-scene { margin:26px 0; padding:18px; border:1px solid #dce2dd; background:#fff; }
+.offline-review-page .offline-scene > header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+.offline-review-page .offline-scene h2 { margin:4px 0 8px; }
+.offline-review-page .offline-status { padding:5px 8px; border-radius:4px; font-size:12px; white-space:nowrap; }
+.offline-review-page .offline-status.ok { background:#dcefe0; color:#155641; }
+.offline-review-page .offline-status.missing { background:#fff0d8; color:#7b4b13; }
+.offline-review-page .offline-exclusion { display:flex; align-items:center; gap:8px; color:#7b4b13; background:#fff5e7; padding:9px 11px; }
+.offline-review-page .offline-camera-tabs { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
+.offline-review-page .offline-camera-tabs button { padding:7px 10px; }
+.offline-review-page .offline-camera-tabs button[aria-pressed="false"] { background:#e9efe9; color:#31483a; }
+.offline-review-page .offline-pair-videos { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.offline-review-page .offline-pair-videos section { min-width:0; }
+.offline-review-page .offline-pair-videos h3 { display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px; margin:8px 0; }
+.offline-review-page .offline-pair-videos h3 span { font-size:11px; color:#637269; font-weight:400; }
+.offline-review-page .offline-pair-videos video { display:block; width:100%; aspect-ratio:20/11; object-fit:contain; background:#14201a; }
+.offline-review-page .offline-pair-videos p,.offline-review-page .offline-hint { color:#59685f; font-size:12px; }
+.offline-review-page .offline-video-missing { aspect-ratio:20/11; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:8px; color:#66746b; background:#edf1ed; }
+.offline-review-page .offline-evidence-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin:18px 0; }
+.offline-review-page .offline-evidence-grid section { min-width:0; border-top:1px solid #dce2dd; padding-top:9px; }
+.offline-review-page .offline-evidence-grid h3 { margin:5px 0 8px; }
+.offline-review-page .offline-evidence-grid p { color:#59685f; font-size:13px; line-height:1.45; }
+.offline-review-page .offline-evidence-grid dl { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.offline-review-page .offline-evidence-grid dt { color:#617067; font-size:11px; }
+.offline-review-page .offline-evidence-grid dd { margin:3px 0; font-variant-numeric:tabular-nums; font-weight:650; }
+.offline-review-page .offline-label { border-top:1px solid #e2e7e2; padding-top:10px; }
+.offline-review-page .offline-label label { display:grid; gap:5px; font-size:12px; }
+.offline-review-page .offline-label textarea { width:100%; min-height:60px; padding:8px; border:1px solid #bac7be; font:inherit; }
+.offline-review-page .offline-label > div,.offline-review-page .offline-demo-actions { display:flex; flex-wrap:wrap; gap:7px; margin:8px 0; }
+.offline-review-page .offline-label button,.offline-review-page .offline-demo-actions button { font-size:12px; padding:7px 9px; }
+.offline-review-page .offline-label small,.offline-review-page .offline-demo-actions small { display:block; color:#64736a; font-size:11px; align-self:center; }
+.offline-review-page .offline-demo-meta { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.offline-review-page .offline-reference-video { display:block; width:min(100%,760px); max-height:55vh; aspect-ratio:20/11; object-fit:contain; background:#14201a; margin:10px 0; }
+.offline-review-page .offline-demo-meta span { padding:5px 8px; background:#edf2ed; color:#405348; font-size:12px; }
+.offline-review-page .offline-demo > a,.offline-review-page .offline-next > a { display:inline-flex; align-items:center; gap:7px; margin:8px 0; color:#155641; font-weight:650; }
+.offline-review-page .offline-next > div { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+.offline-review-page .offline-next > div > div { padding:12px; background:#edf2ed; }
+.offline-review-page .offline-next p { color:#59685f; font-size:13px; line-height:1.45; }
+.offline-review-page .offline-footer { display:flex; align-items:center; gap:7px; color:#637269; font-size:12px; margin:18px 0; }
+.offline-review-page .offline-back { display:inline-flex; align-items:center; gap:5px; color:#155641; text-decoration:none; white-space:nowrap; }
+@media(max-width:760px){.offline-review-page .offline-pair-videos,.offline-review-page .offline-evidence-grid,.offline-review-page .offline-next > div{grid-template-columns:1fr}.offline-review-page .offline-summary{grid-template-columns:repeat(3,minmax(0,1fr))}.offline-review-page .offline-summary > div{padding:10px}.offline-review-page .offline-scene{padding:12px}.offline-review-page .offline-scene > header{flex-direction:column}.offline-review-page .offline-evidence-grid dl{grid-template-columns:repeat(3,minmax(0,1fr))}}

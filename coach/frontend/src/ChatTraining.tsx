@@ -16,7 +16,8 @@ type Dataset = {
   validation_report: { episodes?: number } | null;
   error: string | null;
 };
-type TrainingStatus = 'pending_upload' | 'processing' | 'pending_training' | 'training' | 'succeeded' | 'failed';
+type TrainingStatus = 'pending_upload' | 'processing' | 'pending_training' | 'training' | 'succeeded' | 'failed'
+  | 'retry_requested' | 'retry_reconcile' | 'submit_reconcile';
 type Job = {
   id: string;
   dataset_version_id: string;
@@ -24,6 +25,7 @@ type Job = {
   remote_status: string | null;
   remote_job_id: string | null;
   failure_phase: string | null;
+  retry_used?: boolean;
   checkpoint: string | null;
   error: string | null;
   steps: number;
@@ -36,6 +38,9 @@ const statusText: Record<TrainingStatus, string> = {
   pending_upload: 'Waiting to upload the validated dataset.',
   processing: 'Dream Labs is processing the dataset.',
   pending_training: 'Dataset processed. Waiting to submit the fine-tune.',
+  retry_requested: 'Waiting to retry Dream dataset processing.',
+  retry_reconcile: 'Checking the status of the dataset processing retry.',
+  submit_reconcile: 'Checking whether Dream accepted the training submission.',
   training: 'Fine-tuning on Dream Labs.',
   succeeded: 'Fine-tuning finished.',
   failed: 'The fine-tune stopped before completion.',
@@ -254,7 +259,7 @@ export default function ChatTraining({ taskId, onClose, onCheckpointReady }: {
       <p className="chat-training-status" role="status">{statusText[job.status]} {(job.status === 'training' || job.status === 'processing') && job.remote_status ? ` Status: ${job.remote_status}.` : ''}</p>
       {job.status === 'failed' && <>
         {job.error && <p className="trial-error" role="alert">{job.error}</p>}
-        {job.failure_phase === 'dataset_processing' && !job.remote_job_id && dataset?.remote_id && <button className="secondary" type="button" disabled={busy} onClick={() => void write(
+        {job.failure_phase === 'dataset_processing' && job.remote_status === 'failed' && !job.retry_used && !job.remote_job_id && dataset?.remote_id && <button className="secondary" type="button" disabled={busy} onClick={() => void write(
           () => request<Job>(`/api/finetunes/${encodeURIComponent(job.id)}/retry-processing`, { body: {} }), showJob,
         )}>Retry dataset processing</button>}
         <button type="button" className="secondary" onClick={() => setPrepareNew(true)}>Prepare a new dataset</button>

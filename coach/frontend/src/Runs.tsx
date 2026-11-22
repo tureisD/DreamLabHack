@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import PickupEvidence, { type PickupResult } from './PickupEvidence';
+import SimBaseline from './SimBaseline';
 
 type Finding = { kind: string; severity: string; message: string; evidence: string };
 type Event = { kind: string; elapsed_s: number | null; detail: string | null; reason: string | null; action: string | null };
@@ -7,8 +9,9 @@ type EpisodeItem = {
   started_at_utc: string | null; success: boolean | null; finding_count: number;
 };
 type Episode = EpisodeItem & {
-  simulation?: { source: string; seed: number; start_pose?: string; model_action_rows?: number } | null;
-  pickup_evidence?: { detail: string; peak_lift_m: number | null; longest_hold_s: number | null } | null;
+  simulation?: { source: string; seed: number; start_pose?: string; model_action_rows?: number; apple_xy_m?: number[] } | null;
+  pickup_evidence?: PickupResult | null;
+  review_revision?: number;
   body: string | null; robot_name: string | null; frames: number | null; fps: number | null;
   duration_s: number | null; stop_reason: string | null; error: string | null;
   stalls: number | null; clamps: number | null; videos: Record<string, string>;
@@ -20,14 +23,25 @@ type IntentAudit = { command_rows: number; comparable_rows: number; differing_ro
 function RunCameras({ episode }: { episode: Episode }) {
   const roles = Object.keys(episode.videos);
   const [role, setRole] = useState(roles[0] ?? '');
-  if (!role) return <div className="video-empty">No finished camera video in this rollout.</div>;
+  const [videoState, setVideoState] = useState<'ready' | 'loading' | 'failed' | 'unavailable'>(role ? 'loading' : 'unavailable');
+  const video = useRef<HTMLVideoElement>(null);
+  function jump(seconds: number) {
+    if (video.current && Number.isFinite(video.current.duration)) {
+      video.current.currentTime = Math.min(seconds, video.current.duration);
+    }
+  }
+
   return <>
-    <div className="role-tabs" role="group" aria-label="Cameras">
+    {role ? <><div className="role-tabs" role="group" aria-label="Cameras">
       {roles.map((name) => <button type="button" key={name} className={role === name ? 'role-active' : ''}
-        aria-pressed={role === name} onClick={() => setRole(name)}>{name}</button>)}
+        aria-pressed={role === name} onClick={() => { if (name !== role) { setRole(name); setVideoState('loading'); } }}>{name}</button>)}
     </div>
-    <video key={role} aria-label={`${role} rollout video`} controls playsInline preload="metadata"
-      src={`/api/episodes/${encodeURIComponent(episode.id)}/video/${encodeURIComponent(role)}`} />
+    <video key={role} ref={video} aria-label={`${role} rollout video`} controls playsInline preload="metadata"
+      onLoadedMetadata={() => setVideoState('ready')} onError={() => setVideoState('failed')}
+      src={`/api/episodes/${encodeURIComponent(episode.id)}/video/${encodeURIComponent(role)}`} /></>
+      : <div className="video-empty">No finished camera video in this rollout.</div>}
+    {episode.pickup_evidence?.rule === 'yam-apple-v1' &&
+      <PickupEvidence result={episode.pickup_evidence} jump={videoState === 'ready' ? jump : null} videoState={videoState} />}
   </>;
 }
 
@@ -64,7 +78,9 @@ export function RolloutPreview({ episodeId }: { episodeId: string }) {
   </section>;
 }
 
-export default function Runs() {
+export default function Runs({ initialEpisodeId = '', initialPrompt = '', offline = false }: {
+  initialEpisodeId?: string; initialPrompt?: string; offline?: boolean;
+}) {
   const [items, setItems] = useState<EpisodeItem[]>([]);
   const [selected, setSelected] = useState<Episode | null>(null);
   const [outcome, setOutcome] = useState('unlabelled');
@@ -85,23 +101,39 @@ export default function Runs() {
     void loadItems().catch((caught: Error) => setError(caught.message));
   }, [loadItems]);
 
-  async function openEpisode(id: string) {
+  const openEpisode = useCallback(async (id: string, signal?: AbortSignal) => {
     setError('');
     try {
-      const response = await fetch(`/api/episodes/${id}`);
+      const endpoint = `/api/episodes/${encodeURIComponent(id)}`;
+      const response = await fetch(endpoint, { signal });
       if (!response.ok) throw new Error('Could not load this run.');
       const episode = (await response.json()) as Episode;
+      if (signal?.aborted) return;
       setSelected(episode);
       setAudit(null);
-      const auditResponse = await fetch(`/api/episodes/${id}/intent-audit`);
-      if (auditResponse.ok) setAudit((await auditResponse.json()) as IntentAudit);
       setOutcome(episode.success === null ? 'unlabelled' : episode.success ? 'success' : 'failure');
       setStage(episode.failure_stage ?? '');
       setNote(episode.note ?? '');
+      if (!offline) {
+        const auditResponse = await fetch(`${endpoint}/intent-audit`, { signal });
+        if (auditResponse.ok) {
+          const audit = await auditResponse.json() as IntentAudit;
+          if (!signal?.aborted) setAudit(audit);
+        }
+      }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not load this run.');
+      if (!signal?.aborted) setError(caught instanceof Error ? caught.message : 'Could not load this run.');
     }
-  }
+  }, [offline]);
+
+  useEffect(() => {
+    if (!initialEpisodeId) return;
+    const controller = new AbortController();
+    void openEpisode(initialEpisodeId, controller.signal);
+    return () => controller.abort();
+  }, [initialEpisodeId, openEpisode]);
+
+  const visibleItems = initialPrompt ? items.filter((item) => item.task === initialPrompt) : items;
 
   async function scan() {
     setBusy(true);
@@ -129,6 +161,7 @@ export default function Runs() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          expected_revision: selected.review_revision ?? 0,
           success: outcome === 'unlabelled' ? null : outcome === 'success',
           failure_stage: outcome === 'failure' && stage ? stage : null,
           note: note.trim() || null,
@@ -153,15 +186,15 @@ export default function Runs() {
           <h1>Run review</h1>
           <p className="subtitle">Import saved station or simulator rollouts, inspect failures, and label the task outcome.</p>
         </div>
-        <button onClick={() => void scan()} disabled={busy}>{busy ? 'Working…' : 'Scan rollouts'}</button>
+        {!offline && <button onClick={() => void scan()} disabled={busy}>{busy ? 'Working…' : 'Scan rollouts'}</button>}
       </header>
       {error && <div className="alert" role="alert">{error}</div>}
       {message && <div className="notice" role="status">{message}</div>}
       <div className="runs-layout">
         <section className="card runs-list" aria-label="Imported runs">
-          <div className="card-heading"><h2>Imported runs</h2><span className="count">{items.length}</span></div>
-          {items.length === 0 && <p>No runs indexed yet. Enable station rollouts, then scan the rollout directory.</p>}
-          {items.map((item) => (
+          <div className="card-heading"><h2>Imported runs</h2><span className="count">{visibleItems.length}</span></div>
+          {visibleItems.length === 0 && <p>{initialPrompt ? 'No indexed runs match this task instruction.' : 'No runs indexed yet.'}</p>}
+          {visibleItems.map((item) => (
             <button key={item.id} className={`run-row ${selected?.id === item.id ? 'selected' : ''}`} onClick={() => void openEpisode(item.id)}>
               <strong>{item.task}</strong>
               <span>{item.checkpoint}</span>
@@ -176,14 +209,10 @@ export default function Runs() {
               <div className="card-heading"><h2>{selected.task}</h2><span className="count">{selected.status}</span></div>
               <p className="muted">{selected.checkpoint} · {selected.robot_name ?? selected.body ?? 'Robot unknown'}</p>
               <RunCameras key={selected.id} episode={selected} />
+              {!offline && <SimBaseline key={selected.id} recording={{ ...selected, review_revision: selected.review_revision ?? 0 }} />}
               <dl className="details">
                 {selected.simulation && <div><dt>Simulation</dt><dd>{selected.simulation.source} · seed {selected.simulation.seed}{selected.simulation.start_pose && ` · start: ${selected.simulation.start_pose}`}{selected.simulation.model_action_rows !== undefined && ` · ${selected.simulation.model_action_rows} model action rows`}</dd></div>}
                 <div><dt>Duration</dt><dd>{selected.duration_s?.toFixed(1) ?? '—'} s</dd></div>
-                {selected.pickup_evidence && <div><dt>Simulator pickup evidence</dt><dd>
-                  {selected.pickup_evidence.detail}
-                  {selected.pickup_evidence.peak_lift_m != null && selected.pickup_evidence.longest_hold_s != null &&
-                    ` Peak lift ${(selected.pickup_evidence.peak_lift_m * 100).toFixed(1)} cm. Longest hold ${selected.pickup_evidence.longest_hold_s.toFixed(2)} s.`}
-                </dd></div>}
                 <div><dt>Frames</dt><dd>{selected.frames ?? '—'} at {selected.fps ?? '—'} fps</dd></div>
                 <div><dt>Stop reason</dt><dd>{selected.stop_reason ?? '—'}</dd></div>
                 <div><dt>Stalls / clamps</dt><dd>{selected.stalls ?? '—'} / {selected.clamps ?? '—'}</dd></div>

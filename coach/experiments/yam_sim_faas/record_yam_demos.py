@@ -31,8 +31,10 @@ TASK = "pick up the apple"
 FPS = 20
 ROLES = {"top": "overhead", "left": "wrist_l", "right": "wrist_r"}
 PARTS = {
-    "right_arm": [0, 6], "right_gripper": [6, 7],
-    "left_arm": [7, 13], "left_gripper": [13, 14],
+    "right_arm": [0, 6],
+    "right_gripper": [6, 7],
+    "left_arm": [7, 13],
+    "left_gripper": [13, 14],
 }
 CONFIG = {
     "state": PARTS,
@@ -126,7 +128,9 @@ class RecordingYamEnv(YamEnv):
     def _write_video_frame(self):
         images = self.images()
         for camera, role in ROLES.items():
-            rgb = np.asarray(Image.fromarray(images[camera]).resize((320, 176), Image.Resampling.BILINEAR))
+            rgb = np.asarray(
+                Image.fromarray(images[camera]).resize((320, 176), Image.Resampling.BILINEAR)
+            )
             container, stream = self.outputs[role]
             frame = av.VideoFrame.from_ndarray(rgb, format="rgb24")
             for packet in stream.encode(frame):
@@ -180,16 +184,24 @@ class RecordingYamEnv(YamEnv):
         if self.apple_heights is not None:
             features["observation.apple_height_m"] = {"dtype": "float32", "shape": [1]}
         info = {
-            "codebase_version": "v2.1", "total_episodes": 1, "total_frames": n,
-            "fps": FPS, "chunks_size": 1000,
+            "codebase_version": "v2.1",
+            "total_episodes": 1,
+            "total_frames": n,
+            "fps": FPS,
+            "chunks_size": 1000,
             "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
             "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
             "features": features,
         }
         (meta / "info.json").write_text(json.dumps(info), encoding="utf-8")
-        (meta / "tasks.jsonl").write_text(json.dumps({"task_index": 0, "task": self.task}) + "\n", encoding="utf-8")
-        (meta / "episodes.jsonl").write_text(json.dumps({"episode_index": 0, "tasks": [self.task], "length": n}) + "\n", encoding="utf-8")
-        print(f"recorded {self.folder.name}: {n} frames, {n/FPS:.1f}s", flush=True)
+        (meta / "tasks.jsonl").write_text(
+            json.dumps({"task_index": 0, "task": self.task}) + "\n", encoding="utf-8"
+        )
+        (meta / "episodes.jsonl").write_text(
+            json.dumps({"episode_index": 0, "tasks": [self.task], "length": n}) + "\n",
+            encoding="utf-8",
+        )
+        print(f"recorded {self.folder.name}: {n} frames, {n / FPS:.1f}s", flush=True)
 
 
 def scene_seed(value):
@@ -203,7 +215,8 @@ def scene_seed(value):
 def recording(root, task, checkpoint, seed, source, *, start_pose="home", videos=True,
               object_name="apple", scene_xml=None):
     root.mkdir(parents=True, exist_ok=True)
-    folder = root / f"yam-{uuid4().hex}"
+    recording_id = uuid4().hex
+    folder = root / f"yam-{recording_id}"
     folder.mkdir()
     started = datetime.now(UTC).isoformat()
     env = RecordingYamEnv(folder, task, seed, defer_video=source == "model", videos=videos,
@@ -220,7 +233,7 @@ def recording(root, task, checkpoint, seed, source, *, start_pose="home", videos
         env.close()
         frames = len(env.states)
         info = {
-            "collection_mode": "simulation", "simulation": details,
+            "collection_mode": "simulation", "recording_id": recording_id, "simulation": details,
             "robot_name": "YAM simulator", "body": "yam", "task": task,
             "checkpoint": checkpoint, "started_at_utc": started,
             "frames": frames, "fps": FPS, "duration_s": frames / FPS,
@@ -233,15 +246,15 @@ def recording(root, task, checkpoint, seed, source, *, start_pose="home", videos
         print(f"Review {folder} (scene seed {seed})", flush=True)
 
 
-if __name__ == "__main__":
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT)
     parser.add_argument("--episodes", type=int, default=2)
     parser.add_argument("--vary-approach", action="store_true",
                         help="Vary approach height, joint trajectory duration and descent duration by scene seed")
-    parser.add_argument("--start-pose", choices=("home", "wrist-visible"), default="home")
     parser.add_argument("--seed", type=scene_seed, help="First scene seed; increments per episode")
-    args = parser.parse_args()
+    parser.add_argument("--start-pose", choices=("home", "wrist-visible"), default="home")
+    args = parser.parse_args(argv)
     if args.episodes < 1:
         parser.error("--episodes must be positive")
     first_seed = args.seed if args.seed is not None else secrets.randbits(32)
@@ -260,4 +273,10 @@ if __name__ == "__main__":
             failures += int(not result["passed"])
             (env.folder / "embodiment.json").write_text(json.dumps(CONFIG), encoding="utf-8")
     if failures:
-        raise SystemExit(f"{failures} scripted pickups failed the simulator check. Review before training.")
+        raise SystemExit(
+            f"{failures} scripted pickups failed the simulator check. Review before training."
+        )
+
+
+if __name__ == "__main__":
+    main()

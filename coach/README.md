@@ -2,7 +2,7 @@
 
 A local companion for the [Dream Labs public library](../dream_library/README.md). It checks the robot station, reviews saved rollouts and demonstrations, submits a Dream FaaS job, and guides a paired before/after evaluation. Robot runs and paid fine-tuning require explicit operator actions.
 
-**Start here** opens a conversational AI coach. It introduces the goal, checks Dream access, asks one question at a time about your task and hardware, reads the current local workflow state, and points you to the next action. The evaluation sidebar refreshes the latest saved comparison every five seconds. Until you save an evaluation, it shows a labeled example from the bundled apple pickup simulator study. When it has enough task detail, it proposes a task that you explicitly confirm before saving. It can guide account setup, preflight, baseline trials, demonstrations, FaaS, and held-out evaluation. It does not itself start a robot or paid job. To connect Dream, sign in at the platform's [API keys page](https://platform.dreamlabs.ai/api-keys), create a key, and enter it in the masked field inside the chat. The public Dream library documents this key flow, but provides no OAuth authorization flow or API for our coach to create keys on the user's behalf. The backend validates the key with the Dream SDK and writes it to the SDK credentials file (`DREAM_CREDENTIALS` or `~/.dreamlabs/credentials`), never browser storage or conversation text. A `DREAM_API_KEY` environment variable overrides that file; remove the override and restart before using the connect field. The key file is local plaintext, with owner-only file mode requested when written; protect your OS account and do not commit it.
+**Start here** opens a conversational AI coach. It introduces the goal, checks Dream access, asks one question at a time about your task and hardware, reads the current local workflow state, and points you to the next action. The evaluation sidebar refreshes the latest saved comparison every five seconds. It shows the active task’s results when available. When it has enough task detail, it proposes a task that you explicitly confirm before saving. It can guide account setup, preflight, baseline trials, demonstrations, FaaS, and held-out evaluation. It does not itself start a robot or paid job. To connect Dream, sign in at the platform's [API keys page](https://platform.dreamlabs.ai/api-keys), create a key, and enter it in the masked field inside the chat. The public Dream library documents this key flow, but provides no OAuth authorization flow or API for our coach to create keys on the user's behalf. The backend validates the key with the Dream SDK and writes it to the SDK credentials file (`DREAM_CREDENTIALS` or `~/.dreamlabs/credentials`), never browser storage or conversation text. A `DREAM_API_KEY` environment variable overrides that file; remove the override and restart before using the connect field. The key file is local plaintext, with owner-only file mode requested when written; protect your OS account and do not commit it.
 
 The coach first introduces itself and waits for **Begin**. After Begin, it checks live Dream API access from the local server. This is separate from a browser login: an incognito browser on the same computer still reaches the same local server and its configured key. The coach never claims to know whether the browser is signed in to Dream's website. When API access is ready, the read-only `/api/account/workspace` route lists the account's datasets, fine-tuning jobs, and models through the public SDK; these summaries help the agent recognize existing jobs. Dream does not expose the private console's browser state or a remote "task" resource through this SDK. The chat panel uses Dream Labs' Walla font and sunrise landscape assets for this local demo; confirm brand asset rights before distributing a public build.
 
@@ -27,6 +27,22 @@ The [measured closed-loop repair study](experiments/yam_sim_faas/CLOSED_LOOP_REP
 For the apple experiment, use the [two-account training handoff and verified datasets](experiments/yam_sim_faas/grasp_training/README.md).
 
 For robot-free collection targeted at fresh model failures, use [failure-conditioned YAM demonstrations](experiments/yam_sim_faas/FAILURE_CONDITIONED_SIM.md). Its local collector writes reviewable LeRobot episodes into the coach Demos folder and refuses the reserved evaluation seeds. It has not yet been compared with random collection under equal FaaS budget.
+
+**Explain comparison results** shows each model’s run diagnosis, recorded evidence, and suggested correction. DreamCoach can analyze saved traces locally without starting another model run.
+
+## Offline apple pickup walkthrough
+
+From `coach/`, run the isolated, local-only walkthrough on Linux with EGL available. It creates one fresh workspace, tagged scripted fixtures and a dedicated Offline review page. The server disables Dream, station, training, evaluation and deployment operations; it needs no API key or worker.
+
+```bash
+uv sync --locked --group dev --extra sim
+(cd frontend && npm ci && npm run build)
+MUJOCO_GL=egl uv run --locked --extra sim teach-task-coach offline-demo --directory "$(mktemp -d)/apple" --port 8765
+```
+
+Open the local URL printed by the command. Inspect the matched fixture videos, review separate human labels, and examine the scripted reference. All displayed outcomes are fixture-only, not Dream-1 or robot evidence. Do not point the regular `serve` command or live training workflow at the offline workspace.
+
+The standalone statistical evaluator is separate and does not validate the Coach's paired simulator comparisons.
 
 ## Run locally
 
