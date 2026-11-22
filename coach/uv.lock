@@ -841,6 +841,7 @@ source = { editable = "." }
 dependencies = [
     { name = "dreamlabs-client", extra = ["datasets"] },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -856,7 +857,6 @@ sim = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -865,6 +865,7 @@ dev = [
 requires-dist = [
     { name = "dreamlabs-client", extras = ["datasets"], editable = "../dream_library/dream_client" },
     { name = "fastapi", specifier = ">=0.115,<1" },
+    { name = "httpx", specifier = ">=0.27,<1" },
     { name = "mujoco", marker = "extra == 'sim'", specifier = ">=3.3.5,<5" },
     { name = "numpy", specifier = ">=2,<3" },
     { name = "pillow", marker = "extra == 'sim'", specifier = ">=10" },
@@ -875,7 +876,6 @@ provides-extras = ["sim"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.27,<1" },
     { name = "pytest", specifier = ">=8.3,<10" },
     { name = "ruff", specifier = ">=0.8,<1" },
 ]

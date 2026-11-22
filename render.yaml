@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: dreamcoach-live
+    runtime: docker
+    plan: standard
+    dockerfilePath: ./coach/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    numInstances: 1
+    autoDeployTrigger: off
+    envVars:
+      - key: COACH_MAX_ACTIVE_WORKSPACES
+        value: "1"
+      - key: COACH_HOSTED_DATA_DIR
+        value: /var/lib/dreamcoach
+    disk:
+      name: dreamcoach-workspaces
+      mountPath: /var/lib/dreamcoach
+      sizeGB: 10

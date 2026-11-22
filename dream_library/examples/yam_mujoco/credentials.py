@@ -12,7 +12,8 @@ def config_dir():
     """The user's directory for the sim's own files (key, history, diagnostics), never the install directory.
     @return `~/.config/dream-yam-sim`, created owner-only when missing.
     """
-    path = Path.home() / ".config" / "dream-yam-sim"
+    configured = os.getenv("DREAM_YAM_CONFIG_DIR")
+    path = Path(configured) if configured else Path.home() / ".config" / "dream-yam-sim"
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     return path
 

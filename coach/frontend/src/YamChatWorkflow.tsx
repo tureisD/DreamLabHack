@@ -53,7 +53,7 @@ export default function YamChatWorkflow({
   stop: () => Promise<void>;
   review: () => void;
   training: () => void;
-  explainComparison: () => void;
+  explainComparison?: () => void;
 }) {
   const [scenes, setScenes] = useState(4);
   const [busy, setBusy] = useState(false);
@@ -173,7 +173,7 @@ export default function YamChatWorkflow({
           {job?.kind === 'comparison' && job.state === 'completed' ? 'Run comparison again' : 'Run simulator comparison'}
         </button>
       </div>}
-      {job?.kind === 'comparison' && job.state === 'completed' && <button type="button" className="yam-secondary" onClick={explainComparison}>
+      {job?.kind === 'comparison' && job.state === 'completed' && explainComparison && <button type="button" className="yam-secondary" onClick={explainComparison}>
         Explain comparison results
       </button>}
     </div>}

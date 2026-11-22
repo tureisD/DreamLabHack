@@ -15,6 +15,7 @@ type Status = { configured: boolean; source: string };
 type Workspace = { state: string; message: string; datasets: { id: string; name: string; status: string }[]; fine_tuning_jobs: { id: string; name: string; status: string }[]; models: { id: string; name: string; status: string }[] };
 type Simulator = { state: string; message: string };
 type WorkSurface = { kind: 'demos' | 'training'; taskId: string };
+const hosted = Boolean(document.querySelector('meta[name="dreamcoach-mode"][content="hosted"]'));
 
 const simulatorHelpPattern = /simulator screen|set up the YAM simulator/i;
 
@@ -67,6 +68,7 @@ export default function CoachChat({
   const [dreamAccess, setDreamAccess] = useState('unknown');
   const [text, setText] = useState('');
   const [secret, setSecret] = useState('');
+  const [hostedAiKey, setHostedAiKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [begun, setBegun] = useState(sessionStorage.getItem('coach-begun-v2') === 'yes');
@@ -330,6 +332,12 @@ export default function CoachChat({
   }
 
   function beginConversation() {
+    if (hosted && !ai?.configured) {
+      setBegun(true);
+      setShowSimulator(true);
+      void workflowState().catch((caught: Error) => setError(caught.message));
+      return;
+    }
     const history: Message[] = [...messages, {
       role: 'user',
       content: 'Begin. Please check my Dream Labs connection and guide me one step at a time.',
@@ -350,11 +358,33 @@ export default function CoachChat({
     setWorkSurface(null);
     clearDemoApproval();
     setComparisonReady(null);
-    void turn([], 'introduction');
+    if (ai?.configured) void turn([], 'introduction');
   }
 
+  async function enableHostedAi(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const status = await api<Status>('/api/assistant/connect', 'POST', { api_key: hostedAiKey.trim() });
+      setHostedAiKey('');
+      setAi(status);
+      started.current = true;
+      const history: Message[] = [...messages, {
+        role: 'user', content: 'Continue guiding my hosted YAM simulator workspace.',
+      }];
+      setMessages(history);
+      await turn(history);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not enable AI chat.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const hostedGuide = hosted && ai?.configured === false;
   const currentYamTask = yamJob?.task_id && yamJob.task_id === activeTaskId;
-  const simulatorRequested = begun && (showSimulator || currentYamTask || simulatorMode !== 'apple'
+  const simulatorRequested = begun && (hostedGuide || showSimulator || currentYamTask || simulatorMode !== 'apple'
     || reply?.setup_help === 'simulator' || simulatorHelpPattern.test(reply?.message ?? ''));
   const existingCheckpoint = exampleCheckpoints.find((checkpoint) =>
     workspace?.models.some((model) => model.id === checkpoint && model.status === 'servable'));
@@ -371,10 +401,10 @@ export default function CoachChat({
     {error && <div className="alert" role="alert">{error}</div>}
     <div className="chat-layout">
     <section className="card chat-shell" aria-label="Fine-tuning coach conversation">
-      <div className="chat-landscape" aria-hidden="true"><video autoPlay loop muted playsInline poster="/dream/sunrise-hd-poster.webp"><source src="/dream/sunrise-hd.mp4" type="video/mp4" /></video><span className="chat-spark chat-spark-one">✦</span><span className="chat-spark chat-spark-two">✦</span></div>
+      <div className={`chat-landscape${hosted ? ' hosted-landscape' : ''}`} aria-hidden="true">{!hosted && <video autoPlay loop muted playsInline poster="/dream/sunrise-hd-poster.webp"><source src="/dream/sunrise-hd.mp4" type="video/mp4" /></video>}<span className="chat-spark chat-spark-one">✦</span><span className="chat-spark chat-spark-two">✦</span></div>
       <div className="chat-panel-top">
         <span className="chat-landscape-title">Conversation</span>
-        {begun && !workSurface && <button type="button" className="chat-reset" disabled={!ai?.configured || busy} onClick={startOver}>Start over</button>}
+        {begun && !workSurface && <button type="button" className="chat-reset" disabled={busy} onClick={startOver}>Start over</button>}
       </div>
       <div className={`chat-thread${workSurface ? ' chat-thread-workspace' : ''}`} ref={thread}
         aria-live={workSurface ? undefined : 'polite'} tabIndex={workSurface ? -1 : undefined}>
@@ -382,7 +412,8 @@ export default function CoachChat({
         ? <ChatDemoReview key={workSurface.taskId} taskId={workSurface.taskId} onClose={() => setWorkSurface(null)} onKeep={finishReview} />
         : <ChatTraining key={workSurface.taskId} taskId={workSurface.taskId} onClose={() => setWorkSurface(null)}
           onCheckpointReady={(jobId) => void finishTraining(workSurface.taskId, jobId)} />) : <>
-        {ai && !ai.configured && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>The AI coach is unavailable on this server. Ask the operator to configure its AI credential, then refresh this page.</p></div>}
+        {hostedGuide && !begun && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>I’ll guide you from YAM demos to a fine-tune and a measured comparison. Press Begin to choose a simulator workflow.</p></div>}
+        {!hosted && ai && !ai.configured && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>The AI coach is unavailable on this server. Ask the operator to configure its AI credential, then refresh this page.</p></div>}
         {messages.map((item, index) => <div key={index} className={`chat-bubble chat-${item.role}`}><span>{item.role === 'assistant' ? 'DreamCoach' : 'You'}</span><p>{item.content}</p></div>)}
         {busy && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>Thinking through your next step…</p></div>}
       {needsDreamKey && <div className="chat-action"><p><a href={account.dashboard_url} target="_blank" rel="noreferrer">Open Dream Labs API keys</a>, sign in, and create a key. Paste it in this private field when you have it. The key is not saved in this chat. This checks API access on this machine, not your browser’s Dream website login.</p><form onSubmit={(event) => void connectDream(event)} className="chat-secret"><input aria-label="Dream API key" type="password" autoComplete="off" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="Dream API key" /><button disabled={busy || !secret.trim()}>Connect Dream</button></form></div>}
@@ -419,7 +450,7 @@ export default function CoachChat({
         stop={() => runYamAction('/api/simulator/workflow/stop')}
         review={() => openWork('demos', simulatorMode === 'apple' ? yamJob?.task_id || activeTaskId : activeTaskId)}
         training={() => openWork('training')}
-        explainComparison={() => {
+        explainComparison={hostedGuide ? undefined : () => {
           if (busy) return;
           const history: Message[] = [...messages, { role: 'user', content: 'Explain this simulator comparison and suggest what to do next.' }];
           setMessages(history);
@@ -436,6 +467,15 @@ export default function CoachChat({
         }}>{reply.suggested_screen === 'demos' ? 'Review demos' : reply.suggested_screen === 'training'
           ? 'Open fine-tuning' : `Open ${reply.suggested_screen}`}</button></div>}
       {begun && !simulatorRequested && <button type="button" className="chat-simulator-link" onClick={() => setShowSimulator(true)}>Use the YAM simulator</button>}
+      {begun && hostedGuide && <details className="chat-inventory">
+        <summary>Enable optional AI chat</summary>
+        <p>Use your own OpenAI API key for conversational guidance.</p>
+        <form className="chat-secret" onSubmit={(event) => void enableHostedAi(event)}>
+          <input aria-label="OpenAI API key" placeholder="OpenAI API key" type="password" autoComplete="off" maxLength={300}
+            value={hostedAiKey} onChange={(event) => setHostedAiKey(event.target.value)} />
+          <button type="submit" disabled={busy || !hostedAiKey.trim()}>Enable chat</button>
+        </form>
+      </details>}
       {demoApproval && <section className="chat-action chat-workspace-return" aria-label="Demo saved">
         <div role="status"><strong>Demo kept</strong><p>{demoApproval.remaining
           ? `${demoApproval.kept} kept · ${demoApproval.remaining} still to review.`
@@ -467,13 +507,13 @@ export default function CoachChat({
           </button>
         ))}</div>
       </div>}
-      {!workSurface && !begun && ai?.configured && messages.length > 0 && <div className="chat-begin">
+      {!workSurface && !begun && (hostedGuide || (ai?.configured && messages.length > 0)) && <div className="chat-begin">
         <p id="chat-begin-description">First, we’ll check Dream Labs access.</p>
         <button type="button" aria-describedby="chat-begin-description" disabled={busy} onClick={beginConversation}>
           Begin<span className="chat-begin-arrow" aria-hidden="true">→</span>
         </button>
       </div>}
-      {!workSurface && begun && <form onSubmit={(event) => void submit(event)} className="chat-composer"><textarea ref={composer} aria-label="Message to coach" disabled={!ai?.configured} value={text} maxLength={2000} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(event); } }} placeholder="Tell me about your robot or ask what to do next…" /><button disabled={!ai?.configured || busy || !text.trim()}>Send</button></form>}
+      {!workSurface && begun && !hostedGuide && <form onSubmit={(event) => void submit(event)} className="chat-composer"><textarea ref={composer} aria-label="Message to coach" disabled={!ai?.configured} value={text} maxLength={2000} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(event); } }} placeholder="Tell me about your robot or ask what to do next…" /><button disabled={!ai?.configured || busy || !text.trim()}>Send</button></form>}
     </section>
     <LiveEvaluation taskId={activeTaskId} simulatorActive={!!simulatorRequested && simulatorMode === 'apple'} onOpen={openEvaluation} onOpenAudit={() => open('statistical')} />
     </div>
