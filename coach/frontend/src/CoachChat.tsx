@@ -16,6 +16,7 @@ type Workspace = { state: string; message: string; datasets: { id: string; name:
 type Simulator = { state: string; message: string };
 type WorkSurface = { kind: 'demos' | 'training'; taskId: string };
 const hosted = Boolean(document.querySelector('meta[name="dreamcoach-mode"][content="hosted"]'));
+const hostedIntroduction = 'Hi, I’m DreamCoach. I’ll guide you through teaching Dream-1 a task, from recording YAM demonstrations to fine-tuning and comparing the result with the base model. Press Begin to get started.';
 
 const simulatorHelpPattern = /simulator screen|set up the YAM simulator/i;
 
@@ -38,6 +39,7 @@ function savedMessages(): Message[] {
 export default function CoachChat({
   open, openEvaluation, activeTaskId, selectTask, showSimulatorOnOpen,
   simulatorMode, chooseSimulatorMode, openRecorder, demoApproval, clearDemoApproval, onDemoKept,
+  needsHostedConnection, onHostedConnection,
 }: {
   open: (screen: Screen) => void;
   openEvaluation: (taskId?: string, evaluationId?: string) => void;
@@ -50,8 +52,10 @@ export default function CoachChat({
   demoApproval: DemoKeepReceipt | null;
   clearDemoApproval: () => void;
   onDemoKept: (receipt: DemoKeepReceipt) => void;
+  needsHostedConnection: boolean;
+  onHostedConnection: () => void;
 }) {
-  const [messages, setMessages] = useState<Message[]>(savedMessages);
+  const [messages, setMessages] = useState<Message[]>(() => needsHostedConnection ? [] : savedMessages());
   const [reply, setReply] = useState<Reply | null>(null);
   const [ai, setAi] = useState<Status | null>(null);
   const [account, setAccount] = useState<Account | null>(null);
@@ -71,7 +75,7 @@ export default function CoachChat({
   const [hostedAiKey, setHostedAiKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [begun, setBegun] = useState(sessionStorage.getItem('coach-begun-v2') === 'yes');
+  const [begun, setBegun] = useState(() => !needsHostedConnection && sessionStorage.getItem('coach-begun-v2') === 'yes');
   const thread = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const started = useRef(false);
@@ -93,19 +97,20 @@ export default function CoachChat({
   }, [workSurface, demoApproval, comparisonReady]);
   useEffect(() => { sessionStorage.setItem('coach-begun-v2', begun ? 'yes' : 'no'); }, [begun]);
   useEffect(() => {
+    if (needsHostedConnection) return;
     void Promise.all([api<Status>('/api/assistant/status'), api<Account>('/api/account/status')])
       .then(([aiStatus, dreamStatus]) => { setAi(aiStatus); setAccount(dreamStatus); })
       .catch((caught: Error) => setError(caught.message));
     void api<Simulator>('/api/simulator/status').then(setSimulator).catch(() => undefined);
     void api<string[]>('/api/simulator/example-checkpoints').then(setExampleCheckpoints).catch(() => undefined);
-  }, []);
+  }, [needsHostedConnection]);
   useEffect(() => {
     if (simulator?.state !== 'preparing') return;
     const timer = window.setInterval(() => { void api<Simulator>('/api/simulator/status').then(setSimulator).catch(() => undefined); }, 1500);
     return () => window.clearInterval(timer);
   }, [simulator?.state]);
   useEffect(() => {
-    if (!begun) return;
+    if (!begun || needsHostedConnection) return;
     let cancelled = false;
     let timer: number;
     async function poll() {
@@ -135,9 +140,9 @@ export default function CoachChat({
     setPipeline(null);
     void poll();
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [begun, activeTaskId]);
+  }, [begun, activeTaskId, needsHostedConnection]);
   useEffect(() => {
-    if (!begun && !started.current) {
+    if (!hosted && !begun && !started.current) {
       started.current = true;
       void turn([], 'introduction');
     }
@@ -245,6 +250,29 @@ export default function CoachChat({
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not connect Dream Labs.'); setBusy(false); }
   }
 
+  async function createHostedWorkspace(event: React.FormEvent) {
+    event.preventDefault();
+    const key = secret.trim();
+    if (!key || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await api<{ ready: boolean }>('/hosted/workspace', 'POST', { api_key: key });
+      setSecret('');
+      setMessages([
+        { role: 'assistant', content: hostedIntroduction },
+        { role: 'assistant', content: 'Your Dream Labs account is connected. Choose a YAM workflow below to start recording or review the example demonstrations.' },
+      ]);
+      setShowSimulator(true);
+      onHostedConnection();
+      await workflowState();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not connect Dream Labs.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveTask(draft: TaskDraft) {
     setBusy(true); setError('');
     try {
@@ -332,6 +360,10 @@ export default function CoachChat({
   }
 
   function beginConversation() {
+    if (needsHostedConnection) {
+      setBegun(true);
+      return;
+    }
     if (hosted && !ai?.configured) {
       setBegun(true);
       setShowSimulator(true);
@@ -358,7 +390,7 @@ export default function CoachChat({
     setWorkSurface(null);
     clearDemoApproval();
     setComparisonReady(null);
-    if (ai?.configured) void turn([], 'introduction');
+    if (!hosted && ai?.configured) void turn([], 'introduction');
   }
 
   async function enableHostedAi(event: React.FormEvent) {
@@ -382,13 +414,13 @@ export default function CoachChat({
     }
   }
 
-  const hostedGuide = hosted && ai?.configured === false;
+  const hostedGuide = hosted && !ai?.configured;
   const currentYamTask = yamJob?.task_id && yamJob.task_id === activeTaskId;
-  const simulatorRequested = begun && (hostedGuide || showSimulator || currentYamTask || simulatorMode !== 'apple'
+  const simulatorRequested = begun && !needsHostedConnection && (hostedGuide || showSimulator || currentYamTask || simulatorMode !== 'apple'
     || reply?.setup_help === 'simulator' || simulatorHelpPattern.test(reply?.message ?? ''));
   const existingCheckpoint = exampleCheckpoints.find((checkpoint) =>
     workspace?.models.some((model) => model.id === checkpoint && model.status === 'servable'));
-  const needsDreamKey = begun && account && (!account.configured || dreamAccess === 'blocked' || dreamAccess === 'unavailable');
+  const needsDreamKey = !hosted && begun && account && (!account.configured || dreamAccess === 'blocked' || dreamAccess === 'unavailable');
   const latestMessage = messages[messages.length - 1];
   const replySuggestions = begun && ai?.configured && !busy && !simulatorRequested && !needsDreamKey
     && !workSurface && !demoApproval && !comparisonReady
@@ -398,8 +430,8 @@ export default function CoachChat({
 
   return <main className="page chat-page">
     <header className="header"><div><h1>DreamCoach</h1><p className="subtitle">Fine-tune Dream-1 for a task and measure how it performs.</p></div></header>
-    {error && <div className="alert" role="alert">{error}</div>}
-    <div className="chat-layout">
+    {error && !needsHostedConnection && <div className="alert" role="alert">{error}</div>}
+    <div className={`chat-layout${needsHostedConnection ? ' chat-layout-onboarding' : ''}`}>
     <section className="card chat-shell" aria-label="Fine-tuning coach conversation">
       <div className={`chat-landscape${hosted ? ' hosted-landscape' : ''}`} aria-hidden="true">{!hosted && <video autoPlay loop muted playsInline poster="/dream/sunrise-hd-poster.webp"><source src="/dream/sunrise-hd.mp4" type="video/mp4" /></video>}<span className="chat-spark chat-spark-one">✦</span><span className="chat-spark chat-spark-two">✦</span></div>
       <div className="chat-panel-top">
@@ -412,10 +444,23 @@ export default function CoachChat({
         ? <ChatDemoReview key={workSurface.taskId} taskId={workSurface.taskId} onClose={() => setWorkSurface(null)} onKeep={finishReview} />
         : <ChatTraining key={workSurface.taskId} taskId={workSurface.taskId} onClose={() => setWorkSurface(null)}
           onCheckpointReady={(jobId) => void finishTraining(workSurface.taskId, jobId)} />) : <>
-        {hostedGuide && !begun && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>I’ll guide you from YAM demos to a fine-tune and a measured comparison. Press Begin to choose a simulator workflow.</p></div>}
+        {hosted && messages.length === 0 && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>{hostedIntroduction}</p></div>}
         {!hosted && ai && !ai.configured && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>The AI coach is unavailable on this server. Ask the operator to configure its AI credential, then refresh this page.</p></div>}
         {messages.map((item, index) => <div key={index} className={`chat-bubble chat-${item.role}`}><span>{item.role === 'assistant' ? 'DreamCoach' : 'You'}</span><p>{item.content}</p></div>)}
-        {busy && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>Thinking through your next step…</p></div>}
+        {busy && !needsHostedConnection && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>Thinking through your next step…</p></div>}
+      {needsHostedConnection && begun && <div className="chat-bubble chat-assistant">
+        <span>DreamCoach</span>
+        <p>Let’s connect your Dream Labs account. Enter your API key below and I’ll check access before we start the simulator.</p>
+        <form onSubmit={(event) => void createHostedWorkspace(event)} className="chat-secret">
+          <input aria-label="Dream Labs API key" type="password" autoComplete="off" autoFocus
+            maxLength={300} value={secret} onChange={(event) => setSecret(event.target.value)}
+            placeholder="Dream Labs API key" />
+          <button type="submit" disabled={busy || !secret.trim()}>{busy ? 'Checking…' : 'Connect Dream Labs'}</button>
+        </form>
+        <p className="hint">DreamCoach stores your key in your private workspace, separate from the conversation.</p>
+        <a href="https://platform.dreamlabs.ai/api-keys" target="_blank" rel="noreferrer">Create a Dream Labs API key</a>
+        {error && <p className="alert" role="alert">{error}</p>}
+      </div>}
       {needsDreamKey && <div className="chat-action"><p><a href={account.dashboard_url} target="_blank" rel="noreferrer">Open Dream Labs API keys</a>, sign in, and create a key. Paste it in this private field when you have it. The key is not saved in this chat. This checks API access on this machine, not your browser’s Dream website login.</p><form onSubmit={(event) => void connectDream(event)} className="chat-secret"><input aria-label="Dream API key" type="password" autoComplete="off" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="Dream API key" /><button disabled={busy || !secret.trim()}>Connect Dream</button></form></div>}
       {begun && workspace?.state === 'ready' && <details className="chat-inventory">
         <summary>Dream account data · {workspace.datasets.length} datasets · {workspace.fine_tuning_jobs.length} jobs</summary>
@@ -466,8 +511,8 @@ export default function CoachChat({
           else if (target) open(target);
         }}>{reply.suggested_screen === 'demos' ? 'Review demos' : reply.suggested_screen === 'training'
           ? 'Open fine-tuning' : `Open ${reply.suggested_screen}`}</button></div>}
-      {begun && !simulatorRequested && <button type="button" className="chat-simulator-link" onClick={() => setShowSimulator(true)}>Use the YAM simulator</button>}
-      {begun && hostedGuide && <details className="chat-inventory">
+      {begun && !needsHostedConnection && !simulatorRequested && <button type="button" className="chat-simulator-link" onClick={() => setShowSimulator(true)}>Use the YAM simulator</button>}
+      {begun && !needsHostedConnection && hostedGuide && <details className="chat-inventory">
         <summary>Enable optional AI chat</summary>
         <p>Use your own OpenAI API key for conversational guidance.</p>
         <form className="chat-secret" onSubmit={(event) => void enableHostedAi(event)}>
@@ -507,7 +552,7 @@ export default function CoachChat({
           </button>
         ))}</div>
       </div>}
-      {!workSurface && !begun && (hostedGuide || (ai?.configured && messages.length > 0)) && <div className="chat-begin">
+      {!workSurface && !begun && (hosted || (ai?.configured && messages.length > 0)) && <div className="chat-begin">
         <p id="chat-begin-description">First, we’ll check Dream Labs access.</p>
         <button type="button" aria-describedby="chat-begin-description" disabled={busy} onClick={beginConversation}>
           Begin<span className="chat-begin-arrow" aria-hidden="true">→</span>
@@ -515,7 +560,7 @@ export default function CoachChat({
       </div>}
       {!workSurface && begun && !hostedGuide && <form onSubmit={(event) => void submit(event)} className="chat-composer"><textarea ref={composer} aria-label="Message to coach" disabled={!ai?.configured} value={text} maxLength={2000} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(event); } }} placeholder="Tell me about your robot or ask what to do next…" /><button disabled={!ai?.configured || busy || !text.trim()}>Send</button></form>}
     </section>
-    <LiveEvaluation taskId={activeTaskId} simulatorActive={!!simulatorRequested && simulatorMode === 'apple'} onOpen={openEvaluation} onOpenAudit={() => open('statistical')} />
+    {!needsHostedConnection && <LiveEvaluation taskId={activeTaskId} simulatorActive={!!simulatorRequested && simulatorMode === 'apple'} onOpen={openEvaluation} onOpenAudit={() => open('statistical')} />}
     </div>
   </main>;
 }

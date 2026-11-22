@@ -25,7 +25,7 @@ import uvicorn
 from dream import DreamClient
 from dream.errors import DreamError
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 COOKIE = "__Host-dreamcoach"
@@ -34,7 +34,6 @@ WORKSPACE_SECONDS = 7 * 24 * 60 * 60
 IDLE_SECONDS = 30 * 60
 MAX_BODY = 512 * 1024
 SITE = Path(__file__).resolve().parents[2] / "frontend" / "dist"
-HOSTED_FILES = Path(__file__).with_name("hosting")
 SAFE_HEADERS = {"content-type", "range", "if-range", "accept"}
 RESPONSE_HEADERS = {"content-type", "content-length", "content-range", "accept-ranges"}
 HARDWARE_PATH = re.compile(
@@ -281,20 +280,16 @@ def create_gateway(
     async def health():
         return {"status": "ok"}
 
-    @app.get("/hosting.js")
-    async def setup_script():
-        return FileResponse(HOSTED_FILES / "setup.js", media_type="text/javascript")
-
-    @app.get("/hosting.css")
-    async def setup_style():
-        return FileResponse(HOSTED_FILES / "setup.css", media_type="text/css")
-
     @app.get("/")
     async def root(request: Request):
-        if pool.locate(request.cookies.get(cookie_name)) is None:
-            return FileResponse(HOSTED_FILES / "index.html", media_type="text/html")
+        connected = pool.locate(request.cookies.get(cookie_name)) is not None
+        workspace_state = "connected" if connected else "required"
         page = (SITE / "index.html").read_text(encoding="utf-8")
-        page = page.replace("</head>", '<meta name="dreamcoach-mode" content="hosted"></head>')
+        page = page.replace(
+            "</head>",
+            '<meta name="dreamcoach-mode" content="hosted">'
+            f'<meta name="dreamcoach-workspace" content="{workspace_state}"></head>',
+        )
         return HTMLResponse(page)
 
     @app.post("/hosted/workspace", status_code=201)
