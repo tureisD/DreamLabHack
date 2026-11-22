@@ -47,6 +47,11 @@ def score(folder: Path) -> dict:
         raise ValueError(f"{folder}: replay diverged from recorded state by {max_state_error:.4f}")
 
     rise = np.asarray(heights) - heights[29]
+    # The recorder warms the scene for 33 simulation steps before applying the
+    # first model action. Report grasp timing so a late close is visible even
+    # when a trial briefly lifts the apple.
+    closing_rows = np.flatnonzero(actions[33:, 13] < 0.5)
+    first_close_row = int(closing_rows[0] + 33) if len(closing_rows) else None
     held_by_start = np.min(np.lib.stride_tricks.sliding_window_view(rise, 41), axis=1)
     held_start = int(np.argmax(held_by_start))
     held = float(held_by_start[held_start])
@@ -59,6 +64,8 @@ def score(folder: Path) -> dict:
         "replay_max_state_error": max_state_error,
         "peak_lift_m": float(np.max(rise)),
         "peak_time_s": float(np.argmax(rise) / 20),
+        "first_close_time_s": first_close_row / 20 if first_close_row is not None else None,
+        "first_close_after_warmup_s": (first_close_row - 33) / 20 if first_close_row is not None else None,
         "held_lift_m": held,
         "held_window_start_s": held_start / 20,
         "success": held >= 0.08,
