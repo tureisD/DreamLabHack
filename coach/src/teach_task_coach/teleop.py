@@ -7,11 +7,50 @@ import shutil
 import subprocess
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field
 
 from teach_task_coach.demos import DemoScanner
 from teach_task_coach.station import StationClient, StationUnavailable
+
+
+class ArmLease:
+    """Hold the station's arm lock while a local teleop process owns the motors."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.stream = None
+
+    def acquire(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        stream = self.path.open("a+b")
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                if stream.seek(0, os.SEEK_END) == 0:
+                    stream.write(b"\0")
+                    stream.flush()
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            stream.close()
+            raise ValueError("Robot arms are still owned by the station or another recorder.") from exc
+        self.stream = stream
+
+    def child_options(self) -> dict:
+        # On POSIX the child retains the same flock if the coach server exits.
+        return {"pass_fds": (self.stream.fileno(),)} if os.name != "nt" else {}
+
+    def close(self) -> None:
+        if self.stream is not None:
+            self.stream.close()
+            self.stream = None
 
 
 class TeleopRequest(BaseModel):
@@ -30,9 +69,15 @@ class TeleopStatus(BaseModel):
 
 
 class SO101Recorder:
-    def __init__(self, scanner: DemoScanner, station: StationClient) -> None:
+    def __init__(
+        self, scanner: DemoScanner, station: StationClient, arm_lock_path: Path | None = None
+    ) -> None:
         self.scanner = scanner
         self.station = station
+        home = Path(os.getenv("DREAMCLI_HOME", "~/.dreamlabs")).expanduser()
+        configured_lock = os.getenv("COACH_ARMS_LOCK") or str(home / "arms.lock")
+        self.arm_lock_path = arm_lock_path or Path(configured_lock).expanduser()
+        self.lease: ArmLease | None = None
         self.process: subprocess.Popen | None = None
         self.session_path: Path | None = None
         self.log_file = None
@@ -41,6 +86,13 @@ class SO101Recorder:
         if self.process is None:
             return TeleopStatus(state="idle", session_path=None, exit_code=None)
         code = self.process.poll()
+        if code is not None:
+            if self.log_file is not None:
+                self.log_file.close()
+                self.log_file = None
+            if self.lease is not None:
+                self.lease.close()
+                self.lease = None
         return TeleopStatus(
             state="recording" if code is None else ("complete" if code == 0 else "failed"),
             session_path=str(self.session_path), exit_code=code,
@@ -49,6 +101,11 @@ class SO101Recorder:
     def start(self, prompt: str, request: TeleopRequest) -> TeleopStatus:
         if self.status().state == "recording":
             raise ValueError("A teleoperation recording is already running.")
+        station_url = getattr(self.station, "base_url", None)
+        if isinstance(station_url, str) and urlsplit(station_url).hostname not in (
+            "127.0.0.1", "localhost", "::1"
+        ):
+            raise ValueError("Run the teleoperation recorder on the robot computer with a local station URL.")
         try:
             self.station.status()
         except StationUnavailable:
@@ -75,14 +132,20 @@ class SO101Recorder:
             "--dataset.num_episodes=1", f"--dataset.episode_time_s={request.seconds}",
             "--dataset.reset_time_s=0", "--dataset.push_to_hub=false",
         ]
-        self.log_file = (self.scanner.root / "so101-recorder.log").open("ab")
+        lease = ArmLease(self.arm_lock_path)
         try:
+            lease.acquire()
+            self.log_file = (self.scanner.root / "so101-recorder.log").open("ab")
             self.process = subprocess.Popen(
                 args, stdin=subprocess.DEVNULL, stdout=self.log_file,
                 stderr=subprocess.STDOUT, shell=False,
+                **lease.child_options(),
             )
-        except OSError:
-            self.log_file.close()
+        except BaseException:
+            if self.log_file is not None:
+                self.log_file.close()
             self.log_file = None
+            lease.close()
             raise
+        self.lease = lease
         return self.status()

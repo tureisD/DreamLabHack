@@ -4,12 +4,12 @@ import pytest
 
 from teach_task_coach.demos import DemoScanner
 from teach_task_coach.station import StationUnavailable
-from teach_task_coach.teleop import SO101Recorder, TeleopRequest
+from teach_task_coach.teleop import ArmLease, SO101Recorder, TeleopRequest
 
 
 def test_so101_recorder_requires_station_down_and_uses_local_single_episode(monkeypatch, tmp_path):
     station = Mock()
-    recorder = SO101Recorder(DemoScanner(tmp_path / "demos"), station)
+    recorder = SO101Recorder(DemoScanner(tmp_path / "demos"), station, tmp_path / "arms.lock")
     request = TeleopRequest(
         follower_port="/dev/follower", leader_port="/dev/leader",
         follower_id="follower", leader_id="leader", camera_index=1,
@@ -32,4 +32,26 @@ def test_so101_recorder_requires_station_down_and_uses_local_single_episode(monk
     assert launched.call_args.kwargs["shell"] is False
     with pytest.raises(ValueError, match="already running"):
         recorder.start("put block in bin", request)
-    recorder.log_file.close()
+    process.poll.return_value = 0
+    assert recorder.status().state == "complete"
+
+
+def test_so101_recorder_refuses_timeout_when_station_still_holds_arms(monkeypatch, tmp_path):
+    station = Mock()
+    station.status.side_effect = StationUnavailable("timed out")
+    recorder = SO101Recorder(DemoScanner(tmp_path / "demos"), station, tmp_path / "arms.lock")
+    monkeypatch.setattr("teach_task_coach.teleop.shutil.which", lambda _: "/bin/lerobot-record")
+    launched = Mock()
+    monkeypatch.setattr("teach_task_coach.teleop.subprocess.Popen", launched)
+    request = TeleopRequest(
+        follower_port="/dev/follower", leader_port="/dev/leader",
+        follower_id="follower", leader_id="leader", camera_index=0,
+    )
+    holder = ArmLease(tmp_path / "arms.lock")
+    holder.acquire()
+    try:
+        with pytest.raises(ValueError, match="arms are still owned"):
+            recorder.start("put block in bin", request)
+    finally:
+        holder.close()
+    launched.assert_not_called()
