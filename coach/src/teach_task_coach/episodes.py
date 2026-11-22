@@ -56,6 +56,7 @@ class EpisodeSummary(BaseModel):
     success: bool | None = None
     failure_stage: str | None = None
     note: str | None = None
+    reviewer_id: str | None = None
 
 
 def episode_id(path: Path) -> str:

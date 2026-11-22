@@ -1,6 +1,7 @@
 """HTTP API for the local coach UI."""
 
 from dataclasses import asdict
+from importlib.resources import files
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
@@ -35,6 +36,8 @@ from teach_task_coach.faas import (
     FineTuneRequest,
 )
 from teach_task_coach.guidance import Guidance, guidance
+from teach_task_coach.paired_audit import PairedReport, PairedRequest, evaluate_paired
+from teach_task_coach.paired_snapshot import export_paired_snapshot
 from teach_task_coach.preflight import PreflightResult, PreflightService
 from teach_task_coach.rollout_audit import IntentAudit, audit_rollout
 from teach_task_coach.scene import PlacementResult, SceneAdapter
@@ -79,6 +82,12 @@ class TrialLabel(BaseModel):
     success: bool
     failure_stage: Literal["approach", "grasp", "transport", "release", "other"] | None = None
     note: str | None = Field(default=None, max_length=2000)
+    reviewer_id: str | None = Field(default=None, min_length=1, max_length=120)
+
+
+class PairedSnapshotAttestation(BaseModel):
+    heldout_attested: bool
+    resets_attested: bool
 
 
 class AbandonReason(BaseModel):
@@ -168,6 +177,17 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return asdict(result) | {"feasible": result.feasible}
+
+    @app.post("/api/paired-evaluations/analyze", response_model=PairedReport)
+    def analyze_matched_scenes(value: PairedRequest) -> PairedReport:
+        """Audit predeclared matched scenes without robot or Dream API calls."""
+        return evaluate_paired(value)
+
+    @app.get("/api/paired-evaluations/demo", response_model=PairedRequest)
+    def apple_confirmation_demo() -> PairedRequest:
+        """Return the frozen summary of eight simulator rollouts for a read-only demo."""
+        source = files("teach_task_coach").joinpath("examples/apple_paired_confirmation.json")
+        return PairedRequest.model_validate_json(source.read_text(encoding="utf-8"))
 
     frontend_dist = Path(__file__).resolve().parents[2] / "frontend/dist"
     if (frontend_dist / "assets").is_dir():
@@ -379,7 +399,7 @@ def create_app(
     @app.post("/api/trials/{trial_id}/label", response_model=Trial)
     def label_trial(trial_id: str, label: TrialLabel) -> Trial:
         try:
-            result = runner.label(trial_id, label.success, label.failure_stage, label.note)
+            result = runner.label(trial_id, label.success, label.failure_stage, label.note, label.reviewer_id)
             if result.evaluation_id:
                 evaluation = evaluations.get(result.evaluation_id)
                 if evaluation is not None and evaluation.auto_promote:
@@ -649,6 +669,20 @@ def create_app(
         if evaluations.get(evaluation_id) is None:
             raise HTTPException(status_code=404, detail="Evaluation not found.")
         return tasks.list_evaluation_trials(evaluation_id)
+
+    @app.post("/api/evaluations/{evaluation_id}/paired-snapshot", response_model=PairedRequest)
+    def paired_snapshot(evaluation_id: str, value: PairedSnapshotAttestation) -> PairedRequest:
+        evaluation = evaluations.get(evaluation_id)
+        if evaluation is None:
+            raise HTTPException(status_code=404, detail="Evaluation not found.")
+        try:
+            return export_paired_snapshot(
+                evaluation, tasks, episodes,
+                heldout_attested=value.heldout_attested,
+                resets_attested=value.resets_attested,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/scene-adapter/status")
     def scene_adapter_status() -> dict[str, bool]:
