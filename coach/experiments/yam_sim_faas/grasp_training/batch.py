@@ -14,11 +14,12 @@ from dream import DreamClient, datasets
 ROOT = Path(__file__).resolve().parent
 HOLDOUT = {901, 902, 903, 904}
 SEEDS = {"control": set(range(41, 49)), "varied": set(range(41, 49)) | set(range(101, 117))}
+SEEDS["pooled"] = SEEDS["varied"] | set(range(201, 217))
 
 
-def verify(batch, destination):
-    manifest = json.loads((ROOT / f"{batch}.json").read_text(encoding="utf-8"))
-    archive = ROOT / f"{batch}.zip"
+def verify(batch, destination, bundle_dir=ROOT):
+    manifest = json.loads((bundle_dir / f"{batch}.json").read_text(encoding="utf-8"))
+    archive = bundle_dir / f"{batch}.zip"
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     if digest != manifest["sha256"]:
         raise ValueError("Archive differs from its committed manifest. Fetch the complete batch.")
@@ -81,12 +82,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("verify", "prepare"))
     parser.add_argument("batch", choices=SEEDS)
+    parser.add_argument("--bundle-dir", type=Path, default=ROOT, help="Directory with the archive and manifest")
     parser.add_argument("--account", help="Dream username on the account receiving the upload")
     args = parser.parse_args()
     if args.action == "prepare" and not args.account:
         parser.error("prepare requires --account YOUR_DREAM_USERNAME")
     with TemporaryDirectory() as staging:
         path = Path(staging).resolve()
-        config, slug = verify(args.batch, path)
+        config, slug = verify(args.batch, path, args.bundle_dir)
         if args.action == "prepare":
             prepare(path, config, slug, args.account, len(SEEDS[args.batch]))

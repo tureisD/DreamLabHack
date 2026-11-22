@@ -11,7 +11,7 @@ import numpy as np
 import pyarrow.parquet as pq
 from dream import datasets
 
-from batch import HOLDOUT, SEEDS
+from batch import HOLDOUT, ROOT, SEEDS, verify
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from record_yam_demos import CONFIG, TASK, YamEnv
@@ -62,19 +62,20 @@ def audit(folder, info):
 
 def build(batch, raw_root, output):
     selected = {}
+    required = SEEDS[batch] - SEEDS["varied"] if batch == "pooled" else SEEDS[batch]
     for path in raw_root.glob("*/rollout.json"):
         info = json.loads(path.read_text(encoding="utf-8"))
         scene = info.get("simulation") or {}
         seed = scene.get("seed")
-        if (seed not in SEEDS[batch] or scene.get("source") != "scripted"
+        if (seed not in required or scene.get("source") != "scripted"
                 or scene.get("start_pose") != "wrist-visible" or info["task"] != TASK
                 or bool(scene.get("approach")) != (seed >= 101)):
             continue
         if seed in selected:
             raise ValueError(f"Multiple eligible recordings for seed {seed}. Select one explicitly in the input directory.")
         selected[seed] = path.parent, info
-    if set(selected) != SEEDS[batch]:
-        raise ValueError(f"Missing training seeds {sorted(SEEDS[batch] - set(selected))}")
+    if set(selected) != required:
+        raise ValueError(f"Missing training seeds {sorted(required - set(selected))}")
     output.mkdir(parents=True, exist_ok=True)
     archive = output / f"{batch}.zip"
     manifest = output / f"{batch}.json"
@@ -82,8 +83,12 @@ def build(batch, raw_root, output):
         raise FileExistsError(f"Choose a fresh output for {batch}")
     with TemporaryDirectory(dir=output.parent) as tmp:
         scratch = Path(tmp)
-        training = scratch / "training"
+        training = (scratch / "training").resolve()
+        training.mkdir()
         sessions = []
+        if batch == "pooled":
+            verify("varied", training)
+            sessions.extend(json.loads((ROOT / "varied.json").read_text(encoding="utf-8"))["sessions"])
         for seed, (folder, info) in sorted(selected.items()):
             row = audit(folder, info)
             row["frames"] = export_session(folder, training / f"apple-seed-{seed}")
@@ -92,7 +97,7 @@ def build(batch, raw_root, output):
         report = datasets.validate_dataset(str(training), CONFIG)
         if not report.ok or report.episodes != len(sessions):
             raise ValueError(str(report))
-        if batch == "varied" and len({r["first_close_s"] for r in sessions}) < 8:
+        if batch != "control" and len({r["first_close_s"] for r in sessions}) < 8:
             raise ValueError("Insufficient distinct grasp times for the varied training experiment")
         staged = scratch / archive.name
         with ZipFile(staged, "w", compression=ZIP_STORED) as z:
