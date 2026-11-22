@@ -14,6 +14,7 @@ from dream import DreamClient, datasets
 ROOT = Path(__file__).resolve().parent
 HOLDOUT = {901, 902, 903, 904}
 CONFIRMATION = {905, 906, 907, 908}
+SECOND_CONFIRMATION = {909, 910, 911, 912}
 SEEDS = {
     "control": set(range(41, 49)),
     "varied": set(range(41, 49)) | set(range(101, 117)),
@@ -29,7 +30,7 @@ def verify(batch, destination, bundle_dir=ROOT):
         raise ValueError("Archive differs from its committed manifest. Fetch the complete batch.")
     seeds = SEEDS[batch]
     sessions = manifest["sessions"]
-    if {s["seed"] for s in sessions} != seeds or len(sessions) != len(seeds) or seeds & (HOLDOUT | CONFIRMATION):
+    if {s["seed"] for s in sessions} != seeds or len(sessions) != len(seeds) or seeds & (HOLDOUT | CONFIRMATION | SECOND_CONFIRMATION):
         raise ValueError("Training split differs from the frozen protocol")
     with ZipFile(archive) as package:
         for name in package.namelist():

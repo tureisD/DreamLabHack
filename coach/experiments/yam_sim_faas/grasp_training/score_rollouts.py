@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pyarrow.parquet as pq
-from batch import CONFIRMATION, HOLDOUT
+from batch import CONFIRMATION, HOLDOUT, SECOND_CONFIRMATION
 from build_batch import initialize_replay
 from record_yam_demos import TASK, YamEnv
 
@@ -17,7 +17,7 @@ def score(folder: Path) -> dict:
     if (
         info["status"] != "complete"
         or scene["source"] != "model"
-        or scene["seed"] not in HOLDOUT | CONFIRMATION
+        or scene["seed"] not in HOLDOUT | CONFIRMATION | SECOND_CONFIRMATION
         or scene["start_pose"] != "wrist-visible"
         or info["task"] != TASK
     ):
