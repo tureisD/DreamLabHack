@@ -53,6 +53,7 @@ from teach_task_coach.faas import (
     DatasetVersion,
     DreamGateway,
     FaaSStore,
+    FineTuneAlreadySubmitted,
     FineTuneRecord,
     FineTuneRequest,
 )
@@ -155,6 +156,7 @@ class AbandonReason(BaseModel):
 class DemoDecision(BaseModel):
     decision: Literal["keep", "redo"]
     start_cell: int | None = Field(default=None, ge=0, le=8)
+    defer_coverage_label: bool = False
     note: str | None = Field(default=None, max_length=2000)
 
 
@@ -780,7 +782,7 @@ def create_app(
         if demo is None:
             raise HTTPException(status_code=404, detail="Demo not found.")
         if value.decision == "keep":
-            if value.start_cell is None:
+            if value.start_cell is None and not value.defer_coverage_label:
                 raise HTTPException(status_code=422, detail="Choose a start cell for a kept demo.")
             if not demo.valid:
                 raise HTTPException(status_code=409, detail="Fix hard validation issues before keeping this demo.")
@@ -868,8 +870,8 @@ def create_app(
             raise HTTPException(status_code=404, detail="Dataset version not found.")
         if version.status != "validated":
             raise HTTPException(status_code=409, detail="Dataset must pass local validation first.")
-        existing_jobs = faas.list_finetunes()
         if settings.resume_from:
+            existing_jobs = faas.list_finetunes()
             parent = next((job for job in existing_jobs if job.checkpoint == settings.resume_from), None)
             parent_version = None if parent is None else faas.get_dataset(parent.dataset_version_id)
             if (
@@ -892,9 +894,10 @@ def create_app(
                 for item in parent_evaluations
             ):
                 raise HTTPException(status_code=409, detail="Complete the parent checkpoint's paired evaluation before continuing; only a positive but inconclusive gain supports more steps.")
-        elif any(job.dataset_version_id == version_id for job in existing_jobs):
-            raise HTTPException(status_code=409, detail="This dataset version already has a fine-tune job.")
-        return faas.create_finetune(version_id, settings)
+        try:
+            return faas.create_finetune(version_id, settings)
+        except FineTuneAlreadySubmitted as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/tasks/{task_id}/finetunes", response_model=list[FineTuneRecord])
     def list_finetunes(task_id: str) -> list[FineTuneRecord]:

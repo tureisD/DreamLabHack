@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import SimCorrect from './SimCorrect';
 import SceneTask, { type ScenePreset } from './SceneTask';
+import type { DemoKeepReceipt } from './ChatDemoReview';
 
 type Task = { id: string; name: string; prompt: string; success_rule: string };
 type TaskDraft = Pick<Task, 'name' | 'prompt' | 'success_rule'>;
@@ -29,10 +30,10 @@ async function json<T>(url: string, method = 'GET', body?: unknown): Promise<T> 
 }
 
 export default function Demos({
-  initialTaskId = '', reviewOnOpen = false, openSimulator, recorderFocus, onTaskSelected, initialScenePreset,
+  initialTaskId = '', onKeep, openSimulator, recorderFocus, onTaskSelected, initialScenePreset,
 }: {
   initialTaskId?: string;
-  reviewOnOpen?: boolean;
+  onKeep?: (receipt: DemoKeepReceipt) => void;
   openSimulator?: () => void;
   recorderFocus?: 'fruit' | 'scene' | null;
   onTaskSelected?: (taskId: string) => void;
@@ -55,9 +56,7 @@ export default function Demos({
   const [leaderId, setLeaderId] = useState('so101_leader');
   const [cameraIndex, setCameraIndex] = useState(0);
   const [teleop, setTeleop] = useState<TeleopStatus | null>(null);
-  const reviewSection = useRef<HTMLDivElement>(null);
   const recorderSection = useRef<HTMLDivElement>(null);
-  const openedReview = useRef(false);
   const selected = demos.find((demo) => demo.id === selectedId);
 
   useEffect(() => {
@@ -88,14 +87,6 @@ export default function Demos({
     const timer = window.setInterval(() => void refresh(), 15000);
     return () => { active = false; window.clearInterval(timer); };
   }, [taskId]);
-
-  useEffect(() => {
-    if (!reviewOnOpen || openedReview.current || !demos.length || taskId !== initialTaskId) return;
-    openedReview.current = true;
-    const first = demos.find((demo) => demo.decision === 'unreviewed') ?? demos[0];
-    choose(first);
-    reviewSection.current?.scrollIntoView({ block: 'start' });
-  }, [demos, initialTaskId, reviewOnOpen, taskId]);
 
   useEffect(() => {
     if (recorderFocus) recorderSection.current?.scrollIntoView({ block: 'start' });
@@ -150,9 +141,18 @@ export default function Demos({
     if (!selected) return;
     setBusy(true); setError('');
     try {
-      await json<Demo>(`/api/demos/${selected.id}/decision`, 'POST', {
+      const saved = await json<Demo>(`/api/demos/${selected.id}/decision`, 'POST', {
         decision, start_cell: decision === 'keep' ? cell : null, note: note.trim() || null,
       });
+      if (decision === 'keep' && onKeep) {
+        const others = demos.filter((demo) => demo.id !== saved.id && demo.task_id === saved.task_id);
+        onKeep({
+          taskId: saved.task_id,
+          kept: others.filter((demo) => demo.decision === 'keep').length + 1,
+          remaining: others.filter((demo) => demo.decision === 'unreviewed').length,
+        });
+        return;
+      }
       setDemos(await json<Demo[]>(`/api/tasks/${taskId}/demos`));
       setPlan(await json<Plan>(`/api/tasks/${taskId}/demo-plan`));
       setMessage(`Demo marked ${decision}.`);
@@ -188,7 +188,7 @@ export default function Demos({
       <div className="coverage-grid">{plan.cells.map((item) => <div key={item.cell} className={`coverage-cell ${plan.next_cell === item.cell ? 'coverage-next' : ''}`}><strong>Cell {item.cell + 1}</strong><span>{item.baseline_failures}/{item.baseline_runs} baseline failures</span><span>{item.kept_demos} kept demos</span></div>)}</div>
       <p className="hint">Coverage is a collection guide, not a claim that the model will succeed. Placement cell is labelled by the operator.</p>
     </section>}
-    <div className="runs-layout demo-layout" ref={reviewSection}>
+    <div className="runs-layout demo-layout">
       <section className="card runs-list"><div className="card-heading"><h2>Recorded demos</h2><span className="count">{demos.length}</span></div>{demos.length === 0 && <p>No matching one-episode sessions found. Set COACH_DEMOS_DIR to the recorder output directory and use the task instruction as the dataset task text.</p>}{demos.map((demo) => <button className={`run-row ${selectedId === demo.id ? 'selected' : ''}`} key={demo.id} onClick={() => choose(demo)}><strong>{demo.source_path.split(/[\\/]/).pop()}</strong><span>{demo.frames} frames · {demo.fps} fps</span><small>{demo.decision} · {demo.findings.length} QC findings</small></button>)}</section>
       <section className="card review">{!selected ? <p>Select a demo to inspect it and decide whether to keep it.</p> : <>
         <div className="card-heading"><h2>{selected.source_path.split(/[\\/]/).pop()}</h2><span className="count">{selected.decision}</span></div>

@@ -9,6 +9,7 @@ import Guide from './Guide';
 import Repair from './Repair';
 import CoachEffect from './CoachEffect';
 import CoachChat from './CoachChat';
+import type { DemoKeepReceipt } from './ChatDemoReview';
 import type { SimulatorMode } from './YamChatWorkflow';
 import type { ScenePreset } from './SceneTask';
 
@@ -122,7 +123,7 @@ export default function App() {
   const [evaluationSelection, setEvaluationSelection] = useState<{ taskId?: string; evaluationId?: string }>({});
   const [activeTaskId, setActiveTaskId] = useState(() => sessionStorage.getItem('coach-active-task') ?? '');
   const [showSimulator, setShowSimulator] = useState(false);
-  const [reviewOnOpen, setReviewOnOpen] = useState(false);
+  const [demoApproval, setDemoApproval] = useState<DemoKeepReceipt | null>(null);
   const [simulatorMode, setSimulatorMode] = useState<SimulatorMode>(() => {
     const mode = sessionStorage.getItem('coach-simulator-mode');
     return mode === 'scene' || mode === 'fruit' ? mode : 'apple';
@@ -137,7 +138,14 @@ export default function App() {
 
   function selectTask(taskId: string) {
     setActiveTaskId(taskId);
+    setDemoApproval((current) => current?.taskId === taskId ? current : null);
     sessionStorage.setItem('coach-active-task', taskId);
+  }
+
+  function returnWithDemoApproval(receipt: DemoKeepReceipt) {
+    selectTask(receipt.taskId);
+    setDemoApproval(receipt);
+    setScreen('start');
   }
 
   function openEvaluation(taskId?: string, evaluationId?: string) {
@@ -154,7 +162,7 @@ export default function App() {
         <button className={screen === 'repair' ? 'nav-active' : ''} onClick={() => setScreen('repair')}>Repair first</button>
         <button className={screen === 'preflight' ? 'nav-active' : ''} onClick={() => setScreen('preflight')}>Preflight</button>
         <button className={screen === 'runs' ? 'nav-active' : ''} onClick={() => setScreen('runs')}>Run review</button>
-        <button className={screen === 'demos' ? 'nav-active' : ''} onClick={() => { setReviewOnOpen(false); setRecorderFocus(null); setScreen('demos'); }}>Demos</button>
+        <button className={screen === 'demos' ? 'nav-active' : ''} onClick={() => { setRecorderFocus(null); setScreen('demos'); }}>Demos</button>
         <button className={screen === 'training' ? 'nav-active' : ''} onClick={() => setScreen('training')}>Training</button>
         <button className={screen === 'evaluation' ? 'nav-active' : ''} onClick={() => { if (screen !== 'evaluation') openEvaluation(); }}>Evaluation</button>
         <button className={screen === 'statistical' ? 'nav-active' : ''} onClick={() => setScreen('statistical')}>Statistical audit</button>
@@ -164,7 +172,6 @@ export default function App() {
         open={(next) => {
           if (next === 'evaluation') openEvaluation(activeTaskId);
           else {
-            setReviewOnOpen(next === 'demos');
             setRecorderFocus(null);
             setScreen(next);
           }
@@ -172,6 +179,9 @@ export default function App() {
         openEvaluation={openEvaluation}
         activeTaskId={activeTaskId}
         selectTask={selectTask}
+        demoApproval={demoApproval}
+        clearDemoApproval={() => setDemoApproval(null)}
+        onDemoKept={returnWithDemoApproval}
         showSimulatorOnOpen={showSimulator}
         simulatorMode={simulatorMode}
         chooseSimulatorMode={chooseSimulatorMode}
@@ -179,7 +189,6 @@ export default function App() {
           chooseSimulatorMode(mode);
           setRecorderFocus(mode);
           setScenePreset(preset);
-          setReviewOnOpen(false);
           setScreen('demos');
         }}
       />}
@@ -187,7 +196,7 @@ export default function App() {
       {screen === 'repair' && <Repair onDemos={() => setScreen('demos')} onTraining={() => setScreen('training')} />}
       {screen === 'preflight' && <Preflight />}
       {screen === 'tasks' && <Tasks />}
-      {screen === 'demos' && <Demos initialTaskId={activeTaskId} reviewOnOpen={reviewOnOpen}
+      {screen === 'demos' && <Demos initialTaskId={activeTaskId} onKeep={returnWithDemoApproval}
         recorderFocus={recorderFocus} onTaskSelected={selectTask}
         initialScenePreset={recorderFocus === 'scene' ? scenePreset : undefined}
         openSimulator={() => { setShowSimulator(true); setScreen('start'); }} />}

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import LiveEvaluation from './LiveEvaluation';
+import ChatDemoReview, { type DemoKeepReceipt } from './ChatDemoReview';
+import ChatTraining from './ChatTraining';
 import type { ScenePreset } from './SceneTask';
 import YamChatWorkflow, { type SimulatorMode, type TaskPipeline, type YamJob } from './YamChatWorkflow';
 
@@ -12,6 +14,7 @@ type Task = { id: string; name: string; baseline_checkpoint: string };
 type Status = { configured: boolean; source: string };
 type Workspace = { state: string; message: string; datasets: { id: string; name: string; status: string }[]; fine_tuning_jobs: { id: string; name: string; status: string }[]; models: { id: string; name: string; status: string }[] };
 type Simulator = { state: string; message: string };
+type WorkSurface = { kind: 'demos' | 'training'; taskId: string };
 
 const simulatorHelpPattern = /simulator screen|set up the YAM simulator/i;
 
@@ -33,7 +36,7 @@ function savedMessages(): Message[] {
 
 export default function CoachChat({
   open, openEvaluation, activeTaskId, selectTask, showSimulatorOnOpen,
-  simulatorMode, chooseSimulatorMode, openRecorder,
+  simulatorMode, chooseSimulatorMode, openRecorder, demoApproval, clearDemoApproval, onDemoKept,
 }: {
   open: (screen: Screen) => void;
   openEvaluation: (taskId?: string, evaluationId?: string) => void;
@@ -43,6 +46,9 @@ export default function CoachChat({
   simulatorMode: SimulatorMode;
   chooseSimulatorMode: (mode: SimulatorMode) => void;
   openRecorder: (mode: 'fruit' | 'scene', preset?: ScenePreset) => void;
+  demoApproval: DemoKeepReceipt | null;
+  clearDemoApproval: () => void;
+  onDemoKept: (receipt: DemoKeepReceipt) => void;
 }) {
   const [messages, setMessages] = useState<Message[]>(savedMessages);
   const [reply, setReply] = useState<Reply | null>(null);
@@ -52,6 +58,10 @@ export default function CoachChat({
   const [simulator, setSimulator] = useState<Simulator | null>(null);
   const [yamJob, setYamJob] = useState<YamJob | null>(null);
   const [pipeline, setPipeline] = useState<TaskPipeline | null>(null);
+  const [workflowTask, setWorkflowTask] = useState<Task>();
+  const [workSurface, setWorkSurface] = useState<WorkSurface | null>(null);
+  const [comparisonReady, setComparisonReady] = useState<{ taskId: string; jobId: string; yam: boolean | null } | null>(null);
+  const [comparisonStarting, setComparisonStarting] = useState(false);
   const [showSimulator, setShowSimulator] = useState(showSimulatorOnOpen);
   const [exampleCheckpoints, setExampleCheckpoints] = useState<string[]>([]);
   const [dreamAccess, setDreamAccess] = useState('unknown');
@@ -64,7 +74,21 @@ export default function CoachChat({
   const composer = useRef<HTMLTextAreaElement>(null);
   const started = useRef(false);
 
-  useEffect(() => { sessionStorage.setItem('coach-chat-v2', JSON.stringify(messages.slice(-24))); thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: 'smooth' }); }, [messages]);
+  useEffect(() => {
+    sessionStorage.setItem('coach-chat-v2', JSON.stringify(messages.slice(-24)));
+    if (!workSurface) thread.current?.scrollTo({ top: thread.current.scrollHeight });
+  }, [messages, workSurface]);
+  useEffect(() => {
+    const content = thread.current;
+    if (!content) return;
+    if (workSurface) {
+      content.scrollTop = 0;
+      content.focus({ preventScroll: true });
+    } else if (demoApproval || comparisonReady) {
+      content.scrollTop = content.scrollHeight;
+      content.querySelector<HTMLButtonElement>('.chat-workspace-return button')?.focus({ preventScroll: true });
+    }
+  }, [workSurface, demoApproval, comparisonReady]);
   useEffect(() => { sessionStorage.setItem('coach-begun-v2', begun ? 'yes' : 'no'); }, [begun]);
   useEffect(() => {
     void Promise.all([api<Status>('/api/assistant/status'), api<Account>('/api/account/status')])
@@ -135,6 +159,7 @@ export default function CoachChat({
     setSimulator(sim);
     setDreamAccess(preflight.dream.state);
     const current = tasks.find((task) => task.id === taskId) ?? tasks[0];
+    setWorkflowTask(current);
     const remote = dream.configured && preflight.dream.state === 'ready' ? await api<Workspace>('/api/account/workspace').catch(() => null) : null;
     setWorkspace(remote);
     const taskData = current ? await Promise.all([
@@ -200,6 +225,8 @@ export default function CoachChat({
     if (!input || busy) return;
     if (/\b(?:dl_live_|sk-)[A-Za-z0-9_-]{12,}/.test(input)) { setError('Enter API keys in the masked key field, not the chat.'); return; }
     setText('');
+    clearDemoApproval();
+    setComparisonReady(null);
     const history: Message[] = [...messages, { role: 'user', content: input }];
     setMessages(history);
     await turn(history);
@@ -243,11 +270,62 @@ export default function CoachChat({
       const job = await api<YamJob | null>(path, 'POST', body);
       setYamJob(job);
       if (job) {
+        clearDemoApproval();
+        setComparisonReady(null);
         chooseSimulatorMode('apple');
         selectTask(job.task_id);
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not run the simulator action.');
+    }
+  }
+
+  function openWork(kind: WorkSurface['kind'], taskId = activeTaskId || workflowTask?.id || '') {
+    if (!taskId) {
+      setError('Save a task in chat before reviewing demos or training.');
+      return;
+    }
+    if (taskId !== activeTaskId) selectTask(taskId);
+    setError('');
+    clearDemoApproval();
+    setComparisonReady(null);
+    setWorkSurface({ kind, taskId });
+  }
+
+  function finishReview(receipt: DemoKeepReceipt) {
+    setWorkSurface(null);
+    setReply(null);
+    setPipeline((current) => ({
+      kept: receipt.kept,
+      unreviewed: receipt.remaining,
+      validated: current?.validated ?? false,
+      job: current?.job,
+    }));
+    onDemoKept(receipt);
+  }
+
+  async function finishTraining(taskId: string, jobId: string) {
+    const isApple = (task: Task) => task.name === 'Apple pickup · YAM simulator';
+    const yam = yamJob?.task_id === taskId ? true : workflowTask?.id === taskId ? isApple(workflowTask) : null;
+    setWorkSurface(null);
+    setComparisonReady({ taskId, jobId, yam });
+    if (yam !== null) return;
+    try {
+      const task = await api<Task>(`/api/tasks/${taskId}`);
+      setComparisonReady((current) => current?.jobId === jobId ? { ...current, yam: isApple(task) } : current);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not check this task’s evaluation options.');
+      setComparisonReady((current) => current?.jobId === jobId ? { ...current, yam: false } : current);
+    }
+  }
+
+  async function compareReadyCheckpoint(taskId: string, jobId: string) {
+    if (comparisonStarting) return;
+    setComparisonStarting(true);
+    try {
+      await runYamAction('/api/simulator/compare', { task_id: taskId, job_id: jobId, pairs: 4 });
+    } finally {
+      setComparisonStarting(false);
     }
   }
 
@@ -269,6 +347,9 @@ export default function CoachChat({
     setText('');
     setSecret('');
     setShowSimulator(false);
+    setWorkSurface(null);
+    clearDemoApproval();
+    setComparisonReady(null);
     void turn([], 'introduction');
   }
 
@@ -280,6 +361,7 @@ export default function CoachChat({
   const needsDreamKey = begun && account && (!account.configured || dreamAccess === 'blocked' || dreamAccess === 'unavailable');
   const latestMessage = messages[messages.length - 1];
   const replySuggestions = begun && ai?.configured && !busy && !simulatorRequested && !needsDreamKey
+    && !workSurface && !demoApproval && !comparisonReady
     && latestMessage?.role === 'assistant' && Array.isArray(latestMessage.answerOptions)
     ? latestMessage.answerOptions.filter((suggestion) => typeof suggestion === 'string' && suggestion.trim())
     : [];
@@ -292,14 +374,35 @@ export default function CoachChat({
       <div className="chat-landscape" aria-hidden="true"><video autoPlay loop muted playsInline poster="/dream/sunrise-hd-poster.webp"><source src="/dream/sunrise-hd.mp4" type="video/mp4" /></video><span className="chat-spark chat-spark-one">✦</span><span className="chat-spark chat-spark-two">✦</span></div>
       <div className="chat-panel-top">
         <span className="chat-landscape-title">Conversation</span>
-        {begun && <button type="button" className="chat-reset" disabled={!ai?.configured || busy} onClick={startOver}>Start over</button>}
+        {begun && !workSurface && <button type="button" className="chat-reset" disabled={!ai?.configured || busy} onClick={startOver}>Start over</button>}
       </div>
-      <div className="chat-thread" ref={thread} aria-live="polite">
+      <div className={`chat-thread${workSurface ? ' chat-thread-workspace' : ''}`} ref={thread}
+        aria-live={workSurface ? undefined : 'polite'} tabIndex={workSurface ? -1 : undefined}>
+      {workSurface ? (workSurface.kind === 'demos'
+        ? <ChatDemoReview key={workSurface.taskId} taskId={workSurface.taskId} onClose={() => setWorkSurface(null)} onKeep={finishReview} />
+        : <ChatTraining key={workSurface.taskId} taskId={workSurface.taskId} onClose={() => setWorkSurface(null)}
+          onCheckpointReady={(jobId) => void finishTraining(workSurface.taskId, jobId)} />) : <>
         {ai && !ai.configured && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>The AI coach is unavailable on this server. Ask the operator to configure its AI credential, then refresh this page.</p></div>}
         {messages.map((item, index) => <div key={index} className={`chat-bubble chat-${item.role}`}><span>{item.role === 'assistant' ? 'DreamCoach' : 'You'}</span><p>{item.content}</p></div>)}
         {busy && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>Thinking through your next step…</p></div>}
       {needsDreamKey && <div className="chat-action"><p><a href={account.dashboard_url} target="_blank" rel="noreferrer">Open Dream Labs API keys</a>, sign in, and create a key. Paste it in this private field when you have it. The key is not saved in this chat. This checks API access on this machine, not your browser’s Dream website login.</p><form onSubmit={(event) => void connectDream(event)} className="chat-secret"><input aria-label="Dream API key" type="password" autoComplete="off" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="Dream API key" /><button disabled={busy || !secret.trim()}>Connect Dream</button></form></div>}
-      {begun && workspace?.state === 'ready' && <details className="chat-inventory"><summary>Dream account data · {workspace.datasets.length} datasets · {workspace.fine_tuning_jobs.length} jobs</summary><div><p>Read from Dream’s API with this server’s key. These are account resources, separate from local coach tasks.</p><h3>Datasets</h3><ul>{workspace.datasets.map((item) => <li key={item.id}>{item.name} · {item.status}</li>)}</ul><h3>Fine-tuning jobs</h3><ul>{workspace.fine_tuning_jobs.map((item) => <li key={item.id}>{item.name} · {item.status}</li>)}</ul><div className="chat-inventory-links"><a href="/api/docs/apple-training" target="_blank" rel="noreferrer">Committed apple dataset and training record</a><a href="/api/docs/apple-evaluation" target="_blank" rel="noreferrer">Measured 500-step comparison</a><button className="secondary" onClick={() => open('statistical')}>Open existing apple audit</button></div></div></details>}
+      {begun && workspace?.state === 'ready' && <details className="chat-inventory">
+        <summary>Dream account data · {workspace.datasets.length} datasets · {workspace.fine_tuning_jobs.length} jobs</summary>
+        <div>
+          <p>{hosted ? 'Read from the Dream Labs account you connected.' : 'Read from Dream’s API with the locally configured key.'}</p>
+          <h3>Datasets</h3>
+          <ul>{workspace.datasets.map((item) => <li key={item.id}>{item.name} · {item.status}</li>)}</ul>
+          <h3>Fine-tuning jobs</h3>
+          <ul>{workspace.fine_tuning_jobs.map((item) => <li key={item.id}>{item.name} · {item.status}</li>)}</ul>
+          <div className="chat-inventory-links">
+            {!hosted && <>
+              <a href="/api/docs/apple-training" target="_blank" rel="noreferrer">Committed apple dataset and training record</a>
+              <a href="/api/docs/apple-evaluation" target="_blank" rel="noreferrer">Measured 500-step comparison</a>
+            </>}
+            <button className="secondary" onClick={() => open('statistical')}>Open existing apple audit</button>
+          </div>
+        </div>
+      </details>}
       {begun && reply?.setup_help === 'robot' && <div className="chat-action chat-setup-help"><strong>Robot setup</strong><p>Connect the arms and cameras, then run Preflight to confirm fresh camera frames before a baseline trial.</p><button className="secondary" onClick={() => open('preflight')}>Check arms and cameras</button><a href="https://platform.dreamlabs.ai/setup" target="_blank" rel="noreferrer">Dream robot setup guide</a></div>}
       {simulatorRequested && <YamChatWorkflow
         setup={simulator} dreamReady={dreamAccess === 'ready'} job={yamJob}
@@ -314,8 +417,8 @@ export default function CoachChat({
         compare={(jobId) => runYamAction('/api/simulator/compare', { task_id: activeTaskId, job_id: jobId, pairs: 4 })}
         compareExisting={(checkpoint) => runYamAction('/api/simulator/compare-existing', { checkpoint })}
         stop={() => runYamAction('/api/simulator/workflow/stop')}
-        review={() => { if (yamJob) selectTask(yamJob.task_id); open('demos'); }}
-        training={() => open('training')}
+        review={() => openWork('demos', simulatorMode === 'apple' ? yamJob?.task_id || activeTaskId : activeTaskId)}
+        training={() => openWork('training')}
         explainComparison={() => {
           if (busy) return;
           const history: Message[] = [...messages, { role: 'user', content: 'Explain this simulator comparison and suggest what to do next.' }];
@@ -326,8 +429,33 @@ export default function CoachChat({
       {begun && reply?.task_draft && reply.setup_help !== 'simulator' && <div className="chat-action"><strong>Ready to save this task?</strong><p>{reply.task_draft.name} · {reply.task_draft.prompt}<br />Success: {reply.task_draft.success_rule}</p><button disabled={busy} onClick={() => void saveTask(reply.task_draft!)}>Confirm and save task</button></div>}
       {begun && reply?.suggested_screen && reply.suggested_screen !== 'tasks' && !(simulatorRequested
         && (['demos', 'training'].includes(reply.suggested_screen) || (simulatorMode === 'apple' && reply.suggested_screen === 'evaluation')))
-        && <div className="chat-action"><button className="secondary" onClick={() => open(reply.suggested_screen!)}>{`Open ${reply.suggested_screen}`}</button></div>}
+        && <div className="chat-action"><button className="secondary" onClick={() => {
+          const target = reply.suggested_screen;
+          if (target === 'demos' || target === 'training') openWork(target);
+          else if (target) open(target);
+        }}>{reply.suggested_screen === 'demos' ? 'Review demos' : reply.suggested_screen === 'training'
+          ? 'Open fine-tuning' : `Open ${reply.suggested_screen}`}</button></div>}
       {begun && !simulatorRequested && <button type="button" className="chat-simulator-link" onClick={() => setShowSimulator(true)}>Use the YAM simulator</button>}
+      {demoApproval && <section className="chat-action chat-workspace-return" aria-label="Demo saved">
+        <div role="status"><strong>Demo kept</strong><p>{demoApproval.remaining
+          ? `${demoApproval.kept} kept · ${demoApproval.remaining} still to review.`
+          : `${demoApproval.kept} kept. Next, validate a dataset for fine-tuning.`}</p></div>
+        <div className="chat-workspace-actions">
+          {demoApproval.remaining > 0 && <button type="button" className="secondary" onClick={() => openWork('demos', demoApproval.taskId)}>Review next demo</button>}
+          <button type="button" onClick={() => openWork('training', demoApproval.taskId)}>Open fine-tuning</button>
+        </div>
+      </section>}
+      {comparisonReady && <section className="chat-action chat-workspace-return" aria-label="Checkpoint ready">
+        <div role="status"><strong>Fine-tune ready</strong><p>{comparisonReady.yam === null ? 'Checking evaluation options…' : comparisonReady.yam
+          ? 'Compare the base and fine-tuned models on the same four simulator scenes. This may use Dream credits.'
+          : 'Compare your new checkpoint with the base model on held-out scenes.'}</p></div>
+        {comparisonReady.yam !== null && (comparisonReady.yam
+          ? <button type="button" disabled={comparisonStarting} onClick={() => void compareReadyCheckpoint(comparisonReady.taskId, comparisonReady.jobId)}>
+            {comparisonStarting ? 'Starting comparison…' : 'Run simulator comparison'}
+          </button>
+          : <button type="button" onClick={() => openEvaluation(comparisonReady.taskId)}>Plan evaluation</button>)}
+      </section>}
+      </>}
       </div>
       {replySuggestions.length > 0 && <div className="chat-suggestions" role="group" aria-label="Suggested replies">
         <span>Suggested replies</span>
@@ -339,13 +467,13 @@ export default function CoachChat({
           </button>
         ))}</div>
       </div>}
-      {!begun && ai?.configured && messages.length > 0 && <div className="chat-begin">
+      {!workSurface && !begun && ai?.configured && messages.length > 0 && <div className="chat-begin">
         <p id="chat-begin-description">First, we’ll check Dream Labs access.</p>
         <button type="button" aria-describedby="chat-begin-description" disabled={busy} onClick={beginConversation}>
           Begin<span className="chat-begin-arrow" aria-hidden="true">→</span>
         </button>
       </div>}
-      {begun && <form onSubmit={(event) => void submit(event)} className="chat-composer"><textarea ref={composer} aria-label="Message to coach" disabled={!ai?.configured} value={text} maxLength={2000} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(event); } }} placeholder="Tell me about your robot or ask what to do next…" /><button disabled={!ai?.configured || busy || !text.trim()}>Send</button></form>}
+      {!workSurface && begun && <form onSubmit={(event) => void submit(event)} className="chat-composer"><textarea ref={composer} aria-label="Message to coach" disabled={!ai?.configured} value={text} maxLength={2000} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(event); } }} placeholder="Tell me about your robot or ask what to do next…" /><button disabled={!ai?.configured || busy || !text.trim()}>Send</button></form>}
     </section>
     <LiveEvaluation taskId={activeTaskId} simulatorActive={!!simulatorRequested && simulatorMode === 'apple'} onOpen={openEvaluation} onOpenAudit={() => open('statistical')} />
     </div>

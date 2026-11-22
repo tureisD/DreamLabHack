@@ -136,7 +136,10 @@ export default function YamChatWorkflow({
       </div>
     </div>}
 
-    {mode !== 'apple' && !!pipeline?.kept && <button type="button" className="yam-secondary" onClick={training}>Open training for this task</button>}
+    {mode !== 'apple' && (Boolean(pipeline?.unreviewed) || Boolean(pipeline?.kept)) && <div className="yam-buttons">
+      {!!pipeline?.unreviewed && <button type="button" className="yam-primary" onClick={review}>Review demos <span aria-hidden="true">→</span></button>}
+      {!!pipeline?.kept && <button type="button" className="yam-secondary" onClick={training}>Open fine-tuning</button>}
+    </div>}
 
     {mode === 'apple' && <div className="yam-panel">
       <div className="yam-panel-heading"><h3>Teach apple pickup</h3><p>Lift the apple at least 8 cm and hold it for two seconds.</p></div>
@@ -162,7 +165,7 @@ export default function YamChatWorkflow({
         <small>{pipeline.job
           ? `Fine-tune status: ${pipeline.job.status.replaceAll('_', ' ')}.`
           : pipeline.validated ? 'Dataset validated.' : `${pipeline.kept} demos ready for validation.`}</small>
-        <button type="button" className="yam-secondary" onClick={training}>Open training</button>
+        <button type="button" className="yam-secondary" onClick={training}>Open fine-tuning</button>
       </div>}
       {!running && checkpoint && <div className="yam-next">
         <small>Compare both checkpoints on four held-out scenes. This may use Dream credits.</small>

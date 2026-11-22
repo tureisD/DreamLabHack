@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -289,6 +290,23 @@ def test_second_worker_cannot_claim_same_data_directory(tmp_path):
         exclusive_worker_lock(lock),
     ):
         pass
+
+
+def test_finetune_submission_queues_only_one_job_for_a_dataset(tmp_path):
+    tasks, task, demos, store = setup_dataset(tmp_path)
+    version = store.create_dataset(task.id, "pilot/robot", [demo.id for demo in demos.list(task.id)])
+    store.update_dataset(version.id, status="validated")
+    client = TestClient(create_app(
+        PreflightService(FakeStation(), list), EpisodeStore(tmp_path / "data"),
+        RolloutScanner(tmp_path), tasks, demo_store=demos, faas_store=store,
+    ))
+
+    def submit(_):
+        return client.post(f"/api/datasets/{version.id}/finetunes", json={"steps": 500}).status_code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(submit, range(2))) == [201, 409]
+    assert len(store.list_finetunes(task.id)) == 1
 
 
 def test_resume_settings_persist_and_api_rejects_unevaluated_parent(tmp_path):

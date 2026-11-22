@@ -456,3 +456,53 @@ button:hover { background: #383636; }
 .sim-marker { padding: 3px 6px; background: #fffdf0d9; color: #302b29; border: 1px solid #e5b992; }
 .sim-click { display: grid; place-items: center; width: 25px; height: 25px; color: #fff; background: #a42a2a; border: 2px solid #fff; box-shadow: 0 1px 5px #0008; }
 .sim-correct .training-controls { margin-top: 16px; }
+.chat-page .chat-thread-workspace {
+  padding: clamp(14px, 2.7vw, 32px);
+  background: rgba(255, 249, 243, .86);
+}
+.chat-thread-workspace:focus { outline: none; }
+.chat-inline-workspace, .chat-thread .chat-training {
+  display: grid;
+  gap: 16px;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: clamp(16px, 3.2vw, 30px);
+  border: 1px solid #ead9c9;
+  border-radius: 16px;
+  background: #fffdf9;
+}
+.chat-inline-workspace > *, .chat-thread .chat-training > * { margin: 0; }
+.chat-inline-workspace > button, .chat-thread .chat-training > button { justify-self: start; }
+.chat-workspace-header, .chat-training-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+.chat-training-header { padding-bottom: 14px; border-bottom: 1px solid #ead9c9; }
+.chat-workspace-header h2, .chat-training-header h2 { margin: 0; font-size: clamp(18px, 2.2vw, 24px); }
+.chat-workspace-header p, .chat-inline-workspace .label-form { margin: 8px 0 0; }
+.chat-workspace-field { display: grid; justify-items: start; gap: 5px; font-size: 13px; font-weight: 650; }
+.chat-workspace-field select { max-width: 100%; padding: 7px; border: 1px solid #ead9c9; border-radius: 8px; background: white; font: inherit; }
+.chat-inline-workspace .role-tabs, .chat-workspace-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.chat-demo-video { display: block; width: 100%; max-height: clamp(160px, 35dvh, 300px); object-fit: contain; border-radius: 10px; background: #222; }
+.chat-demo-findings { margin: 6px 0 0; padding-left: 22px; }
+.chat-demo-details { padding: 9px 12px; border: 1px solid #ead9c9; border-radius: 10px; }
+.chat-demo-details summary { cursor: pointer; color: #6e4128; font-size: 14px; font-weight: 650; }
+.chat-training .chat-training-status, .chat-training-approval, .chat-training-next { padding: 12px; border-radius: 10px; background: #fff1e3; }
+.chat-training-approval {
+  display: grid;
+  gap: 10px;
+  padding: clamp(14px, 2.5vw, 22px);
+  border: 1px solid #f1d2b4;
+}
+.chat-training-approval h3 { margin: 0; font-size: 16px; }
+.chat-training-approval .chat-workspace-actions { gap: 10px; margin-top: 6px; }
+.chat-training-next { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.chat-training-next code { overflow-wrap: anywhere; }
+.chat-training .chat-training-form { margin: 0; }
+.chat-training details .chat-training-form { margin-top: 10px; }
+.chat-workspace-return { justify-content: space-between; border: 1px solid #ead9c9; }
+.chat-workspace-return strong { color: #714123; }
+.chat-workspace-return p { margin-top: 4px; }

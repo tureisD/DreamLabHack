@@ -73,6 +73,10 @@ class FineTuneRecord(FineTuneRequest):
     created_at: str
 
 
+class FineTuneAlreadySubmitted(ValueError):
+    pass
+
+
 def _now() -> str:
     return dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
 
@@ -203,18 +207,27 @@ class FaaSStore:
         )
         with self.db.connect() as connection:
             self._schema(connection)
-            connection.execute(
+            inserted = connection.execute(
                 """INSERT INTO fine_tune_jobs
                    (id, dataset_version_id, suffix, steps, lr_schedule, base_share, use_eef,
                     remote_job_id, remote_status, checkpoint, status, failure_phase, error, created_at, resume_from)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                   WHERE NOT EXISTS (
+                       SELECT 1 FROM fine_tune_jobs
+                       WHERE (? IS NULL AND dataset_version_id = ?) OR resume_from = ?
+                   )""",
                 (
                     job.id, job.dataset_version_id, job.suffix, job.steps, job.lr_schedule,
                     job.base_share, int(job.use_eef), None, None, None, job.status, None, None,
-                    job.created_at,
-                    job.resume_from,
+                    job.created_at, job.resume_from,
+                    job.resume_from, job.dataset_version_id, job.resume_from,
                 ),
             )
+            if not inserted.rowcount:
+                raise FineTuneAlreadySubmitted(
+                    "This checkpoint already has a continuation job." if job.resume_from
+                    else "This dataset version already has a fine-tune job."
+                )
         return job
 
     def get_finetune(self, job_id: str) -> FineTuneRecord | None:

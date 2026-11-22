@@ -154,6 +154,13 @@ def test_demo_import_review_and_coverage_plan(tmp_path):
     demo_id = client.get(f"/api/tasks/{task.id}/demos").json()[0]["id"]
     assert client.get(f"/api/demos/{demo_id}/video/overhead").content == b"video fixture"
     assert client.post(f"/api/demos/{demo_id}/decision", json={"decision": "keep"}).status_code == 422
+    kept_without_cell = client.post(
+        f"/api/demos/{demo_id}/decision",
+        json={"decision": "keep", "defer_coverage_label": True},
+    )
+    assert kept_without_cell.status_code == 200
+    assert kept_without_cell.json()["decision"] == "keep"
+    assert kept_without_cell.json()["start_cell"] is None
 
     trial = task_store.create_trial(task.id, TrialInput(start_cell=4))
     episode = EpisodeSummary(
@@ -187,6 +194,7 @@ def test_demo_import_review_and_coverage_plan(tmp_path):
     plan_before = plan(task.id, task_store, episode_store, demo_store)
     assert plan_before.next_cell == 4
     assert plan_before.cells[4].baseline_failures == 1
+    assert not plan_before.observed_failure_cells_covered
 
     kept = client.post(
         f"/api/demos/{demo_id}/decision",
