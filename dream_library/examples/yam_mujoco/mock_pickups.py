@@ -53,7 +53,7 @@ def solve(env, side, target, rotation, seed):
     raise ValueError(f"IK failed {side} {target}: score {best[0]:.4f}")
 
 
-def run_trial(fruit, yaw=0, lift=0.15, *, env=None, snapshot_dir=None):
+def run_trial(fruit, yaw=0, lift=0.15, *, env=None, snapshot_dir=None, settle_steps=30):
     """Run one scripted physical pickup and release trial.
     @param fruit Scene fruit name.
     @param yaw Grasp yaw in radians.
@@ -66,7 +66,7 @@ def run_trial(fruit, yaw=0, lift=0.15, *, env=None, snapshot_dir=None):
     try:
         home = np.r_[np.zeros(6), 1.0]
         start = env.state()
-        for _ in range(30):
+        for _ in range(settle_steps):
             env.step(start["left"], start["right"])
         p = env.data.body(fruit).xpos.copy()
         initial_z = p[2]

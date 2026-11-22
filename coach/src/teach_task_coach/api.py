@@ -1,5 +1,8 @@
 """HTTP API for the local coach UI."""
 
+import hashlib
+import json
+import re
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
@@ -39,6 +42,8 @@ from teach_task_coach.faas import (
     FineTuneRequest,
 )
 from teach_task_coach.guidance import Guidance, guidance
+from teach_task_coach.offline_review import OfflineReview
+from teach_task_coach.offline_review import review as offline_review
 from teach_task_coach.preflight import PreflightResult, PreflightService
 from teach_task_coach.rollout_audit import IntentAudit, audit_rollout
 from teach_task_coach.scene import PlacementResult, SceneAdapter
@@ -122,11 +127,36 @@ def create_app(
     dream_gateway: DreamGateway | None = None,
     evaluation_store: EvaluationStore | None = None,
     scene_adapter: SceneAdapter | None = None,
+    offline_only: bool = False,
 ) -> FastAPI:
     app = FastAPI(title="Teach it a task", version="0.1.0")
 
     @app.middleware("http")
     async def local_browser_writes_only(request: Request, call_next):
+        if offline_only and request.url.path.startswith("/api/"):
+            read_routes = {
+                ("GET", "/api/mode"),
+                ("GET", "/api/episodes"),
+                ("GET", "/api/tasks"),
+            }
+            path = request.url.path
+            method = request.method
+            allowed = (method, path) in read_routes or any(
+                method == verb and re.fullmatch(pattern, path)
+                for verb, pattern in (
+                    ("GET", r"/api/offline-review/[A-Za-z0-9_-]+"),
+                    ("GET", r"/api/episodes/[A-Za-z0-9_-]+"),
+                    ("GET", r"/api/episodes/[A-Za-z0-9_-]+/video/[A-Za-z0-9_.-]+"),
+                    ("GET", r"/api/tasks/[A-Za-z0-9_-]+/demos"),
+                    ("GET", r"/api/demos/[A-Za-z0-9_-]+/video/[A-Za-z0-9_.-]+"),
+                    ("POST", r"/api/rollouts/import"),
+                    ("POST", r"/api/tasks/[A-Za-z0-9_-]+/demos/import"),
+                    ("POST", r"/api/episodes/[A-Za-z0-9_-]+/label"),
+                    ("POST", r"/api/demos/[A-Za-z0-9_-]+/decision"),
+                )
+            )
+            if not allowed:
+                return JSONResponse(status_code=403, content={"detail": "This action is disabled in the offline walkthrough."})
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):
             origin = request.headers.get("origin")
             if origin:
@@ -150,8 +180,49 @@ def create_app(
     evaluations = evaluation_store or EvaluationStore(episodes.data_dir)
     scene_fixture = scene_adapter or SceneAdapter()
 
+    def require_live_task(task_id: str) -> Task:
+        task = tasks.get_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        if task.offline_mode:
+            raise HTTPException(status_code=409, detail="Offline walkthrough tasks cannot use robot, training, evaluation, or deployment actions.")
+        return task
+
+    def require_live_dataset(version_id: str) -> DatasetVersion:
+        version = faas.get_dataset(version_id)
+        if version is None:
+            raise HTTPException(status_code=404, detail="Dataset version not found.")
+        require_live_task(version.task_id)
+        return version
+
+    def require_live_trial(trial_id: str) -> Trial:
+        trial = tasks.get_trial(trial_id)
+        if trial is None:
+            raise HTTPException(status_code=404, detail="Trial not found.")
+        require_live_task(trial.task_id)
+        return trial
+
+    def require_live_evaluation(evaluation_id: str) -> Evaluation:
+        evaluation = evaluations.get(evaluation_id)
+        if evaluation is None:
+            raise HTTPException(status_code=404, detail="Evaluation not found.")
+        require_live_task(evaluation.task_id)
+        return evaluation
+
+    @app.get("/api/mode")
+    def get_mode() -> dict[str, bool]:
+        return {"offline_only": offline_only}
+
     @app.get("/api/preflight", response_model=PreflightResult)
     def get_preflight() -> PreflightResult:
+        if offline_only:
+            from teach_task_coach.preflight import Check
+            return PreflightResult(
+                station=Check(state="unavailable", message="Robot access is disabled in this offline walkthrough."),
+                dream=Check(state="unavailable", message="Dream access is disabled in this offline walkthrough."),
+                station_status=None,
+                models=[],
+            )
         return preflight.run()
 
     @app.get("/health")
@@ -167,12 +238,61 @@ def create_app(
         index = frontend_dist / "index.html"
         return FileResponse(index) if index.is_file() else {"message": "Build coach/frontend first."}
 
+    def offline_episode_for_task(episode: EpisodeSummary, task_id: str | None = None) -> bool:
+        simulation = episode.simulation or {}
+        owner = simulation.get("offline_task_id")
+        scene_id = simulation.get("offline_scene_id")
+        if (
+            simulation.get("policy_origin") != "offline_fixture"
+            or not isinstance(owner, str)
+            or not isinstance(scene_id, str)
+            or episode.status != "complete"
+            or not episode.evidence_sha256
+        ):
+            return False
+        task = tasks.get_task(owner)
+        if task is None or not task.offline_mode or task.prompt != episode.task:
+            return False
+        manifest_path = tasks.db.data_dir / "offline-protocol.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("schema") != "coach-offline-walkthrough-v1" or manifest.get("task_id") != owner:
+                return False
+            spec = next((item for item in manifest.get("scenes", []) if item.get("id") == scene_id), None)
+            if spec is None or episode.simulation.get("seed") != spec.get("seed"):
+                return False
+            if episode.checkpoint != f"offline-fixture/{episode.simulation.get('comparison_role')}":
+                return False
+            if (episode.simulation.get("policy_origin") != "offline_fixture"
+                    or episode.simulation.get("protocol_sha256") != hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+                    or episode.simulation.get("protocol") != manifest.get("schema")
+                    or episode.simulation.get("rule_version") != manifest.get("rule_version")):
+                return False
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError):
+            return False
+        return task_id is None or owner == task_id
+
+    def episode_offline_owner(episode: EpisodeSummary) -> str | None:
+        if offline_episode_for_task(episode):
+            return str((episode.simulation or {}).get("offline_task_id"))
+        return None
+
     @app.post("/api/rollouts/import", response_model=ImportResult)
     def import_rollouts() -> ImportResult:
         found, skipped = rollouts.scan()
+        imported = 0
         for episode in found:
+            simulation = episode.simulation or {}
+            if simulation.get("policy_origin") == "offline_fixture" or isinstance(simulation.get("offline_task_id"), str):
+                if not offline_only or not offline_episode_for_task(episode):
+                    skipped.append(f"{Path(episode.source_path).name}: offline fixture belongs only to its isolated offline workspace")
+                    continue
+            elif offline_only:
+                skipped.append(f"{Path(episode.source_path).name}: offline workspace imports explicitly tagged fixtures only")
+                continue
             episodes.upsert(episode)
-        return ImportResult(imported=len(found), skipped=skipped)
+            imported += 1
+        return ImportResult(imported=imported, skipped=skipped)
 
     @app.get("/api/episodes", response_model=list[EpisodeListItem])
     def list_episodes() -> list[EpisodeListItem]:
@@ -191,19 +311,43 @@ def create_app(
                 ) if episode.simulation is not None else None,
             )
             for episode in episodes.list()
+            if (
+                offline_episode_for_task(episode)
+                if offline_only
+                else (episode.simulation or {}).get("policy_origin") != "offline_fixture"
+                     and not isinstance((episode.simulation or {}).get("offline_task_id"), str)
+            )
         ]
+
+    @app.get("/api/offline-review/{task_id}", response_model=OfflineReview)
+    def get_offline_review(task_id: str) -> OfflineReview:
+        if not offline_only:
+            raise HTTPException(status_code=404, detail="Offline review is available only in the isolated offline application.")
+        try:
+            return offline_review(task_id, tasks, episodes, demos)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Task not found.") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/episodes/{episode_id}", response_model=EpisodeSummary)
     def get_episode(episode_id: str) -> EpisodeSummary:
         episode = episodes.get(episode_id)
         if episode is None:
             raise HTTPException(status_code=404, detail="Episode not found.")
+        if offline_only and not offline_episode_for_task(episode):
+            raise HTTPException(status_code=404, detail="Episode not found in this offline workspace.")
+        if not offline_only and (
+            (episode.simulation or {}).get("policy_origin") == "offline_fixture"
+            or isinstance((episode.simulation or {}).get("offline_task_id"), str)
+        ):
+            raise HTTPException(status_code=404, detail="Offline fixture episodes are not part of the live workspace.")
         return episode
 
     @app.get("/api/episodes/{episode_id}/intent-audit", response_model=IntentAudit)
     def get_intent_audit(episode_id: str) -> IntentAudit:
         episode = episodes.get(episode_id)
-        if episode is None:
+        if episode is None or (episode.simulation or {}).get("policy_origin") == "offline_fixture" or isinstance((episode.simulation or {}).get("offline_task_id"), str):
             raise HTTPException(status_code=404, detail="Episode not found.")
         try:
             return audit_rollout(Path(episode.source_path))
@@ -213,6 +357,14 @@ def create_app(
     @app.get("/api/episodes/{episode_id}/video/{role}")
     def get_video(episode_id: str, role: str) -> FileResponse:
         episode = episodes.get(episode_id)
+        if episode is not None and (
+            (offline_only and not offline_episode_for_task(episode))
+            or (not offline_only and (
+                (episode.simulation or {}).get("policy_origin") == "offline_fixture"
+                or isinstance((episode.simulation or {}).get("offline_task_id"), str)
+            ))
+        ):
+            raise HTTPException(status_code=404, detail="Video not found.")
         path = None if episode is None else episode.videos.get(role)
         if (
             path is None
@@ -224,6 +376,17 @@ def create_app(
 
     @app.post("/api/episodes/{episode_id}/label", response_model=EpisodeSummary)
     def label_episode(episode_id: str, label: EpisodeLabel) -> EpisodeSummary:
+        current = episodes.get(episode_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="Episode not found.")
+        if offline_only:
+            if not offline_episode_for_task(current):
+                raise HTTPException(status_code=404, detail="Episode not found in this offline workspace.")
+        elif (
+            (current.simulation or {}).get("policy_origin") == "offline_fixture"
+            or isinstance((current.simulation or {}).get("offline_task_id"), str)
+        ):
+            raise HTTPException(status_code=409, detail="Offline fixture labels can only be changed in their isolated offline walkthrough.")
         try:
             episode = episodes.label(episode_id, label.success, label.failure_stage, label.note,
                                      expected_revision=label.expected_revision)
@@ -239,12 +402,13 @@ def create_app(
 
     @app.get("/api/tasks", response_model=list[Task])
     def list_tasks() -> list[Task]:
-        return tasks.list_tasks()
+        values = tasks.list_tasks()
+        return [task for task in values if task.offline_mode] if offline_only else [task for task in values if not task.offline_mode]
 
     @app.get("/api/tasks/{task_id}", response_model=Task)
     def get_task(task_id: str) -> Task:
         task = tasks.get_task(task_id)
-        if task is None:
+        if task is None or (offline_only and not task.offline_mode) or (not offline_only and task.offline_mode):
             raise HTTPException(status_code=404, detail="Task not found.")
         return task
 
@@ -257,6 +421,7 @@ def create_app(
 
     @app.post('/api/tasks/{task_id}/sim-baselines', response_model=SimLink)
     def assign_sim_baseline(task_id: str, value: SimAssignment):
+        require_live_task(task_id)
         try:
             return link_episode(tasks, task_id, value)
         except KeyError as exc:
@@ -266,6 +431,7 @@ def create_app(
 
     @app.post('/api/tasks/{task_id}/findings/{finding_id}/review', response_model=WorkflowFinding)
     def review_finding(task_id: str, finding_id: str, value: FindingReview):
+        require_live_task(task_id)
         try:
             return acknowledge(task_id, finding_id, value, tasks, episodes)
         except KeyError as exc:
@@ -275,24 +441,26 @@ def create_app(
 
     @app.get("/api/tasks/{task_id}/guidance", response_model=Guidance)
     def get_guidance(task_id: str) -> Guidance:
-        if tasks.get_task(task_id) is None:
+        task = tasks.get_task(task_id)
+        if task is None:
             raise HTTPException(status_code=404, detail="Task not found.")
+        if task.offline_mode:
+            raise HTTPException(status_code=409, detail="Use the offline walkthrough review for fixture tasks.")
         return guidance(task_id, tasks, episodes, demos, faas, evaluations)
 
     @app.get("/api/tasks/{task_id}/diagnosis", response_model=TaskDiagnosis)
     def get_diagnosis(task_id: str) -> TaskDiagnosis:
-        if tasks.get_task(task_id) is None:
-            raise HTTPException(status_code=404, detail="Task not found.")
+        require_live_task(task_id)
         return diagnose(task_id, tasks, episodes)
 
     @app.get("/api/tasks/{task_id}/consistency", response_model=ConsistencyReview)
     def get_consistency(task_id: str) -> ConsistencyReview:
-        if tasks.get_task(task_id) is None:
-            raise HTTPException(status_code=404, detail="Task not found.")
+        require_live_task(task_id)
         return review_task(task_id, tasks, episodes)
 
     @app.post("/api/tasks/{task_id}/baseline-trials", response_model=Trial, status_code=201)
     def create_baseline_trial(task_id: str, value: TrialInput) -> Trial:
+        require_live_task(task_id)
         try:
             return tasks.create_trial(task_id, value)
         except KeyError as exc:
@@ -300,15 +468,12 @@ def create_app(
 
     @app.get("/api/tasks/{task_id}/baseline-trials", response_model=list[Trial])
     def list_baseline_trials(task_id: str) -> list[Trial]:
-        if tasks.get_task(task_id) is None:
-            raise HTTPException(status_code=404, detail="Task not found.")
+        require_live_task(task_id)
         return tasks.list_trials(task_id)
 
     @app.get("/api/tasks/{task_id}/deployment", response_model=DeploymentStatus)
     def get_deployment(task_id: str) -> DeploymentStatus:
-        task = tasks.get_task(task_id)
-        if task is None:
-            raise HTTPException(status_code=404, detail="Task not found.")
+        task = require_live_task(task_id)
         return DeploymentStatus(
             task_id=task_id, checkpoint=tasks.deployed_checkpoint(task_id),
             baseline_checkpoint=task.baseline_checkpoint,
@@ -316,14 +481,13 @@ def create_app(
 
     @app.post("/api/tasks/{task_id}/deployment/rollback", response_model=DeploymentStatus)
     def rollback_deployment(task_id: str) -> DeploymentStatus:
-        task = tasks.get_task(task_id)
-        if task is None:
-            raise HTTPException(status_code=404, detail="Task not found.")
+        task = require_live_task(task_id)
         tasks.set_deployment(task_id, task.baseline_checkpoint, None)
         return get_deployment(task_id)
 
     @app.post("/api/tasks/{task_id}/deployed-trials", response_model=Trial, status_code=201)
     def create_deployed_trial(task_id: str, value: TrialInput) -> Trial:
+        require_live_task(task_id)
         try:
             return tasks.create_deployed_trial(task_id, value)
         except KeyError as exc:
@@ -331,12 +495,12 @@ def create_app(
 
     @app.get("/api/tasks/{task_id}/deployed-trials", response_model=list[Trial])
     def list_deployed_trials(task_id: str) -> list[Trial]:
-        if tasks.get_task(task_id) is None:
-            raise HTTPException(status_code=404, detail="Task not found.")
+        require_live_task(task_id)
         return tasks.list_deployed_trials(task_id)
 
     @app.post("/api/trials/{trial_id}/start", response_model=Trial)
     def start_trial(trial_id: str) -> Trial:
+        require_live_trial(trial_id)
         try:
             planned = tasks.get_trial(trial_id)
             if planned is not None and planned.status == "planned" and planned.evaluation_id and scene_fixture.configured:
@@ -358,8 +522,7 @@ def create_app(
 
     @app.get("/api/trials/{trial_id}/warmups", response_model=list[EpisodeSummary])
     def trial_warmups(trial_id: str) -> list[EpisodeSummary]:
-        if tasks.get_trial(trial_id) is None:
-            raise HTTPException(status_code=404, detail="Trial not found.")
+        require_live_trial(trial_id)
         return [
             episode for episode_id in tasks.warmup_episode_ids(trial_id)
             if (episode := episodes.get(episode_id)) is not None
@@ -367,6 +530,7 @@ def create_app(
 
     @app.post("/api/trials/{trial_id}/stop", response_model=Trial)
     def stop_trial(trial_id: str) -> Trial:
+        require_live_trial(trial_id)
         try:
             return runner.stop(trial_id)
         except KeyError as exc:
@@ -378,6 +542,7 @@ def create_app(
 
     @app.post("/api/trials/{trial_id}/sync", response_model=Trial)
     def sync_trial(trial_id: str) -> Trial:
+        require_live_trial(trial_id)
         try:
             return runner.sync(trial_id)
         except KeyError as exc:
@@ -389,6 +554,7 @@ def create_app(
 
     @app.post("/api/trials/{trial_id}/reconcile", response_model=Trial)
     def reconcile_trial(trial_id: str) -> Trial:
+        require_live_trial(trial_id)
         try:
             return runner.reconcile_start(trial_id)
         except KeyError as exc:
@@ -400,6 +566,7 @@ def create_app(
 
     @app.post("/api/trials/{trial_id}/label", response_model=Trial)
     def label_trial(trial_id: str, label: TrialLabel) -> Trial:
+        require_live_trial(trial_id)
         try:
             result = runner.label(trial_id, label.success, label.failure_stage, label.note)
             if result.evaluation_id:
@@ -416,6 +583,7 @@ def create_app(
 
     @app.post("/api/trials/{trial_id}/abandon", response_model=Trial)
     def abandon_trial(trial_id: str, value: AbandonReason) -> Trial:
+        require_live_trial(trial_id)
         try:
             return runner.abandon(trial_id, value.reason)
         except KeyError as exc:
@@ -427,12 +595,19 @@ def create_app(
 
     @app.post("/api/tasks/{task_id}/demos/import", response_model=ImportResult)
     def import_demos(task_id: str) -> ImportResult:
-        task = tasks.get_task(task_id)
-        if task is None:
-            raise HTTPException(status_code=404, detail="Task not found.")
+        task = require_live_task(task_id)
         found, skipped = recorder.scan(task_id, task.prompt)
         imported = 0
         for demo in found:
+            if task.offline_mode and (
+                demo.offline_task_id != task_id
+                or demo.origin == "offline_fixture"
+            ):
+                skipped.append(f"{Path(demo.source_path).name}: demo is not an eligible reference for this offline task")
+                continue
+            if not task.offline_mode and demo.offline_task_id is not None:
+                skipped.append(f"{Path(demo.source_path).name}: offline-owned demos cannot be imported into a live task")
+                continue
             try:
                 demos.upsert(demo)
             except DemoError as exc:
@@ -443,9 +618,7 @@ def create_app(
 
     @app.post("/api/tasks/{task_id}/teleop/start", response_model=TeleopStatus)
     def start_teleop(task_id: str, value: TeleopRequest) -> TeleopStatus:
-        task = tasks.get_task(task_id)
-        if task is None:
-            raise HTTPException(status_code=404, detail="Task not found.")
+        task = require_live_task(task_id)
         try:
             return teleop.start(task.prompt, value)
         except ValueError as exc:
@@ -457,7 +630,8 @@ def create_app(
 
     @app.get("/api/tasks/{task_id}/demos", response_model=list[Demo])
     def list_demos(task_id: str) -> list[Demo]:
-        if tasks.get_task(task_id) is None:
+        task = tasks.get_task(task_id)
+        if task is None or (offline_only and not task.offline_mode) or (not offline_only and task.offline_mode):
             raise HTTPException(status_code=404, detail="Task not found.")
         return demos.list(task_id)
 
@@ -466,11 +640,25 @@ def create_app(
         demo = demos.get(demo_id)
         if demo is None:
             raise HTTPException(status_code=404, detail="Demo not found.")
+        task = tasks.get_task(demo.task_id)
+        if task is None or (offline_only and not task.offline_mode) or (not offline_only and task.offline_mode):
+            raise HTTPException(status_code=404, detail="Task not found.")
         if value.decision == "keep":
             if value.start_cell is None:
                 raise HTTPException(status_code=422, detail="Choose a start cell for a kept demo.")
             if not demo.valid:
                 raise HTTPException(status_code=409, detail="Fix hard validation issues before keeping this demo.")
+            if demo.origin not in ("human", "scripted_reference"):
+                raise HTTPException(status_code=409, detail="This demo's source is unknown or offline-only and cannot be kept for training.")
+            if task.offline_mode and (
+                demo.origin != "scripted_reference"
+                or not demo.source_episode_id
+                or not any(
+                    episode.id == demo.source_episode_id and offline_episode_for_task(episode, task.id)
+                    for episode in episodes.list()
+                )
+            ):
+                raise HTTPException(status_code=409, detail="Only a scripted reference linked to this task's fixture can be kept in the offline walkthrough.")
         result = demos.decide(demo_id, value.decision, value.start_cell, value.note)
         assert result is not None
         return result
@@ -478,6 +666,10 @@ def create_app(
     @app.get("/api/demos/{demo_id}/video/{role}")
     def get_demo_video(demo_id: str, role: str) -> FileResponse:
         demo = demos.get(demo_id)
+        if demo is not None:
+            task = tasks.get_task(demo.task_id)
+            if task is None or (offline_only and not task.offline_mode) or (not offline_only and task.offline_mode):
+                raise HTTPException(status_code=404, detail="Video not found.")
         if demo is None:
             raise HTTPException(status_code=404, detail="Demo not found.")
         key = f"observation.images.{role}"
@@ -519,9 +711,8 @@ def create_app(
 
     @app.post("/api/tasks/{task_id}/datasets", response_model=DatasetVersion, status_code=201)
     def create_dataset_version(task_id: str, value: DatasetRequest) -> DatasetVersion:
-        if tasks.get_task(task_id) is None:
-            raise HTTPException(status_code=404, detail="Task not found.")
-        selected = [demo for demo in demos.list(task_id) if demo.decision == "keep" and demo.valid]
+        require_live_task(task_id)
+        selected = [demo for demo in demos.training_eligible(task_id) if demo.decision == "keep" and demo.valid]
         if not selected:
             raise HTTPException(status_code=409, detail="Keep at least one valid demonstration first.")
         try:
@@ -537,22 +728,16 @@ def create_app(
 
     @app.get("/api/tasks/{task_id}/datasets", response_model=list[DatasetVersion])
     def list_dataset_versions(task_id: str) -> list[DatasetVersion]:
-        if tasks.get_task(task_id) is None:
-            raise HTTPException(status_code=404, detail="Task not found.")
+        require_live_task(task_id)
         return faas.list_datasets(task_id)
 
     @app.get("/api/datasets/{version_id}", response_model=DatasetVersion)
     def get_dataset_version(version_id: str) -> DatasetVersion:
-        result = faas.get_dataset(version_id)
-        if result is None:
-            raise HTTPException(status_code=404, detail="Dataset version not found.")
-        return result
+        return require_live_dataset(version_id)
 
     @app.post("/api/datasets/{version_id}/finetunes", response_model=FineTuneRecord, status_code=201)
     def submit_finetune(version_id: str, settings: FineTuneRequest) -> FineTuneRecord:
-        version = faas.get_dataset(version_id)
-        if version is None:
-            raise HTTPException(status_code=404, detail="Dataset version not found.")
+        version = require_live_dataset(version_id)
         if version.status != "validated":
             raise HTTPException(status_code=409, detail="Dataset must pass local validation first.")
         existing_jobs = faas.list_finetunes()
@@ -585,12 +770,18 @@ def create_app(
 
     @app.get("/api/tasks/{task_id}/finetunes", response_model=list[FineTuneRecord])
     def list_finetunes(task_id: str) -> list[FineTuneRecord]:
-        if tasks.get_task(task_id) is None:
-            raise HTTPException(status_code=404, detail="Task not found.")
+        require_live_task(task_id)
         return faas.list_finetunes(task_id)
 
     @app.post('/api/finetunes/{job_id}/retry-processing', response_model=FineTuneRecord)
     def retry_processing(job_id: str):
+        job = faas.get_finetune(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Fine-tune job not found.")
+        version = faas.get_dataset(job.dataset_version_id)
+        if version is None:
+            raise HTTPException(status_code=404, detail="Dataset version not found.")
+        require_live_task(version.task_id)
         try:
             return faas.request_retry(job_id)
         except KeyError as exc:
@@ -603,12 +794,15 @@ def create_app(
         result = faas.get_finetune(job_id)
         if result is None:
             raise HTTPException(status_code=404, detail="Fine-tune job not found.")
+        version = faas.get_dataset(result.dataset_version_id)
+        if version is None:
+            raise HTTPException(status_code=404, detail="Dataset version not found.")
+        require_live_task(version.task_id)
         return result
 
     @app.post("/api/tasks/{task_id}/evaluations", response_model=Evaluation, status_code=201)
     def create_evaluation(task_id: str, value: EvaluationRequest) -> Evaluation:
-        if tasks.get_task(task_id) is None:
-            raise HTTPException(status_code=404, detail="Task not found.")
+        require_live_task(task_id)
         job = faas.get_finetune(value.fine_tune_job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Fine-tune job not found.")
@@ -632,21 +826,16 @@ def create_app(
 
     @app.get("/api/tasks/{task_id}/evaluations", response_model=list[Evaluation])
     def list_evaluations(task_id: str) -> list[Evaluation]:
-        if tasks.get_task(task_id) is None:
-            raise HTTPException(status_code=404, detail="Task not found.")
+        require_live_task(task_id)
         return evaluations.list(task_id)
 
     @app.get("/api/evaluations/{evaluation_id}", response_model=Evaluation)
     def get_evaluation(evaluation_id: str) -> Evaluation:
-        result = evaluations.get(evaluation_id)
-        if result is None:
-            raise HTTPException(status_code=404, detail="Evaluation not found.")
-        return result
+        return require_live_evaluation(evaluation_id)
 
     @app.get("/api/evaluations/{evaluation_id}/trials", response_model=list[Trial])
     def list_evaluation_trials(evaluation_id: str) -> list[Trial]:
-        if evaluations.get(evaluation_id) is None:
-            raise HTTPException(status_code=404, detail="Evaluation not found.")
+        require_live_evaluation(evaluation_id)
         return tasks.list_evaluation_trials(evaluation_id)
 
     @app.get("/api/scene-adapter/status")
@@ -655,9 +844,7 @@ def create_app(
 
     @app.post("/api/trials/{trial_id}/prepare-scene", response_model=PlacementResult)
     def prepare_scene(trial_id: str) -> PlacementResult:
-        trial = tasks.get_trial(trial_id)
-        if trial is None:
-            raise HTTPException(status_code=404, detail="Trial not found.")
+        trial = require_live_trial(trial_id)
         if trial.status != "planned" or not trial.evaluation_id:
             raise HTTPException(status_code=409, detail="Only a planned evaluation scene can be placed.")
         scene = scene_for_trial(trial, tasks)
@@ -674,16 +861,12 @@ def create_app(
 
     @app.get("/api/evaluations/{evaluation_id}/report", response_model=EvaluationReport)
     def get_evaluation_report(evaluation_id: str) -> EvaluationReport:
-        evaluation = evaluations.get(evaluation_id)
-        if evaluation is None:
-            raise HTTPException(status_code=404, detail="Evaluation not found.")
+        evaluation = require_live_evaluation(evaluation_id)
         return evaluations.report(evaluation, tasks, episodes)
 
     @app.post("/api/evaluations/{evaluation_id}/promote", response_model=DeploymentStatus)
     def promote_evaluation(evaluation_id: str) -> DeploymentStatus:
-        evaluation = evaluations.get(evaluation_id)
-        if evaluation is None:
-            raise HTTPException(status_code=404, detail="Evaluation not found.")
+        evaluation = require_live_evaluation(evaluation_id)
         if evaluations.report(evaluation, tasks, episodes).decision != "improved":
             raise HTTPException(status_code=409, detail="The evaluation has not verified improvement.")
         tasks.set_deployment(evaluation.task_id, evaluation.candidate_checkpoint, evaluation.id)

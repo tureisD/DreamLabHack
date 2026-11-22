@@ -50,7 +50,7 @@ def guidance(
             labelled.append(episode)
     failures = sum(episode.success is False for episode in labelled)
     decision = partial(Guidance, labelled_baseline_runs=len(labelled), task_failures=failures)
-    demos_for_task = demos.list(task_id)
+    demos_for_task = demos.training_eligible(task_id)
     kept = [demo for demo in demos_for_task if demo.decision == "keep" and demo.valid]
     pending = sum(demo.decision == "unreviewed" for demo in demos_for_task)
     coverage = plan(task_id, tasks, episodes, demos)

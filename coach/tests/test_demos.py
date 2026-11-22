@@ -55,6 +55,14 @@ def make_demo(root, *, with_video=True):
     return folder
 
 
+def test_conversion_marker_preserves_offline_origin_without_rollout_sidecar(tmp_path):
+    folder = make_demo(tmp_path)
+    (folder / "meta/conversion.json").write_text(json.dumps({"origin": "offline_fixture"}))
+    demo = read_demo(folder, "task-id")
+    assert demo.origin == "offline_fixture"
+    assert demo not in DemoStore(tmp_path / "data").training_eligible("task-id")
+
+
 def test_demo_qc_flags_idle_start_and_missing_video(tmp_path):
     folder = make_demo(tmp_path)
     demo = read_demo(folder, "task-id")

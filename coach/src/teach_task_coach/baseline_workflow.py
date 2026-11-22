@@ -46,6 +46,7 @@ def sim_eligible(e: EpisodeSummary) -> bool:
         and e.body == "yam"
         and e.recording_key is not None
         and s.get("source") == "model"
+        and s.get("policy_origin") == "dream_model"
         and e.status == "complete"
         and not e.error
         and e.stop_reason not in ("SafetyStop", "ModelReady")

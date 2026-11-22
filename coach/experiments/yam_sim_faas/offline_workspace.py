@@ -1,6 +1,7 @@
 """Create a new, isolated Coach acceptance workspace. No station or Dream client calls."""
 
 import argparse
+import json
 from pathlib import Path
 
 from record_yam_demos import TASK, mock_pickups, recording
@@ -21,12 +22,13 @@ def main():
     root.mkdir(parents=True, exist_ok=False)
     runs, demos, data = (root / p for p in ("rollouts", "demos", "data"))
     # Deterministic stand-in policy for the recording pipeline. Never claim Dream inference.
-    with recording(runs, TASK, FIXTURE, 41, "model", start_pose="wrist-visible") as (env, sim):
-        sim.update(policy_origin="offline_fixture", warmup_rows=0, model_action_rows=80)
+    with recording(runs, TASK, FIXTURE, 41, "scripted", start_pose="wrist-visible") as (env, sim):
+        sim.update(policy_origin="offline_fixture", offline_task_id="pending", warmup_rows=0, model_action_rows=80)
         pose = env.state()
         for _ in range(80):
             env.step(pose["left"], pose["right"])
     with recording(demos, TASK, "scripted-yam", 101, "scripted") as (env, sim):
+        sim.update(policy_origin="scripted_reference", offline_task_id="pending")
         sim["script_result"] = mock_pickups.run_trial("apple", env=env, snapshot_dir=env.folder)
     tasks = TaskStore(data)
     for name in ("Apple pickup / control", "Apple pickup / offline review"):
@@ -36,8 +38,14 @@ def main():
                 prompt=TASK,
                 baseline_checkpoint=FIXTURE,
                 success_rule="Within the 4-second test window, lift the apple over 8 cm and hold for at least 2 seconds.",
-            )
+            ),
+            offline_mode=True,
         )
+    for folder in (runs, demos):
+        for sidecar in folder.glob("*/rollout.json"):
+            info = json.loads(sidecar.read_text(encoding="utf-8"))
+            info["simulation"]["offline_task_id"] = task.id
+            sidecar.write_text(json.dumps(info, indent=2), encoding="utf-8")
     store = EpisodeStore(data)
     found, skipped = RolloutScanner(runs).scan()
     if skipped or len(found) != 1:

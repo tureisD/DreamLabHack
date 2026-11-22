@@ -1,5 +1,6 @@
 """End-to-end contract for the offline review loop. No station or Dream calls."""
 
+import hashlib
 import json
 import shutil
 from concurrent.futures import ThreadPoolExecutor
@@ -10,7 +11,7 @@ from fastapi.testclient import TestClient
 from test_demos import make_demo
 
 from teach_task_coach.api import create_app
-from teach_task_coach.demos import DemoScanner
+from teach_task_coach.demos import DemoScanner, DemoStore
 from teach_task_coach.episodes import RolloutScanner
 from teach_task_coach.preflight import PreflightService
 from teach_task_coach.storage import EpisodeStore
@@ -36,7 +37,7 @@ def recording(root, **fields):
     uid=uuid4().hex
     p=root/'rollouts'/uid
     p.mkdir(parents=True)
-    info={'recording_id':uid,'status':'complete','collection_mode':'simulation','body':'yam','task':'pick up the apple','checkpoint':'base','frames':100,'fps':20,'simulation':{'source':'model','model_action_rows':60,'start_pose':'wrist-visible','seed':41,'apple_xy_m':[0.12,0.01]},'stop_reason':'finished'}
+    info={'recording_id':uid,'status':'complete','collection_mode':'simulation','body':'yam','task':'pick up the apple','checkpoint':'base','frames':100,'fps':20,'simulation':{'source':'model','policy_origin':'dream_model','model_action_rows':60,'start_pose':'wrist-visible','seed':41,'apple_xy_m':[0.12,0.01]},'stop_reason':'finished'}
     info.update(fields)
     (p/'rollout.json').write_text(json.dumps(info))
     return p
@@ -53,6 +54,87 @@ def at(c, task_id, episode_id, cell=2):
 
 def label(c, eid, value, rev=0):
     return c.post(f'/api/episodes/{eid}/label',json={'success':value,'failure_stage':'grasp' if value is False else None,'expected_revision':rev})
+
+
+def offline_client(root):
+    from teach_task_coach.tasks import TaskInput
+
+    data = root / "offline-data"
+    tasks = TaskStore(data)
+    task = tasks.create_task(
+        TaskInput(name="Offline fixture", prompt="pick up the apple", baseline_checkpoint="offline-fixture/baseline", success_rule="lift and hold"),
+        offline_mode=True,
+    )
+    manifest = {
+        "schema": "coach-offline-walkthrough-v1", "task_id": task.id,
+        "rule_version": "yam-apple-v1",
+        "scenes": [{"id": "scene-1", "seed": 41, "sides": ["baseline", "candidate"]}],
+    }
+    (data / "offline-protocol.json").write_text(json.dumps(manifest))
+    client = TestClient(create_app(
+        PreflightService(NoExternalCalls(), NoExternalCalls()), EpisodeStore(data),
+        RolloutScanner(root / "rollouts"), task_store=tasks,
+        demo_store=DemoStore(data), demo_scanner=DemoScanner(root / "demos"),
+        dream_gateway=NoExternalCalls(), offline_only=True,
+    ))
+    return client, task.id, data
+
+
+def offline_recording(root, task_id, *, scene="scene-1", role="baseline", seed=41):
+    path = root / "rollouts" / uuid4().hex
+    path.mkdir(parents=True)
+    sim = {
+        "source": "scripted", "policy_origin": "offline_fixture", "offline_task_id": task_id,
+        "offline_scene_id": scene, "comparison_role": role, "seed": seed,
+        "model_action_rows": 20, "action_budget": 20, "protocol": "coach-offline-walkthrough-v1",
+        "rule_version": "yam-apple-v1", "pre_action_state_hash": "state-1",
+        "protocol_sha256": hashlib.sha256((root / "offline-data/offline-protocol.json").read_bytes()).hexdigest(),
+        "apple_xy_m": [0.1, 0.1], "start_pose": "wrist-visible",
+    }
+    (path / "rollout.json").write_text(json.dumps({
+        "recording_id": uuid4().hex, "status": "complete", "collection_mode": "simulation",
+        "body": "yam", "task": "pick up the apple", "checkpoint": f"offline-fixture/{role}",
+        "frames": 20, "fps": 20, "simulation": sim, "stop_reason": "finished",
+    }))
+    return path
+
+
+def test_offline_label_scope_and_normal_import_isolation(tmp_path):
+    from teach_task_coach.episodes import episode_id
+
+    client, task_id, _data = offline_client(tmp_path)
+    offline_recording(tmp_path, task_id)
+    foreign_task_id = "not-the-fixture-task"
+    foreign = offline_recording(tmp_path, foreign_task_id)
+    recording(tmp_path)
+    result = client.post("/api/rollouts/import").json()
+    assert result["imported"] == 1 and len(result["skipped"]) == 2
+    imported = client.get("/api/episodes").json()
+    assert len(imported) == 1
+    owned_id = imported[0]["id"]
+    assert client.post(f"/api/episodes/{owned_id}/label", json={"success": False, "expected_revision": 0}).status_code == 200
+    foreign_episode_id = episode_id(foreign)
+    assert client.post(f"/api/episodes/{foreign_episode_id}/label", json={"success": True, "expected_revision": 0}).status_code == 404
+    assert client.get(f"/api/episodes/{foreign_episode_id}").status_code == 404
+    assert client.post("/api/tasks", json={"name":"no", "prompt":"x", "baseline_checkpoint":"base", "success_rule":"x"}).status_code == 403
+
+
+def test_standard_workspace_rejects_offline_fixture_import_and_labels(tmp_path):
+    _, task_id, data = offline_client(tmp_path)
+    fixture = offline_recording(tmp_path, task_id)
+    recording(tmp_path)
+    standard = TestClient(create_app(
+        PreflightService(NoExternalCalls(), NoExternalCalls()), EpisodeStore(data),
+        RolloutScanner(tmp_path / "rollouts"), task_store=TaskStore(data),
+        demo_store=DemoStore(data), demo_scanner=DemoScanner(tmp_path / "demos"),
+        dream_gateway=NoExternalCalls(),
+    ))
+    result = standard.post("/api/rollouts/import").json()
+    assert result["imported"] == 1 and len(result["skipped"]) == 1
+    assert len(standard.get("/api/episodes").json()) == 1
+    from teach_task_coach.episodes import episode_id
+    assert standard.post(f"/api/episodes/{episode_id(fixture)}/label", json={"success": True}).status_code == 404
+    assert standard.get("/api/offline-review/" + task_id).status_code == 404
 
 
 def test_offline_guide_from_unlabelled_run_to_kept_demo(tmp_path):
@@ -77,7 +159,8 @@ def test_offline_guide_from_unlabelled_run_to_kept_demo(tmp_path):
     assert c.post(decision,json={'decision':'redo'}).is_success and g()['target_cell']==2
     assert c.post(decision,json={'decision':'keep','start_cell':2}).is_success
     next((folder/'videos').rglob('*.mp4')).unlink(); c.post(route+'/demos/import')
-    assert g()['phase']=='collect' and g()['target_cell']==2
+    assert g()['phase']=='review' and g()['target_cell']==2
+    assert c.get(route+'/demos').json()[0]['decision']=='unreviewed'  # Changed evidence requires fresh human review.
     assert label(c,eid,True,0).status_code==409
     assert label(c,eid,None,1).is_success and g()['labelled_baseline_runs']==0
     assert c.get(route+'/baseline-trials').json()[0]['status']=='awaiting_label'

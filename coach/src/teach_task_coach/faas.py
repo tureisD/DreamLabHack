@@ -363,15 +363,38 @@ class FaaSWorker:
         attempted = 0
         for dataset in self.store.list_datasets():
             if dataset.status == "pending_validation":
+                task = self.tasks.get_task(dataset.task_id)
+                if task is None or task.offline_mode:
+                    self.store.update_dataset(dataset.id, status="failed", error="Offline or missing task cannot enter Dream validation.")
+                    continue
                 attempted += 1
                 self._validate(dataset)
         for job in self.store.list_finetunes():
+            version = self.store.get_dataset(job.dataset_version_id)
+            task = None if version is None else self.tasks.get_task(version.task_id)
+            if task is None or task.offline_mode:
+                if job.status not in ("failed", "succeeded"):
+                    self.store.update_finetune(job.id, status="failed", error="Offline or missing task cannot contact Dream training.")
+                continue
             if job.status in ("pending_upload", "processing", "pending_training", "training", "retry_requested", "retry_reconcile", "submit_reconcile"):
                 attempted += 1
                 self._advance(job)
         return attempted
 
     def _validate(self, version: DatasetVersion) -> None:
+        task = self.tasks.get_task(version.task_id)
+        if task is None or task.offline_mode:
+            self.store.update_dataset(version.id, status="failed", error="Offline or missing task cannot enter Dream validation.")
+            return
+        source_demos = [self.demos.get(demo_id) for demo_id in version.demo_ids]
+        if any(
+            demo is None or demo.task_id != version.task_id
+            or demo.decision != "keep" or not demo.valid
+            or demo.origin not in ("human", "scripted_reference")
+            for demo in source_demos
+        ):
+            self.store.update_dataset(version.id, status="failed", error="Dataset contains a missing, changed, or ineligible demonstration.")
+            return
         try:
             embodiment = next(
                 (body for body in self.gateway.embodiments() if body.name == version.embodiment_name),
@@ -382,10 +405,6 @@ class FaaSWorker:
                 return
             root = Path(version.local_path)
             if not root.exists():
-                source_demos = [self.demos.get(demo_id) for demo_id in version.demo_ids]
-                if any(demo is None or demo.decision != "keep" or not demo.valid for demo in source_demos):
-                    self.store.update_dataset(version.id, status="failed", error="A selected demo is no longer kept or valid.")
-                    return
                 size = sum(
                     path.stat().st_size
                     for demo in source_demos if demo is not None
@@ -403,10 +422,20 @@ class FaaSWorker:
                     assert demo is not None
                     copied = temporary / demo.id
                     shutil.copytree(demo.source_path, copied)
+                    receipt = {
+                        "origin": demo.origin,
+                        "source_identity": demo.source_identity,
+                        "source_episode_id": demo.source_episode_id,
+                        "task_id": demo.task_id,
+                    }
+                    (copied / "coach-demo.json").write_text(json.dumps(receipt, sort_keys=True), encoding="utf-8")
                     checked = read_demo(copied, version.task_id)
                     expected = set(embodiment.embodiment_config.get('video', {}).values())
-                    if not checked.valid or set(checked.camera_keys) != expected or checked.task_text != demo.task_text:
-                        raise ValueError('Frozen demonstration failed frame, action, task or camera-role checks.')
+                    if (not checked.valid or checked.origin not in ("human", "scripted_reference")
+                            or checked.source_identity != demo.source_identity
+                            or checked.evidence_sha256 != demo.evidence_sha256
+                            or set(checked.camera_keys) != expected or checked.task_text != demo.task_text):
+                        raise ValueError('Frozen demonstration failed provenance, frame, action, task or camera-role checks.')
                 manifest = {"task_id": version.task_id, "demo_ids": version.demo_ids, "files": _files_manifest(temporary)}
                 (temporary / ".coach-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
                 os.replace(temporary, root)
@@ -430,7 +459,13 @@ class FaaSWorker:
 
     def _advance(self, job: FineTuneRecord) -> None:
         version = self.store.get_dataset(job.dataset_version_id)
-        assert version is not None
+        if version is None:
+            self.store.update_finetune(job.id, status="failed", error="Training dataset is missing.")
+            return
+        task = self.tasks.get_task(version.task_id)
+        if task is None or task.offline_mode:
+            self.store.update_finetune(job.id, status="failed", error="Offline or missing task cannot contact Dream training.")
+            return
         try:
             if job.status == "pending_upload":
                 self._upload(job, version)

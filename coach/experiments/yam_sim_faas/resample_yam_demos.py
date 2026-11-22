@@ -28,14 +28,24 @@ from teach_task_coach.demos import DemoStore, read_demo
 selected = []
 for demo_id in dict.fromkeys(args.kept_demo):
     demo = DemoStore().get(demo_id)
-    if not demo or demo.task_id != args.task_id or demo.decision != 'keep' or not demo.valid:
+    if demo and demo.origin == 'offline_fixture':
+        parser.error('Offline fixture demos are never eligible for training conversion.')
+    if not demo or demo.task_id != args.task_id or demo.decision != 'keep' or not demo.valid or demo.origin not in ('human', 'scripted_reference'):
         parser.error(f'Not a kept demo for this task: {demo_id}')
     session = Path(demo.source_path).resolve()
-    if session.parent != SOURCE or not read_demo(session, demo.task_id).valid:
+    current = read_demo(session, demo.task_id)
+    if session.parent != SOURCE or not current.valid:
         parser.error('Selected demo is not valid in the specified source directory')
+    if current.origin not in ('human', 'scripted_reference') or current.origin != demo.origin or current.offline_task_id is not None:
+        parser.error('Selected demo provenance changed or belongs to an offline fixture; rescan and review eligible source evidence first.')
+    conversion = json.loads((session / 'meta/conversion.json').read_text()) if (session / 'meta/conversion.json').is_file() else {}
+    if conversion.get('origin') == 'offline_fixture' or conversion.get('offline_task_id'):
+        parser.error('Offline fixture conversions are never eligible for training resampling.')
     sidecar = json.loads((session / 'rollout.json').read_text())
     if sidecar.get('status') != 'complete' or sidecar.get('simulation', {}).get('source') != 'scripted':
         parser.error('Only complete, explicitly scripted recordings may be converted')
+    if sidecar.get('simulation', {}).get('policy_origin') == 'offline_fixture':
+        parser.error('Offline fixture recordings are never eligible for training conversion')
     selected.append((demo, session, sidecar))
 
 for demo, session, sidecar in selected:
@@ -84,7 +94,7 @@ for demo, session, sidecar in selected:
     episode = json.loads((session / "meta/episodes.jsonl").read_text(encoding="utf-8"))
     episode["length"] = len(indices)
     (meta / "episodes.jsonl").write_text(json.dumps(episode) + "\n", encoding="utf-8")
-    provenance = {'source_demo_id': demo.id, 'source_task_id': demo.task_id, 'source_recording_id': sidecar.get('recording_id'), 'source_sidecar_sha256': hashlib.sha256((session/'rollout.json').read_bytes()).hexdigest(), 'source': 'scripted', 'source_fps': 20, 'output_fps': 10, 'selection': 'even source frames', 'start_cell': demo.start_cell}
+    provenance = {'source_demo_id': demo.id, 'source_task_id': demo.task_id, 'source_recording_id': sidecar.get('recording_id'), 'source_sidecar_sha256': hashlib.sha256((session/'rollout.json').read_bytes()).hexdigest(), 'source': 'scripted', 'origin': demo.origin, 'source_fps': 20, 'output_fps': 10, 'selection': 'even source frames', 'start_cell': demo.start_cell}
     (meta/'conversion.json').write_text(json.dumps(provenance, indent=2), encoding='utf-8')
     if not read_demo(output, demo.task_id).valid:
         raise ValueError(f'Converted session failed media validation: {output}')

@@ -7,6 +7,7 @@ import Demos from './Demos';
 import Training from './Training';
 import EvaluationPage from './Evaluation';
 import Guide from './Guide';
+import OfflineReview from './OfflineReview';
 
 type Check = { state: 'ready' | 'blocked' | 'unavailable'; message: string };
 type Model = {
@@ -136,7 +137,7 @@ export default function App() {
         <div className="local-indicator"><Monitor size={16} aria-hidden="true" />Local workspace</div>
       </aside>
       <div className="workspace-content" key={`${screen}:${query.get('task') || ''}`}>
-        {screen === 'guide' ? <Guide /> : screen === 'preflight' ? <Preflight /> : screen === 'tasks' ? <Tasks /> : screen === 'demos' ? <Demos /> : screen === 'training' ? <Training /> : screen === 'evaluation' ? <EvaluationPage /> : <Runs requested={query.get('run')} taskPrompt={query.get('prompt') || ''} />}
+        {screen === 'offline' ? <OfflineReview taskId={query.get('task') || ''} /> : screen === 'guide' ? <Guide /> : screen === 'preflight' ? <Preflight /> : screen === 'tasks' ? <Tasks /> : screen === 'demos' ? <Demos /> : screen === 'training' ? <Training /> : screen === 'evaluation' ? <EvaluationPage /> : <Runs requested={query.get('run')} taskPrompt={query.get('prompt') || ''} />}
       </div>
     </>
   );

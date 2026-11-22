@@ -28,6 +28,7 @@ class TaskInput(BaseModel):
 class Task(TaskInput):
     id: str
     created_at: str
+    offline_mode: bool = False
 
 
 class TrialInput(BaseModel):
@@ -81,7 +82,8 @@ class TaskStore:
                 prompt TEXT NOT NULL,
                 baseline_checkpoint TEXT NOT NULL,
                 success_rule TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                offline_mode INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS trials (
                 id TEXT PRIMARY KEY,
@@ -140,6 +142,9 @@ class TaskStore:
             );
             """
         )
+        task_columns = {row["name"] for row in connection.execute("PRAGMA table_info(tasks)")}
+        if "offline_mode" not in task_columns:
+            connection.execute("ALTER TABLE tasks ADD COLUMN offline_mode INTEGER NOT NULL DEFAULT 0")
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(trials)")}
         for name, sql_type in (
             ("checkpoint", "TEXT"), ("evaluation_id", "TEXT"),
@@ -149,12 +154,12 @@ class TaskStore:
             if name not in columns:
                 connection.execute(f"ALTER TABLE trials ADD COLUMN {name} {sql_type}")
 
-    def create_task(self, value: TaskInput) -> Task:
-        task = Task(id=uuid.uuid4().hex, created_at=_utc_now(), **value.model_dump())
+    def create_task(self, value: TaskInput, *, offline_mode: bool = False) -> Task:
+        task = Task(id=uuid.uuid4().hex, created_at=_utc_now(), offline_mode=offline_mode, **value.model_dump())
         with self.db.connect() as connection:
             self._schema(connection)
             connection.execute(
-                "INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO tasks (id, name, prompt, baseline_checkpoint, success_rule, created_at, offline_mode) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     task.id,
                     task.name,
@@ -162,6 +167,7 @@ class TaskStore:
                     task.baseline_checkpoint,
                     task.success_rule,
                     task.created_at,
+                    int(task.offline_mode),
                 ),
             )
             rng = random.Random(int(task.id[:16], 16))

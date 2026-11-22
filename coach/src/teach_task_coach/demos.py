@@ -16,6 +16,18 @@ from pydantic import BaseModel
 from teach_task_coach.storage import CoachDatabase, default_data_dir
 
 
+def _content_hash(folder: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(p for p in folder.rglob("*") if p.is_file() and p.name != "coach-demo.json"):
+        if not path.resolve().is_relative_to(folder.resolve()):
+            raise DemoError("Demonstration content escapes its session directory.")
+        digest.update(path.relative_to(folder).as_posix().encode("utf-8") + b"\0")
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+    return digest.hexdigest()
+
+
 class DemoError(ValueError):
     """A recorder session cannot be interpreted as one demonstration."""
 
@@ -30,6 +42,11 @@ class Demo(BaseModel):
     id: str
     task_id: str
     source_path: str
+    origin: Literal["human", "scripted_reference", "offline_fixture", "unknown"] = "unknown"
+    offline_task_id: str | None = None
+    source_episode_id: str | None = None
+    source_identity: str = ""
+    evidence_sha256: str = ""
     task_text: str
     codebase_version: str
     frames: int
@@ -133,6 +150,64 @@ def read_demo(folder: Path, task_id: str) -> Demo:
     except (TypeError, ValueError) as exc:
         raise DemoError("Episode frame count or rate is invalid.") from exc
     findings: list[DemoFinding] = []
+    origin: Literal["human", "scripted_reference", "offline_fixture", "unknown"] = "unknown"
+    source_episode_id = None
+    source_identity = None
+    conversion_path = folder / "meta/conversion.json"
+    conversion = _object(conversion_path) if conversion_path.is_file() else {}
+    marker = conversion.get("origin")
+    if marker in ("human", "scripted_reference", "offline_fixture"):
+        origin = marker
+    sidecar = folder / "rollout.json"
+    if sidecar.is_file():
+        metadata = _object(sidecar)
+        simulation = metadata.get("simulation")
+        policy_origin = simulation.get("policy_origin") if isinstance(simulation, dict) else None
+        # Offline provenance is absolute: contradictory source labels cannot override it.
+        offline_owner = simulation.get("offline_task_id") if isinstance(simulation, dict) else None
+        offline_task_id = offline_owner if isinstance(offline_owner, str) else None
+        if (
+            policy_origin == "offline_fixture"
+            or origin == "offline_fixture"
+            or (isinstance(offline_owner, str) and policy_origin != "scripted_reference")
+        ):
+            origin = "offline_fixture"
+        elif policy_origin == "human" or (simulation.get("source") == "human" and policy_origin is None):
+            origin = "human"
+        elif policy_origin == "scripted_reference" or (simulation.get("source") == "scripted" and origin != "offline_fixture"):
+            origin = "scripted_reference"
+        elif policy_origin is not None:
+            origin = "unknown"
+        if isinstance(simulation, dict):
+            value = simulation.get("source_episode_id")
+            if isinstance(value, str) and value:
+                source_episode_id = value
+            recording_id = metadata.get("recording_id")
+            if isinstance(recording_id, str) and recording_id:
+                source_identity = f"rollout:{recording_id}"
+        if source_identity is None:
+            converted_id = conversion.get("source_recording_id")
+            if isinstance(converted_id, str) and converted_id:
+                source_identity = f"rollout:{converted_id}"
+    else:
+        # Preserve an explicit conversion provenance marker even when the source
+        # rollout sidecar is missing. A copied fixture must never become human by
+        # taking the legacy-recorder fallback.
+        if origin == "unknown":
+            origin = "human" if not conversion_path.is_file() else "unknown"
+        receipt_path = folder / "coach-demo.json"
+        if receipt_path.is_file():
+            receipt = _object(receipt_path)
+            candidate = receipt.get("origin")
+            if origin != "offline_fixture" and candidate in ("human", "scripted_reference", "offline_fixture"):
+                origin = candidate
+            source_episode_id = receipt.get("source_episode_id")
+            identity = receipt.get("source_identity")
+            if isinstance(identity, str) and identity:
+                source_identity = identity
+    if source_identity is None:
+        source_identity = "content:" + _content_hash(folder)
+    evidence_sha256 = _content_hash(folder)
     if not np.isfinite(fps) or fps <= 0 or frames <= 0:
         findings.append(DemoFinding(code="empty", severity="error", message="Episode has no usable frames or rate."))
     if not cameras:
@@ -176,9 +251,14 @@ def read_demo(folder: Path, task_id: str) -> Demo:
             findings.append(DemoFinding(code="unreadable_actions", severity="error", message=f"Could not read actions: {type(exc).__name__}."))
 
     return Demo(
-        id=hashlib.sha256(os.fsencode(folder)).hexdigest()[:20],
+        id=hashlib.sha256(source_identity.encode("utf-8")).hexdigest()[:20],
         task_id=task_id,
         source_path=str(folder),
+        origin=origin,
+        offline_task_id=offline_task_id if sidecar.is_file() else None,
+        source_episode_id=source_episode_id,
+        source_identity=source_identity,
+        evidence_sha256=evidence_sha256,
         task_text=task_text,
         codebase_version=version,
         frames=frames,
@@ -240,9 +320,41 @@ class DemoStore:
     def upsert(self, demo: Demo) -> None:
         with self.db.connect() as connection:
             self._schema(connection)
-            existing = connection.execute("SELECT task_id FROM demos WHERE id = ?", (demo.id,)).fetchone()
-            if existing is not None and existing["task_id"] != demo.task_id:
-                raise DemoError("Demo folder is already assigned to another task.")
+            existing = connection.execute("SELECT * FROM demos WHERE id = ?", (demo.id,)).fetchone()
+            if existing is None:
+                existing = connection.execute("SELECT * FROM demos WHERE source_path = ?", (demo.source_path,)).fetchone()
+            identity_match = connection.execute(
+                "SELECT id, task_id FROM demos WHERE json_extract(summary_json, '$.source_identity') = ? ORDER BY rowid LIMIT 1",
+                (demo.source_identity,),
+            ).fetchone()
+            if identity_match is not None and (existing is None or identity_match["id"] != existing["id"]):
+                if identity_match["task_id"] != demo.task_id:
+                    raise DemoError("This recording identity is already assigned to another task.")
+                existing = connection.execute("SELECT * FROM demos WHERE id = ?", (identity_match["id"],)).fetchone()
+            if existing is not None:
+                if existing["task_id"] != demo.task_id:
+                    raise DemoError("Demo folder is already assigned to another task.")
+                # Re-importing changed bytes in the same session keeps the database
+                # row identity, but invalidates the prior Keep and operator note.
+                demo.id = existing["id"]
+                previous = self._decode(existing)
+                # Provenance only becomes more restrictive on re-import. In particular,
+                # a missing sidecar must never turn a known fixture into a human demo.
+                if previous.origin == "offline_fixture":
+                    demo.origin = "offline_fixture"
+                if previous.origin == "unknown" and demo.origin == "unknown":
+                    demo.origin = "unknown"
+                if previous.evidence_sha256 != demo.evidence_sha256 or previous.origin != demo.origin:
+                    connection.execute(
+                        "UPDATE demos SET summary_json=?, source_path=?, decision='unreviewed', start_cell=NULL, note=NULL WHERE id=?",
+                        (demo.model_dump_json(exclude={"decision", "start_cell", "note"}), demo.source_path, demo.id),
+                    )
+                    return
+                connection.execute(
+                    "UPDATE demos SET summary_json=? WHERE id=?",
+                    (demo.model_dump_json(exclude={"decision", "start_cell", "note"}), demo.id),
+                )
+                return
             connection.execute(
                 """INSERT INTO demos (id, task_id, source_path, summary_json)
                    VALUES (?, ?, ?, ?)
@@ -263,6 +375,9 @@ class DemoStore:
             ).fetchall()
         return [self._decode(row) for row in rows]
 
+    def training_eligible(self, task_id: str) -> list[Demo]:
+        return [demo for demo in self.list(task_id) if demo.origin in ("human", "scripted_reference") and demo.offline_task_id is None]
+
     def get(self, demo_id: str) -> Demo | None:
         with self.db.connect() as connection:
             self._schema(connection)
@@ -281,9 +396,13 @@ class DemoStore:
 
     @staticmethod
     def _decode(row: Any) -> Demo:
+        summary = json.loads(row["summary_json"])
+        if "origin" not in summary:
+            # Old indexed sessions need an explicit rescan before they can enter training.
+            summary["origin"] = "unknown"
         return Demo.model_validate(
             {
-                **json.loads(row["summary_json"]),
+                **summary,
                 "decision": row["decision"],
                 "start_cell": row["start_cell"],
                 "note": row["note"],

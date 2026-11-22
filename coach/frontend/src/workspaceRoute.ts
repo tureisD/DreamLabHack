@@ -1,4 +1,4 @@
-export const screens = ['runs', 'tasks', 'demos', 'guide', 'evaluation', 'training', 'preflight'] as const;
+export const screens = ['runs', 'tasks', 'demos', 'guide', 'evaluation', 'training', 'preflight', 'offline'] as const;
 export type Screen = typeof screens[number];
 export function readRoute(hash = window.location.hash) {
   const [path, query = ''] = hash.replace(/^#\/?/, '').split('?');

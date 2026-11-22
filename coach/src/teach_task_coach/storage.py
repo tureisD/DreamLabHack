@@ -101,6 +101,16 @@ class EpisodeStore:
                         (episode.source_path, json.dumps(payload), original["id"]),
                     )
                     return
+            existing = connection.execute("SELECT summary_json FROM episodes WHERE id=?", (episode.id,)).fetchone()
+            if existing is not None:
+                old = json.loads(existing["summary_json"])
+                changed = old != payload
+                if changed:
+                    connection.execute(
+                        "UPDATE episodes SET summary_json=?, success=NULL, failure_stage=NULL, note=NULL, review_revision=review_revision+1 WHERE id=?",
+                        (json.dumps(payload), episode.id),
+                    )
+                    return
             connection.execute(
                 """INSERT INTO episodes (id, source_path, summary_json)
                    VALUES (?, ?, ?)

@@ -36,7 +36,7 @@ def plan(task_id: str, tasks: TaskStore, episodes: EpisodeStore, demos: DemoStor
             continue
         totals[trial.start_cell] += 1
         failures[trial.start_cell] += int(not episode.success)
-    for demo in demos.list(task_id):
+    for demo in demos.training_eligible(task_id):
         if demo.decision == "keep" and demo.valid and demo.start_cell is not None:
             kept[demo.start_cell] += 1
 
