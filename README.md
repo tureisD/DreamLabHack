@@ -62,6 +62,25 @@ The [DreamAPI documentation](https://platform.dreamlabs.ai/api-documentation) co
 guide: getting started, calling Dream-1 from your own control loop with `dream.DreamClient`, showing your robot in
 Live View, bringing a robot of your own, and fine-tuning Dream-1 on recordings of your robot.
 
+## DreamCoach extension
+
+This fork also includes [DreamCoach](coach/README.md), an experimental companion for teaching Dream-1 a task. It
+guides a user from baseline failures through setup checks, demonstration review, Dream FaaS submission, and paired
+evaluation of the resulting checkpoint. Robot motion, paid training, and checkpoint promotion remain under operator
+control.
+
+### Measured evaluation repair
+
+We tested one completed apple-pickup fine-tune on fresh YAM simulator scenes without changing its weights or starting
+another FaaS job. In eight matched scenes, a nine-request evaluation passed **7/8** and a twelve-request evaluation
+passed **8/8**. In a separate, frozen twenty-scene confirmation, **14/19** valid trajectories met the two-second lift
+rule by request nine and **19/19** did by request twelve; five first succeeded during request 10 or 11. One attempt
+was invalid after a Dream episode restart and remains in the record. See the [protocol, run IDs, and reports](coach/experiments/yam_sim_faas/CLOSED_LOOP_REPAIR_STUDY.md), or open **Coach effect** in the app.
+
+This shows why the coach checks execution and evaluation settings before recommending more demonstrations or another
+fine-tune. It is a narrow simulator result. The [operator-study benchmark](coach/benchmark/README.md) is still
+prospective; we have **not** measured reductions in operator time, demonstration count, or FaaS spend.
+
 ## License
 
 Apache License 2.0 (`LICENSE`). Three of the vendored packages, `i2rt`, `pyroki` and `jaxls` under
