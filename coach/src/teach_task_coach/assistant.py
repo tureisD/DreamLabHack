@@ -134,24 +134,29 @@ class ChatReply(BaseModel):
     setup_help: Literal["robot", "simulator"] | None = None
 
 
+CHAT_WELCOME = (
+    "Hi, I’m DreamCoach. I help you fine-tune Dream-1 and use the results to decide what to teach it next.\n\n"
+    "• Simulate and collect. Use YAM without a physical robot. Start with the bundled apple pickup demos, "
+    "click to correct a fruit task, or build a pick-and-place scene.\n"
+    "• Review and fine-tune. Keep the useful demos, then I’ll guide you through dataset validation and Dream FaaS. "
+    "You approve paid training.\n"
+    "• Evaluate and improve. For apple pickup, compare the base and fine-tuned models on the same held-out scenes. "
+    "Watch results in the sidebar and use the misses to choose your next demos.\n\n"
+    "Press Begin and I’ll guide you one step at a time."
+)
+
+
 def chat(value: ChatRequest) -> ChatReply:
-    key = _active_ai_key()
-    if not key:
-        raise ValueError("Connect an AI provider before starting the chat.")
     for message in value.messages:
         if re.search(r"\b(?:dl_live_|sk-)[A-Za-z0-9_-]{12,}", message.content):
             raise ValueError("API keys must be entered in the masked key field, not the chat.")
+    if value.stage == "introduction":
+        return ChatReply(message=CHAT_WELCOME)
+    key = _active_ai_key()
+    if not key:
+        raise ValueError("Connect an AI provider before starting the chat.")
     state = json.dumps(value.state, ensure_ascii=False)[:5000]
     transcript = [{"role": item.role, "content": item.content} for item in value.messages[-20:]]
-    introduction = (
-        "You are DreamCoach, a Dream-1 fine-tuning coach. This is the introduction BEFORE the user clicks Begin. "
-        "Introduce yourself as DreamCoach. Explain your purpose: guide a beginner from a task idea through "
-        "Dream connection, baseline, demonstrations, fine-tuning, and evaluation. State the end goal: a custom "
-        "Dream-1 checkpoint with measured improvement on the user's task. Say that you will ask questions one "
-        "at a time after they press Begin. Do not ask a question, request a key, mention setup instructions, "
-        "or suggest a screen yet. Return JSON with input_kind=text, suggested_screen=null, task_draft=null, "
-        "suggestions=[], setup_help=null."
-    )
     guide = (
             "You are DreamCoach, the interactive Dream-1 fine-tuning coach. The user has clicked Begin. "
             "Conduct a conversation with a complete beginner. "
@@ -205,7 +210,7 @@ def chat(value: ChatRequest) -> ChatReply:
     )
     payload = {
         "model": os.getenv("COACH_ASSISTANT_MODEL", "gpt-4.1-mini"),
-        "instructions": introduction if value.stage == "introduction" else guide,
+        "instructions": guide,
         "input": [{"role": "user", "content": f"Current app state: {state}"}, *transcript],
         "text": {"format": {"type": "json_schema", "name": "coach_turn", "strict": True,
                  "schema": {"type": "object", "additionalProperties": False, "properties": {
@@ -232,8 +237,6 @@ def chat(value: ChatRequest) -> ChatReply:
         parsed = json.loads(result)
         if not isinstance(parsed, dict) or not isinstance(parsed.get("message"), str) or not parsed["message"].strip():
             raise ValueError("The AI coach returned an empty turn.")
-        if value.stage == "introduction":
-            return ChatReply(message=parsed["message"].strip())
         try:
             draft = TaskDraft.model_validate(parsed["task_draft"]) if parsed.get("task_draft") else None
         except ValidationError:

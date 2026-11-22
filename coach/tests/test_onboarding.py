@@ -134,35 +134,21 @@ def test_chat_asks_model_for_next_turn_and_never_sends_credentials(monkeypatch):
 
 
 def test_introduction_has_no_action_before_begin(monkeypatch):
-    import io
-    import json
-
     from teach_task_coach import assistant
 
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-only-key")
-    calls = []
+    def unexpected_remote_call(*_args, **_kwargs):
+        raise AssertionError("The welcome should be available without an AI provider request.")
 
-    class Response(io.BytesIO):
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            self.close()
-
-    def fake_open(request, timeout):
-        calls.append(json.loads(request.data))
-        result = {"message": "I'm your guide. We'll get a measured improvement. Press Begin.",
-                  "input_kind": "dream_key", "suggested_screen": "tasks", "task_draft": None}
-        return Response(json.dumps({"output": [{"content": [
-            {"type": "output_text", "text": json.dumps(result)}
-        ]}]}).encode())
-
-    monkeypatch.setattr(assistant.urllib.request, "urlopen", fake_open)
+    monkeypatch.setattr(assistant, "_active_ai_key", unexpected_remote_call)
+    monkeypatch.setattr(assistant.urllib.request, "urlopen", unexpected_remote_call)
     result = chat(ChatRequest(stage="introduction", messages=[], state={"dream_connected": False}))
     assert "Press Begin" in result.message
+    assert "without a physical robot" in result.message
+    assert "held-out scenes" in result.message
+    assert "misses to choose your next demos" in result.message
     assert result.input_kind == "text"
     assert result.suggested_screen is None
-    assert "Do not ask a question" in calls[0]["instructions"]
+    assert result.setup_help is None
 
 
 def test_connected_workspace_reads_only_account_inventory():

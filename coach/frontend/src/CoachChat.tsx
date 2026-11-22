@@ -107,13 +107,13 @@ export default function CoachChat({
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [begun, activeTaskId]);
   useEffect(() => {
-    if (ai?.configured && !started.current && messages.length === 0) {
+    if (!begun && !started.current) {
       started.current = true;
       void turn([], 'introduction');
     }
-  // Initial turn only. Subsequent turns are sent by submit or Continue.
+  // Refresh the local welcome for sessions that have not clicked Begin.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ai?.configured]);
+  }, [begun]);
   useEffect(() => { if (messages.length > 0 && begun) void workflowState().catch(() => undefined);
   // The opening introduction does not run account checks until Begin.
   // eslint-disable-next-line react-hooks/exhaustive-deps
