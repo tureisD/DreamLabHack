@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type PointerEvent } from 'react';
 import Runs from './Runs';
 import Tasks from './Tasks';
 import Demos from './Demos';
@@ -14,6 +14,14 @@ import OfflineReview from './OfflineReview';
 import { readRoute, screenHref } from './workspaceRoute';
 import type { DemoKeepReceipt } from './ChatDemoReview';
 import type { SimulatorMode } from './YamChatWorkflow';
+
+function movePointer(event: PointerEvent<HTMLDivElement>) {
+  if (event.pointerType !== 'mouse' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const surface = event.currentTarget;
+  surface.style.setProperty('--pointer-x', `${event.clientX}px`);
+  surface.style.setProperty('--pointer-y', `${event.clientY}px`);
+  surface.classList.add('has-pointer');
+}
 
 export default function App() {
   const [needsHostedConnection, setNeedsHostedConnection] = useState(() =>
@@ -119,36 +127,33 @@ export default function App() {
 
   return (
     <>
-      {!needsHostedConnection && <nav className={`top-nav${screen === 'start' ? ' chat-nav' : ''}`} aria-label="Coach sections">
-        <span className="brand">DreamCoach</span>
-        <button className={screen === 'start' ? 'nav-active' : ''} onClick={() => { setShowSimulator(false); setScreen('start'); }}>Start here</button>
-        <button className={screen === 'guide' ? 'nav-active' : ''} onClick={() => setScreen('guide')}>Guide</button>
-        <button className={screen === 'repair' ? 'nav-active' : ''} onClick={() => setScreen('repair')}>Repair first</button>
-        <button className={screen === 'preflight' ? 'nav-active' : ''} onClick={() => setScreen('preflight')}>Preflight</button>
-        <button className={screen === 'runs' ? 'nav-active' : ''} onClick={() => setScreen('runs')}>Run review</button>
-        <button className={screen === 'demos' ? 'nav-active' : ''} onClick={() => setScreen('demos')}>Demos</button>
-        <button className={screen === 'training' ? 'nav-active' : ''} onClick={() => setScreen('training')}>Training</button>
-        <button className={screen === 'evaluation' ? 'nav-active' : ''} onClick={() => { if (screen !== 'evaluation') openEvaluation(); }}>Evaluation</button>
-        <button className={screen === 'statistical' ? 'nav-active' : ''} onClick={() => setScreen('statistical')}>Statistical audit</button>
-        <button className={screen === 'effect' ? 'nav-active' : ''} onClick={() => setScreen('effect')}>Coach effect</button>
+      {screen !== 'start' && <nav className="top-nav" aria-label="DreamCoach">
+        <button type="button" onClick={() => {
+          if (window.location.hash) window.location.hash = '';
+          setScreen('start');
+        }}>Back to DreamCoach</button>
       </nav>}
-      {screen === 'start' && <CoachChat
-        needsHostedConnection={needsHostedConnection}
-        onHostedConnection={() => {
-          resetChatSession();
-          setNeedsHostedConnection(false);
-        }}
-        resetSession={resetChatSession}
-        onEvidence={() => setScreen('effect')}
-        activeTaskId={activeTaskId}
-        selectTask={selectTask}
-        demoApproval={demoApproval}
-        clearDemoApproval={() => setDemoApproval(null)}
-        onDemoKept={returnWithDemoApproval}
-        showSimulatorOnOpen={showSimulator}
-        simulatorMode={simulatorMode}
-        chooseSimulatorMode={chooseSimulatorMode}
-      />}
+      {screen === 'start' && <div className="coach-experience" onPointerMove={movePointer}
+        onPointerLeave={(event) => event.currentTarget.classList.remove('has-pointer')}>
+        <div className="coach-pointer" aria-hidden="true" />
+        <CoachChat
+          needsHostedConnection={needsHostedConnection}
+          onHostedConnection={() => {
+            resetChatSession();
+            setNeedsHostedConnection(false);
+          }}
+          resetSession={resetChatSession}
+          onEvidence={() => setScreen('effect')}
+          activeTaskId={activeTaskId}
+          selectTask={selectTask}
+          demoApproval={demoApproval}
+          clearDemoApproval={() => setDemoApproval(null)}
+          onDemoKept={returnWithDemoApproval}
+          showSimulatorOnOpen={showSimulator}
+          simulatorMode={simulatorMode}
+          chooseSimulatorMode={chooseSimulatorMode}
+        />
+      </div>}
       {screen === 'guide' && <Guide initialTaskId={route.screen === 'guide' ? routeTask : activeTaskId}
         onRepair={() => setScreen('repair')} />}
       {screen === 'repair' && <Repair onDemos={() => setScreen('demos')} onTraining={() => setScreen('training')} />}

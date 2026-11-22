@@ -35,7 +35,7 @@ export type TaskPipeline = {
 
 export type SimulatorMode = 'apple' | 'fruit' | 'scene';
 
-const workflows: { id: SimulatorMode; title: string; description: string; icon: string }[] = [
+export const simulatorWorkflows: { id: SimulatorMode; title: string; description: string; icon: string }[] = [
   { id: 'apple', title: 'Apple pickup', description: 'Run the fine-tuning loop', icon: '◎' },
   { id: 'fruit', title: 'Fruit correction', description: 'Click to teach a motion', icon: '↖' },
   { id: 'scene', title: 'Build a scene', description: 'Pick an object and target', icon: '◇' },
@@ -96,7 +96,7 @@ export default function YamChatWorkflow({
     </header>
 
     <div className="yam-workflow-options" role="group" aria-label="Robot-free workflow">
-      {workflows.map(({ id, title, description, icon }) => (
+      {simulatorWorkflows.map(({ id, title, description, icon }) => (
         <button type="button" className="yam-choice" key={id} aria-pressed={mode === id} onClick={() => setMode(id)}>
           <span className="yam-choice-icon" aria-hidden="true">{icon}</span>
           <strong>{title}</strong>
