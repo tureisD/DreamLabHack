@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { YamComparisonPlan } from './YamComparisonExplanation';
 
 type CheckpointOption = {
   checkpoint: string;
@@ -74,7 +75,7 @@ export default function ChatCheckpointPicker({ onClose, onCompare }: {
         </select>
       </label>
       {selection && <div className="chat-training-next"><code>{selection.checkpoint}</code></div>}
-      <p>Compare this model with Dream-1 on the same four apple pickup scenes. The comparison uses inference credits.</p>
+      <YamComparisonPlan pairs={4} />
       <button type="button" disabled={!selection || starting} onClick={() => void runComparison()}>
         {starting ? 'Starting comparison…' : 'Run simulator comparison'}
       </button>

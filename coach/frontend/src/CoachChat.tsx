@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import LiveEvaluation from './LiveEvaluation';
+import LiveEvaluation, { useLiveEvaluation } from './LiveEvaluation';
 import ChatDemoReview, { type DemoKeepReceipt } from './ChatDemoReview';
 import ChatTraining from './ChatTraining';
 import ChatCheckpointPicker from './ChatCheckpointPicker';
 import ChatToolPanel, { type ChatTool } from './ChatToolPanel';
 import SceneTask, { type ScenePreset } from './SceneTask';
 import SimCorrect from './SimCorrect';
+import type { PairedReport } from './StatisticalAudit';
 import YamChatWorkflow, { type SimulatorMode, type TaskPipeline, type YamJob } from './YamChatWorkflow';
+import { YamComparisonPlan } from './YamComparisonExplanation';
 
 type Screen = 'preflight' | 'tasks' | 'demos' | 'training' | 'evaluation' | 'statistical';
 type Message = { role: 'user' | 'assistant'; content: string; answerOptions?: string[] };
@@ -78,6 +80,10 @@ export default function CoachChat({
   const [error, setError] = useState('');
   const [simulatorNotice, setSimulatorNotice] = useState('');
   const [begun, setBegun] = useState(sessionStorage.getItem('coach-begun-v3') === 'yes');
+  const evaluationTaskId = begun ? activeTaskId : '';
+  const currentYamJob = activeTaskId && yamJob?.task_id === activeTaskId ? yamJob : null;
+  const comparisonId = currentYamJob?.kind === 'comparison' ? currentYamJob.id : undefined;
+  const evaluation = useLiveEvaluation(evaluationTaskId, comparisonId);
   const thread = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const started = useRef(false);
@@ -182,18 +188,29 @@ export default function CoachChat({
       api<{ status: string }[]>(`/api/tasks/${current.id}/datasets`),
       api<{ status: string; checkpoint: string | null }[]>(`/api/tasks/${current.id}/finetunes`),
       api<unknown[]>(`/api/tasks/${current.id}/evaluations`),
-      api<{ report: {
-        decision: string; baseline_successes: number; baseline_attempted: number;
-        candidate_successes: number; candidate_attempted: number; usable_pairs: number;
-        planned_pairs: number; observed_difference: number | null; problems: string[];
-      } } | null>(`/api/simulator/comparisons/${current.id}`),
+      api<{ report: PairedReport } | null>(`/api/simulator/comparisons/${current.id}`),
     ]) : null;
+    const report = taskData?.[5]?.report ?? null;
     return {
       simulator_mode: mode,
-      simulator_comparison: taskData?.[5]?.report ?? null,
+      simulator_comparison: report && (workflow?.kind !== 'comparison' || report.evaluation_id === workflow.id) ? {
+        decision: report.decision,
+        baseline_successes: report.baseline_successes, baseline_attempted: report.baseline_attempted,
+        candidate_successes: report.candidate_successes, candidate_attempted: report.candidate_attempted,
+        usable_pairs: report.usable_pairs, planned_pairs: report.planned_pairs,
+        observed_difference: report.observed_difference, problems: report.problems,
+      } : null,
       simulator_workflow: workflow ? {
         task_id: workflow.task_id, kind: workflow.kind, status: workflow.state,
         completed: workflow.completed, total: workflow.total, demos: workflow.demos,
+        activity: workflow.message,
+        comparison_protocol: workflow.kind === 'comparison' ? {
+          models: 'base Dream-1 and the selected fine-tune',
+          trials: workflow.total * 2,
+          pair: 'One attempt per model from the same simulator starting state on a scene held out from training.',
+          progress: 'A pair counts after both attempts finish, whether they succeed or fail.',
+          success_rule: 'Lift the apple at least 8 cm above its starting height and hold it there for two continuous seconds.',
+        } : undefined,
       } : null,
       current_task: current ? { id: current.id, name: current.name, guidance: taskData?.[0],
         kept_demos: taskData?.[1].filter((demo) => demo.decision === 'keep').length,
@@ -298,6 +315,12 @@ export default function CoachChat({
         setComparisonReady(null);
         chooseSimulatorMode('apple');
         selectTask(job.task_id);
+        if (job.kind === 'comparison' && job.state === 'running') {
+          setMessages((history) => [...history, {
+            role: 'assistant',
+            content: 'I’ve started the YAM comparison. I’ll show each model’s result as its trial finishes, then summarize how they did on the same scenes.',
+          }]);
+        }
       }
       return true;
     } catch (caught) {
@@ -471,7 +494,6 @@ export default function CoachChat({
   }
 
   const hostedGuide = hosted && ai?.configured === false;
-  const currentYamJob = activeTaskId && yamJob?.task_id === activeTaskId ? yamJob : null;
   const currentTask = activeTaskId && workflowTask?.id === activeTaskId ? workflowTask : undefined;
   const currentPipeline = pipeline?.taskId === activeTaskId ? pipeline : null;
   const simulatorRequested = begun && (hostedGuide || showSimulator || currentYamJob || simulatorMode !== 'apple'
@@ -562,6 +584,7 @@ export default function CoachChat({
       {simulatorRequested && <YamChatWorkflow
         setup={simulator} dreamReady={dreamAccess === 'ready'} job={currentYamJob}
         pipeline={currentYamJob || simulatorMode !== 'apple' ? currentPipeline : null}
+        comparisonReport={evaluation.simulation?.report ?? null}
         openExistingCheckpoints={() => showWork({ kind: 'checkpoints' })}
         mode={simulatorMode}
         setMode={chooseSimulatorMode}
@@ -610,9 +633,11 @@ export default function CoachChat({
         </div>
       </section>}
       {comparisonReady && <section className="chat-action chat-workspace-return" aria-label="Checkpoint ready">
-        <div role="status"><strong>Fine-tune ready</strong><p>{comparisonReady.yam === null ? 'Checking evaluation options…' : comparisonReady.yam
-          ? 'Compare the base and fine-tuned models on the same four simulator scenes. This may use Dream credits.'
-          : 'Compare your new checkpoint with the base model on held-out scenes.'}</p></div>
+        <div role="status"><strong>Fine-tune ready</strong>
+          {comparisonReady.yam ? <YamComparisonPlan pairs={4} /> : <p>{comparisonReady.yam === null
+            ? 'Checking evaluation options…'
+            : 'Compare your new checkpoint with the base model on held-out scenes.'}</p>}
+        </div>
         {comparisonReady.yam !== null && (comparisonReady.yam
           ? <button type="button" disabled={yamActionPending} onClick={() => void runYamAction('/api/simulator/compare', {
             task_id: comparisonReady.taskId, job_id: comparisonReady.jobId, pairs: 4,
@@ -641,7 +666,8 @@ export default function CoachChat({
       </div>}
       {!workSurface && begun && !hostedGuide && <form onSubmit={(event) => void submit(event)} className="chat-composer"><textarea ref={composer} aria-label="Message to coach" disabled={!ai?.configured} value={text} maxLength={2000} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(event); } }} placeholder="Tell me about your robot or ask what to do next…" /><button disabled={!ai?.configured || busy || !text.trim()}>Send</button></form>}
     </section>
-    <LiveEvaluation taskId={begun ? activeTaskId : ''} simulatorActive={!!simulatorRequested && simulatorMode === 'apple'} onOpen={openEvaluation} />
+    <LiveEvaluation taskId={evaluationTaskId} simulatorActive={!!simulatorRequested && simulatorMode === 'apple'}
+      onOpen={openEvaluation} evidence={evaluation} />
     </div>
   </main>;
 }

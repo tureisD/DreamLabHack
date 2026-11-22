@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ScenePreset } from './SceneTask';
+import type { PairedReport } from './StatisticalAudit';
+import { YamComparisonPlan, YamComparisonProgress } from './YamComparisonExplanation';
 
 export type YamJob = {
   id: string;
@@ -34,13 +36,14 @@ const sceneChoices: { id: ScenePreset; title: string; target: string }[] = [
 ];
 
 export default function YamChatWorkflow({
-  setup, dreamReady, job, pipeline, mode, setMode, openRecorder, openExistingCheckpoints,
+  setup, dreamReady, job, pipeline, comparisonReport, mode, setMode, openRecorder, openExistingCheckpoints,
   prepare, collect, reuseDemos, compare, stop, review, training, explainComparison,
 }: {
   setup: { state: string; message: string } | null;
   dreamReady: boolean;
   job: YamJob | null;
   pipeline: TaskPipeline | null;
+  comparisonReport: PairedReport | null;
   mode: SimulatorMode;
   setMode: (mode: SimulatorMode) => void;
   openRecorder: (mode: 'fruit' | 'scene', preset?: ScenePreset) => void;
@@ -101,11 +104,13 @@ export default function YamChatWorkflow({
       <div role="status">
         <strong>{running ? (job.kind === 'comparison' ? 'Comparing checkpoints' : job.kind === 'import' ? 'Importing demos' : 'Collecting demos')
           : job.state === 'failed' ? 'Run stopped' : job.state === 'cancelled' ? 'Run stopped by you' : 'Run complete'}</strong>
-        <p>{job.message}</p>
-        {job.kind !== 'import' && (running || job.completed > 0) && <div className="yam-job-progress">
-          <progress value={job.completed} max={job.total} aria-label={job.kind === 'collection' ? 'Completed training scenes' : 'Completed evaluation pairs'} />
-          <small>{job.completed}/{job.total} {job.kind === 'collection' ? 'scenes' : 'pairs'}</small>
-        </div>}
+        {job.kind === 'comparison' ? <YamComparisonProgress job={job} report={comparisonReport} /> : <>
+          <p>{job.message}</p>
+          {job.kind === 'collection' && (running || job.completed > 0) && <div className="yam-job-progress">
+            <progress value={job.completed} max={job.total} aria-label="Completed training scenes" />
+            <small>{job.completed}/{job.total} scenes</small>
+          </div>}
+        </>}
       </div>
       {running && <button type="button" className="yam-secondary" disabled={busy} onClick={() => void act(stop)}>Quit run</button>}
     </div>}
@@ -168,7 +173,7 @@ export default function YamChatWorkflow({
         <button type="button" className="yam-secondary" onClick={training}>Open fine-tuning</button>
       </div>}
       {!running && checkpoint && <div className="yam-next">
-        <small>Compare both checkpoints on four held-out scenes. This may use Dream credits.</small>
+        <YamComparisonPlan pairs={4} />
         <button type="button" className="yam-primary" disabled={busy || !dreamReady || !ready} onClick={() => void act(() => compare(checkpoint.id))}>
           {job?.kind === 'comparison' && job.state === 'completed' ? 'Run comparison again' : 'Run simulator comparison'}
         </button>

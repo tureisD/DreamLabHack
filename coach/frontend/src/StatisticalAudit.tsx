@@ -22,6 +22,7 @@ type PairAttempt = {
 };
 type Pair = { pair_id: string; baseline: PairAttempt | null; candidate: PairAttempt | null };
 export type PairedReport = {
+  evaluation_id: string;
   decision: 'descriptive' | 'improved' | 'regressed' | 'inconclusive' | 'not_evaluable';
   planned_pairs: number; submitted_pairs: number; usable_pairs: number;
   baseline_attempted: number; candidate_attempted: number;
