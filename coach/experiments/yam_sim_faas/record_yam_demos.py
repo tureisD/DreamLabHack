@@ -5,11 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 import secrets
-from contextlib import contextmanager
-from datetime import datetime, timezone
-from uuid import uuid4
 import sys
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import av
 import mujoco
@@ -39,12 +39,15 @@ CONFIG = {
 
 
 class RecordingYamEnv(YamEnv):
-    def __init__(self, folder, task, seed, *, defer_video=False, videos=True, start_pose="home"):
+    def __init__(self, folder, task, seed, *, defer_video=False, videos=True, start_pose="home",
+                 object_name="apple"):
         super().__init__()
         self.folder = folder
         self.task = task
-        apple = self.data.joint("apple_free").qpos
-        apple[:2] += np.random.default_rng(seed).uniform(-0.025, 0.025, size=2)
+        if object_name not in ("apple", "orange", "banana"):
+            raise ValueError("Unsupported YAM object")
+        fruit_pose = self.data.joint(f"{object_name}_free").qpos
+        fruit_pose[:2] += np.random.default_rng(seed).uniform(-0.025, 0.025, size=2)
         if start_pose == "wrist-visible":
             # Fixed simulator-only starting pose. The open gripper still has to approach.
             for index, angle in enumerate((-0.4, 1.4, 1.4, -1.35, 0.0, 0.0), 1):
@@ -54,7 +57,8 @@ class RecordingYamEnv(YamEnv):
         elif start_pose != "home":
             raise ValueError(f"Unknown simulator start pose: {start_pose}")
         mujoco.mj_forward(self.model, self.data)
-        self.apple_xy = apple[:2].tolist()
+        self.object_xy = fruit_pose[:2].tolist()
+        self.apple_xy = self.object_xy if object_name == "apple" else self.data.joint("apple_free").qpos[:2].tolist()
         self.states: list[np.ndarray] = []
         self.actions: list[np.ndarray] = []
         self.apple_heights = [] if not videos else None
@@ -157,13 +161,16 @@ def scene_seed(value):
 
 
 @contextmanager
-def recording(root, task, checkpoint, seed, source, *, start_pose="home", videos=True):
+def recording(root, task, checkpoint, seed, source, *, start_pose="home", videos=True,
+              object_name="apple"):
     root.mkdir(parents=True, exist_ok=True)
     folder = root / f"yam-{uuid4().hex}"
     folder.mkdir()
-    started = datetime.now(timezone.utc).isoformat()
-    env = RecordingYamEnv(folder, task, seed, defer_video=source == "model", videos=videos, start_pose=start_pose)
-    details = {"source": source, "seed": seed, "apple_xy_m": env.apple_xy, "start_pose": start_pose}
+    started = datetime.now(UTC).isoformat()
+    env = RecordingYamEnv(folder, task, seed, defer_video=source == "model", videos=videos,
+                          start_pose=start_pose, object_name=object_name)
+    details = {"source": source, "seed": seed, "apple_xy_m": env.apple_xy,
+               "object_name": object_name, "object_xy_m": env.object_xy, "start_pose": start_pose}
     status, reason, error = "complete", "finished", None
     try:
         yield env, details
@@ -205,9 +212,9 @@ if __name__ == "__main__":
             approach = {}
             if args.vary_approach:
                 rng = np.random.default_rng([first_seed + index, 73])
-                approach = dict(approach_steps=int(rng.integers(35, 91)),
-                                descent_steps=int(rng.integers(38, 86)),
-                                approach_height=float(rng.uniform(0.09, 0.155)))
+                approach = {"approach_steps": int(rng.integers(35, 91)),
+                            "descent_steps": int(rng.integers(38, 86)),
+                            "approach_height": float(rng.uniform(0.09, 0.155))}
                 details["approach"] = approach
             result = mock_pickups.run_trial("apple", env=env, snapshot_dir=env.folder, **approach)
             details["script_result"] = result
