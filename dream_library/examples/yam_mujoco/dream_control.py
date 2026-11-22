@@ -372,6 +372,8 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
             if steps % FRAME_EVERY_STEPS == 0:
                 capture(env, windows)
             steps += 1
+        if progress is not None:
+            progress["warmup_rows"] = steps
         obs = observation(env, windows, args.task, args.model, args.model in POSE_MODELS)
         if args.dry_run:
             print(f"Dry run OK: task={args.task!r}, model={args.model}, {FRAMES} frames x 3 cameras. No API call.")

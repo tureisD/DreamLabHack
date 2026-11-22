@@ -25,6 +25,8 @@ async function json<T>(url: string, method = 'GET', body?: unknown): Promise<T> 
   return (await response.json()) as T;
 }
 
+import { initialTask, readRoute, selectTask } from './workspaceRoute';
+
 export default function Demos() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [taskId, setTaskId] = useState('');
@@ -48,7 +50,7 @@ export default function Demos() {
   useEffect(() => {
     void json<Task[]>('/api/tasks').then((values) => {
       setTasks(values);
-      if (values.length) setTaskId(values[0].id);
+      if (values.length) setTaskId(initialTask(values)?.id || '');
     }).catch((caught: Error) => setError(caught.message));
   }, []);
 
@@ -57,7 +59,6 @@ export default function Demos() {
     let active = true;
     const refresh = async () => {
       try {
-        await json<ImportResult>(`/api/tasks/${taskId}/demos/import`, 'POST');
         const [values, coverage] = await Promise.all([
           json<Demo[]>(`/api/tasks/${taskId}/demos`),
           json<Plan>(`/api/tasks/${taskId}/demo-plan`),
@@ -116,7 +117,8 @@ export default function Demos() {
   function choose(demo: Demo) {
     setSelectedId(demo.id);
     setRole(demo.camera_keys[0]?.replace('observation.images.', '') ?? '');
-    setCell(demo.start_cell ?? 0);
+    const hinted = readRoute().query.get('cell');
+    setCell(demo.start_cell ?? (hinted && /^[0-8]$/.test(hinted) ? Number(hinted) : 0));
     setNote(demo.note ?? '');
   }
 
@@ -124,7 +126,7 @@ export default function Demos() {
     <header className="header"><div><p className="eyebrow">Record what matters</p><h1>Demonstrations</h1><p className="subtitle">Completed LeRobot episodes appear here shortly after the recorder saves them.</p></div><button onClick={() => void scan()} disabled={busy || !taskId}>Scan now</button></header>
     {error && <div className="alert" role="alert">{error}</div>}
     {message && <div className="notice" role="status">{message}</div>}
-    <div className="demo-task-select"><label>Task <select value={taskId} onChange={(event) => { setTaskId(event.target.value); setSelectedId(''); }}>{tasks.map((task) => <option value={task.id} key={task.id}>{task.name}</option>)}</select></label></div>
+    <div className="demo-task-select"><label>Task <select value={taskId} onChange={(event) => { selectTask(event.target.value); setTaskId(event.target.value); setSelectedId(''); }}>{tasks.map((task) => <option value={task.id} key={task.id}>{task.name}</option>)}</select></label></div>
     <section className="card teleop-controls"><h2>SO-101 leader/follower recording</h2><p>Stop the Dream station process before using the same arm with LeRobot. This records one local episode and does not upload it to Hugging Face.</p><div className="training-controls"><label>Follower port<input value={followerPort} onChange={(event) => setFollowerPort(event.target.value)} placeholder="/dev/ttyACM0" /></label><label>Leader port<input value={leaderPort} onChange={(event) => setLeaderPort(event.target.value)} placeholder="/dev/ttyACM1" /></label><label>Follower ID<input value={followerId} onChange={(event) => setFollowerId(event.target.value)} /></label><label>Leader ID<input value={leaderId} onChange={(event) => setLeaderId(event.target.value)} /></label><label>Camera index<input type="number" min={0} value={cameraIndex} onChange={(event) => setCameraIndex(Number(event.target.value))} /></label><button disabled={busy || !taskId || !followerPort || !leaderPort || teleop?.state === 'recording'} onClick={() => void record()}>Record one demo</button></div><p className="hint">Recorder: {teleop?.state ?? 'idle'}{teleop?.session_path ? ` · ${teleop.session_path}` : ''}. Restart the station after the recording exits, then review the new demo below.</p></section>
     {plan && <section className="card coverage">
       <div className="card-heading"><h2>What to record next</h2><span className="count">{plan.observed_failure_cells_covered ? 'Observed failure cells covered' : 'Coverage in progress'}</span></div>

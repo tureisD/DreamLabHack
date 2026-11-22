@@ -27,13 +27,14 @@ from dream.errors import (
 )
 from pydantic import BaseModel, Field
 
-from teach_task_coach.demos import DemoStore
+from teach_task_coach.demos import DemoStore, read_demo
 from teach_task_coach.storage import CoachDatabase
 from teach_task_coach.tasks import TaskStore
 
 DatasetStatus = Literal["pending_validation", "validated", "failed"]
 TrainingStatus = Literal[
-    "pending_upload", "processing", "pending_training", "training", "succeeded", "failed"
+    "pending_upload", "processing", "pending_training", "training", "succeeded", "failed",
+    "retry_requested", "retry_reconcile", "submit_reconcile"
 ]
 
 
@@ -61,6 +62,10 @@ class FineTuneRequest(BaseModel):
 
 
 class FineTuneRecord(FineTuneRequest):
+    failed_phase: str | None = None
+    failed_at: str | None = None
+    failure_reason: str | None = None
+    retry_used: bool = False
     id: str
     dataset_version_id: str
     suffix: str
@@ -115,8 +120,9 @@ class FaaSStore:
             """
         )
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(fine_tune_jobs)")}
-        if "resume_from" not in columns:
-            connection.execute("ALTER TABLE fine_tune_jobs ADD COLUMN resume_from TEXT")
+        for name, sql_type in (("resume_from", "TEXT"), ("failed_phase", "TEXT"), ("failed_at", "TEXT"), ("failure_reason", "TEXT"), ("retry_used", "INTEGER NOT NULL DEFAULT 0")):
+            if name not in columns:
+                connection.execute(f"ALTER TABLE fine_tune_jobs ADD COLUMN {name} {sql_type}")
 
     def create_dataset(self, task_id: str, embodiment_name: str, demo_ids: list[str]) -> DatasetVersion:
         identifier = uuid.uuid4().hex
@@ -224,8 +230,29 @@ class FaaSStore:
             ).fetchall()
         return [self._finetune(row) for row in rows]
 
+    def claim(self, job_id: str, expected: str, target: str) -> bool:
+        with self.db.connect() as db:
+            self._schema(db)
+            return db.execute('UPDATE fine_tune_jobs SET status=? WHERE id=? AND status=?', (target,job_id,expected)).rowcount == 1
+
+    def request_retry(self, job_id: str) -> FineTuneRecord:
+        job = self.get_finetune(job_id)
+        if not job: raise KeyError(job_id)
+        version = self.get_dataset(job.dataset_version_id)
+        if not version or version.status != 'validated' or not version.remote_id or not version.remote_name or job.remote_job_id or job.checkpoint:
+            raise ValueError('No validated remote dataset available for processing retry.')
+        verify_manifest(version)
+        with self.db.connect() as db:
+            self._schema(db)
+            updated = db.execute("""UPDATE fine_tune_jobs SET status='retry_requested', retry_used=1,
+                failed_at=COALESCE(failed_at,?),failure_reason=COALESCE(failure_reason,error)
+                WHERE id=? AND status='failed' AND retry_used=0 AND remote_job_id IS NULL AND failed_phase='processing'""",(_now(),job_id))
+            if updated.rowcount != 1:
+                raise ValueError('No confirmed, untried processing failure. No new submission was authorized.')
+        return self.get_finetune(job_id)
+
     def update_finetune(self, job_id: str, **changes: Any) -> FineTuneRecord:
-        allowed = {"remote_job_id", "checkpoint", "status", "error"}
+        allowed = {"remote_job_id", "checkpoint", "status", "error", "failed_phase", "failed_at", "failure_reason"}
         if not changes.keys() <= allowed:
             raise ValueError("Unsupported fine-tune field update.")
         with self.db.connect() as connection:
@@ -257,7 +284,8 @@ class FaaSStore:
             steps=row["steps"], lr_schedule=row["lr_schedule"], base_share=row["base_share"],
             use_eef=bool(row["use_eef"]), remote_job_id=row["remote_job_id"],
             checkpoint=row["checkpoint"], status=row["status"], error=row["error"],
-            created_at=row["created_at"], resume_from=row["resume_from"],
+            created_at=row["created_at"], resume_from=row["resume_from"], failed_phase=row['failed_phase'],
+            failed_at=row['failed_at'],failure_reason=row['failure_reason'],retry_used=bool(row['retry_used']),
         )
 
 
@@ -278,6 +306,9 @@ class DreamGateway:
 
     def upload(self, path: str, name: str, embodiment: str) -> Any:
         return self.client.upload_dataset(path, name, embodiment)
+
+    def retry_dataset(self, dataset_id: str) -> Any:
+        return self.client.retry_dataset(dataset_id)
 
     def dataset_status(self, dataset_id: str) -> Any:
         return self.client.get_dataset_status(dataset_id)
@@ -313,6 +344,14 @@ def _files_manifest(root: Path) -> list[dict[str, Any]]:
     return entries
 
 
+def verify_manifest(version: DatasetVersion) -> None:
+    root = Path(version.local_path)
+    manifest = json.loads((root / '.coach-manifest.json').read_text(encoding='utf-8'))
+    if (manifest.get('task_id') != version.task_id or manifest.get('demo_ids') != version.demo_ids
+            or manifest.get('files') != _files_manifest(root)):
+        raise ValueError('Dataset files or identity changed after validation.')
+
+
 class FaaSWorker:
     def __init__(
         self, store: FaaSStore, tasks: TaskStore, demos: DemoStore, gateway: DreamGateway
@@ -327,7 +366,7 @@ class FaaSWorker:
                 attempted += 1
                 self._validate(dataset)
         for job in self.store.list_finetunes():
-            if job.status in ("pending_upload", "processing", "pending_training", "training"):
+            if job.status in ("pending_upload", "processing", "pending_training", "training", "retry_requested", "retry_reconcile", "submit_reconcile"):
                 attempted += 1
                 self._advance(job)
         return attempted
@@ -362,7 +401,12 @@ class FaaSWorker:
                 temporary.mkdir()
                 for demo in source_demos:
                     assert demo is not None
-                    shutil.copytree(demo.source_path, temporary / demo.id)
+                    copied = temporary / demo.id
+                    shutil.copytree(demo.source_path, copied)
+                    checked = read_demo(copied, version.task_id)
+                    expected = set(embodiment.embodiment_config.get('video', {}).values())
+                    if not checked.valid or set(checked.camera_keys) != expected or checked.task_text != demo.task_text:
+                        raise ValueError('Frozen demonstration failed frame, action, task or camera-role checks.')
                 manifest = {"task_id": version.task_id, "demo_ids": version.demo_ids, "files": _files_manifest(temporary)}
                 (temporary / ".coach-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
                 os.replace(temporary, root)
@@ -392,12 +436,14 @@ class FaaSWorker:
                 self._upload(job, version)
             elif job.status == "processing":
                 self._processing(job, version)
-            elif job.status == "pending_training":
+            elif job.status in ('retry_requested','retry_reconcile'):
+                self._retry_processing(job, version)
+            elif job.status in ('pending_training','submit_reconcile'):
                 self._start_training(job, version)
             elif job.status == "training":
                 self._training(job)
-        except (DreamAuthError, DreamProtocolError, DreamUploadError) as exc:
-            self.store.update_finetune(job.id, error=f"{type(exc).__name__}: retrying after credentials or connection recover.")
+        except (DreamAuthError, DreamProtocolError, DreamUploadError, TimeoutError, ConnectionError) as exc:
+            self.store.update_finetune(job.id, error=f"{type(exc).__name__}: check credentials or connection; reconcile remote state before another action.")
         except DreamServerError as exc:
             if getattr(exc, "retryable", False):
                 self.store.update_finetune(job.id, error=f"{type(exc).__name__}: service unavailable; retrying.")
@@ -407,11 +453,7 @@ class FaaSWorker:
             self.store.update_finetune(job.id, status="failed", error=str(exc))
 
     def _upload(self, job: FineTuneRecord, version: DatasetVersion) -> None:
-        manifest_path = Path(version.local_path) / ".coach-manifest.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if manifest["files"] != _files_manifest(Path(version.local_path)):
-            self.store.update_finetune(job.id, status="failed", error="Dataset files changed after validation.")
-            return
+        verify_manifest(version)
         remote = next(
             (
                 item for item in self.gateway.datasets()
@@ -420,7 +462,7 @@ class FaaSWorker:
             ),
             None,
         )
-        if remote is None or remote.status in ("failed", "uploading"):
+        if remote is None or remote.status == 'uploading':
             remote = self.gateway.upload(version.local_path, version.remote_slug, version.embodiment_name)
         self.store.update_dataset(version.id, remote_id=remote.id, remote_name=remote.name)
         self.store.update_finetune(job.id, status="processing", error=None)
@@ -433,11 +475,34 @@ class FaaSWorker:
         if remote.status == "processed":
             self.store.update_finetune(job.id, status="pending_training", error=None)
         elif remote.status == "failed":
-            self.store.update_finetune(job.id, status="failed", error=remote.error or "Dataset processing failed.")
+            reason = remote.error or 'Dataset processing failed.'
+            self.store.update_finetune(job.id,status='failed',failed_phase='processing',failed_at=job.failed_at or _now(),failure_reason=job.failure_reason or reason,error=reason)
+
+    def _retry_processing(self, job: FineTuneRecord, version: DatasetVersion) -> None:
+        verify_manifest(version)
+        if not version.remote_id: raise ValueError('Missing remote dataset ID.')
+        remote=self.gateway.dataset_status(version.remote_id)
+        if (remote.id,remote.name,remote.embodiment)!=(version.remote_id,version.remote_name,version.embodiment_name):
+            raise ValueError('Remote dataset identity mismatch; processing was not requested.')
+        if remote.status=='failed' and job.status=='retry_requested':
+            if not self.store.claim(job.id,'retry_requested','retry_reconcile'):return
+            remote=self.gateway.retry_dataset(version.remote_id)
+            if remote.id!=version.remote_id: raise ValueError('Retry returned a different remote dataset.')
+            if remote.status=='failed':
+                self.store.update_finetune(job.id,status='failed',error=remote.error or 'Processing retry failed.')
+                return
+        if remote.status=='processed': self.store.update_finetune(job.id,status='pending_training',error=None)
+        elif remote.status in ('ready_to_process','processing'): self.store.update_finetune(job.id,status='processing',error=None)
+        else: self.store.update_finetune(job.id,error='Remote retry outcome unclear; polling only, no automatic repeat.')
 
     def _start_training(self, job: FineTuneRecord, version: DatasetVersion) -> None:
         existing = next((item for item in self.gateway.finetunes() if item.get("suffix") == job.suffix), None)
         if existing is None:
+            if job.status == 'submit_reconcile':
+                self.store.update_finetune(job.id,error='Submission outcome unknown: waiting for this suffix; will not submit again.')
+                return
+            verify_manifest(version)
+            if not self.store.claim(job.id,'pending_training','submit_reconcile'):return
             assert version.remote_name is not None
             existing = self.gateway.submit(
                 version.remote_name,

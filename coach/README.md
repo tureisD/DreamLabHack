@@ -2,6 +2,23 @@
 
 A local companion for the [Dream Labs public library](../dream_library/README.md). It checks the robot station, reviews saved rollouts and demonstrations, submits a Dream FaaS job, and guides a paired before/after evaluation. Robot runs and paid fine-tuning require explicit operator actions.
 
+## Offline apple pickup
+
+From `coach/`, run the following in Bash on Linux with EGL available. The script creates a **new** workspace, a simulated stand-in policy recording, and a scripted demonstration. No station, Dream API key or training worker is needed.
+
+```bash
+uv sync --locked --group dev --extra sim
+(cd frontend && npm ci && npm run build)
+workspace="$(mktemp -d)/apple"
+export COACH_DATA_DIR="$workspace/data" COACH_ROLLOUTS_DIR="$workspace/rollouts" COACH_DEMOS_DIR="$workspace/demos"
+MUJOCO_GL=egl uv run --locked --extra sim python experiments/yam_sim_faas/offline_workspace.py "$workspace"
+uv run --locked --extra sim teach-task-coach serve
+```
+
+Open `http://127.0.0.1:8765` followed by the review route printed by the script. In **Run review → Operator review**, assign the stand-in recording to the offline-review task, confirm a start cell, and record your judgement. In **Guide**, inspect the cell recommendation. In **Demonstrations**, review the scripted video, confirm its actual cell, and choose **Keep** or **Redo**; revisit Guide to see the change. An unassessable recording can stay unlabelled. Neither fixture demonstrates Dream-1 improvement.
+
+The [standalone statistics branch](https://github.com/tureisD/DreamLabHack/tree/codex/stat-eval-implementation) is separate and does not validate the Coach's paired simulator comparisons.
+
 ## Run locally
 
 From `coach/`:

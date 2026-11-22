@@ -1,0 +1,32 @@
+/* Task pages share typography, navigation and focus styles with the review workspace. */
+.task-workspace { display:grid; grid-template-columns:minmax(185px,255px) minmax(0,1fr); align-items:start; gap:20px 28px; }
+.task-workspace .header,.task-status-message { grid-column:1 / -1; }
+.task-workspace .header { padding-bottom:16px; border-bottom:1px solid var(--line); }
+.task-sidebar,.task-content,.trial-info { min-width:0; }
+.task-sidebar { border-right:1px solid var(--line); padding-right:18px; }
+.task-list-header,.task-overview-header,.trial-item { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.task-list-header h2,.task-workspace .trial-section-header h2,.task-create-header h2 { margin:0; font-size:17px; }
+.task-count { color:var(--muted); font-variant-numeric:tabular-nums; }
+.task-list { display:grid; gap:3px; margin:12px 0; }
+.task-workspace .task-item { min-width:0; width:100%; padding:11px; text-align:left; background:transparent; color:var(--ink); border:1px solid transparent; border-bottom-color:var(--line); }
+.task-workspace .task-item:is(:hover,.selected) { background:var(--wash); border-color:#a4c7b1; }
+.task-item-checkpoint,.task-meta-label,.trial-status,.trial-empty,.task-loading,.task-empty { color:var(--muted); font-size:13px; }
+.task-item-checkpoint,.task-meta-value.emphasis { overflow-wrap:anywhere; font-family:ui-monospace,monospace; font-size:12px; }
+.task-item-name,.trial-cell { font-weight:650; overflow-wrap:anywhere; } .task-item-checkpoint {margin-top:3px;}
+.task-content { display:grid; gap:22px; }
+.task-overview { display:grid; gap:14px; }
+.task-overview-title { margin:0; line-height:1.25; font-size:23px; overflow-wrap:anywhere; }
+.task-recordings-link,.guide-action-link,.task-workspace .task-create-toggle { display:inline-flex; align-items:center; justify-content:center; gap:8px; border-radius:5px; padding:9px 12px; background:var(--accent); color:white; text-decoration:none; font-size:13px; font-weight:650; }
+.task-meta-value,.task-success-rule { margin:4px 0 0; line-height:1.5; overflow-wrap:anywhere; }
+.task-success-rule { border-left:3px solid #407d59; padding:9px 13px; background:var(--wash); }
+.trial-section,.task-create-section { border-top:1px solid var(--line); padding-top:16px; }
+.trial-mode-control,.trial-create-label,.task-form-label,.trial-label-form label { display:grid; gap:5px; font-size:13px; font-weight:600; }
+.trial-mode-control { margin-top:12px; max-width:270px; }
+.task-content :where(input,select,textarea) { width:100%; min-width:0; padding:8px; border-radius:5px; border:1px solid #b4c0b9; background:white; color:var(--ink); font:inherit; }
+.trial-deployed-checkpoint,.trial-safety-notice { margin:12px 0; font-size:13px; line-height:1.4; } .trial-safety-notice {display:flex;gap:8px;align-items:flex-start;background:#faf0dc;color:#654b19;padding:9px 11px;} .trial-safety-notice svg {flex:none;}
+.trial-create-form { display:grid; grid-template-columns:minmax(90px,.5fr) minmax(140px,1.5fr) auto; gap:10px; align-items:end; }
+.task-form,.trial-label-form {display:grid;gap:13px;margin:14px 0;max-width:650px;}.task-form textarea,.trial-label-form textarea{min-height:76px;resize:vertical;}.task-form button,.trial-label-form button { justify-self:start; }
+.trial-list-header h3 { margin:18px 0 9px; }.trial-item { border-block-start:1px solid var(--line); padding:12px 0; }.trial-status {margin-top:4px;overflow-wrap:anywhere;}.task-workspace .trial-actions {flex-wrap:wrap;}.task-status-message.info {color:var(--muted);}.task-status-message.error,.trial-error {color:#853c31;}.task-status-message.success,.trial-completed {color:#245d38;}
+.review-conflict { border-left:3px solid #96601c; padding:12px 15px; background:#faf0dc; overflow-wrap:anywhere; }.review-conflict div {display:flex;flex-wrap:wrap;gap:8px;}.review-conflict p {white-space:pre-wrap;}
+@media(max-width:950px){.task-workspace{grid-template-columns:minmax(150px,190px) minmax(0,1fr);gap:15px;}.trial-create-form{grid-template-columns:1fr;}.trial-create-submit{justify-self:start;}}
+@media(max-width:700px){.task-workspace{grid-template-columns:minmax(0,1fr);}.task-sidebar{border:0;border-bottom:1px solid var(--line);padding:0 0 10px;}.task-overview-header{align-items:flex-start;}.task-overview-title{font-size:21px;}}

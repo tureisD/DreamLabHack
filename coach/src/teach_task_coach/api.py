@@ -10,6 +10,15 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from teach_task_coach.baseline_workflow import (
+    FindingReview,
+    SimAssignment,
+    SimLink,
+    WorkflowFinding,
+    acknowledge,
+    assignment,
+    link_episode,
+)
 from teach_task_coach.consistency import ConsistencyReview, review_task
 from teach_task_coach.coverage import CoveragePlan, plan
 from teach_task_coach.demos import Demo, DemoError, DemoScanner, DemoStore
@@ -34,7 +43,7 @@ from teach_task_coach.preflight import PreflightResult, PreflightService
 from teach_task_coach.rollout_audit import IntentAudit, audit_rollout
 from teach_task_coach.scene import PlacementResult, SceneAdapter
 from teach_task_coach.station import StationRejected, StationUnavailable
-from teach_task_coach.storage import EpisodeStore
+from teach_task_coach.storage import EpisodeStore, StaleReviewError
 from teach_task_coach.tasks import Task, TaskInput, TaskStore, Trial, TrialInput, TrialStateError
 from teach_task_coach.teleop import SO101Recorder, TeleopRequest, TeleopStatus
 from teach_task_coach.trials import TrialError, TrialRunner
@@ -45,6 +54,11 @@ class ImportResult(BaseModel):
     skipped: list[str]
 
 
+class RunListSimulation(BaseModel):
+    source: str | None = None
+    seed: int | None = None
+
+
 class EpisodeListItem(BaseModel):
     id: str
     task: str
@@ -53,9 +67,12 @@ class EpisodeListItem(BaseModel):
     started_at_utc: str | None
     success: bool | None
     finding_count: int
+    simulation: RunListSimulation | None = None
 
 
 class EpisodeLabel(BaseModel):
+    # Older clients may write a first label, but never overwrite an existing review.
+    expected_revision: int = Field(default=0, ge=0, le=2**53 - 1, strict=True)
     success: bool | None
     failure_stage: Literal["approach", "grasp", "transport", "release", "other"] | None = None
     note: str | None = Field(default=None, max_length=2000)
@@ -168,6 +185,10 @@ def create_app(
                 started_at_utc=episode.started_at_utc,
                 success=episode.success,
                 finding_count=len(episode.findings),
+                simulation=RunListSimulation(
+                    source=episode.simulation.get('source') if isinstance(episode.simulation.get('source'), str) else None,
+                    seed=episode.simulation.get('seed') if type(episode.simulation.get('seed')) is int else None,
+                ) if episode.simulation is not None else None,
             )
             for episode in episodes.list()
         ]
@@ -203,7 +224,11 @@ def create_app(
 
     @app.post("/api/episodes/{episode_id}/label", response_model=EpisodeSummary)
     def label_episode(episode_id: str, label: EpisodeLabel) -> EpisodeSummary:
-        episode = episodes.label(episode_id, label.success, label.failure_stage, label.note)
+        try:
+            episode = episodes.label(episode_id, label.success, label.failure_stage, label.note,
+                                     expected_revision=label.expected_revision)
+        except StaleReviewError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         if episode is None:
             raise HTTPException(status_code=404, detail="Episode not found.")
         return episode
@@ -222,6 +247,31 @@ def create_app(
         if task is None:
             raise HTTPException(status_code=404, detail="Task not found.")
         return task
+
+    @app.get('/api/episodes/{episode_id}/sim-baseline', response_model=SimLink | None)
+    def get_sim_assignment(episode_id: str):
+        episode = episodes.get(episode_id)
+        if episode is None:
+            raise HTTPException(status_code=404, detail='Episode not found.')
+        return assignment(tasks, episode)
+
+    @app.post('/api/tasks/{task_id}/sim-baselines', response_model=SimLink)
+    def assign_sim_baseline(task_id: str, value: SimAssignment):
+        try:
+            return link_episode(tasks, task_id, value)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except TrialStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post('/api/tasks/{task_id}/findings/{finding_id}/review', response_model=WorkflowFinding)
+    def review_finding(task_id: str, finding_id: str, value: FindingReview):
+        try:
+            return acknowledge(task_id, finding_id, value, tasks, episodes)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/tasks/{task_id}/guidance", response_model=Guidance)
     def get_guidance(task_id: str) -> Guidance:
@@ -538,6 +588,15 @@ def create_app(
         if tasks.get_task(task_id) is None:
             raise HTTPException(status_code=404, detail="Task not found.")
         return faas.list_finetunes(task_id)
+
+    @app.post('/api/finetunes/{job_id}/retry-processing', response_model=FineTuneRecord)
+    def retry_processing(job_id: str):
+        try:
+            return faas.request_retry(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail='Job not found.') from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/finetunes/{job_id}", response_model=FineTuneRecord)
     def get_finetune(job_id: str) -> FineTuneRecord:

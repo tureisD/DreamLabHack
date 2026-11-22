@@ -34,6 +34,10 @@ class Evaluation(BaseModel):
 
 
 class EvaluationReport(BaseModel):
+    rule_version: str = 'coach-paired-point-margin-v1'
+    population: str = 'station'
+    completeness: Literal['incomplete', 'complete']
+    missing_pairs: int
     evaluation_id: str
     target_pairs: int
     usable_pairs: int
@@ -205,6 +209,9 @@ class EvaluationStore:
             right = episodes.get(candidate.episode_id) if candidate.episode_id else None
             if (
                 left is None or right is None or left.status != "complete" or right.status != "complete"
+                or left.simulation is not None or right.simulation is not None
+                or left.collection_mode == 'simulation' or right.collection_mode == 'simulation'
+                or left.checkpoint != evaluation.baseline_checkpoint or right.checkpoint != evaluation.candidate_checkpoint
                 or left.stop_reason == "ModelReady" or right.stop_reason == "ModelReady"
                 or left.success is None or right.success is None
             ):
@@ -230,14 +237,14 @@ class EvaluationStore:
                 reason = "Candidate had more safety stops than baseline; review them before switching."
             elif difference >= evaluation.minimum_effect and low > 0 and p_value < 0.05:
                 decision = "improved"
-                reason = "Candidate cleared the predeclared improvement threshold on held-out paired trials."
+                reason = "Observed gain met the practical margin; the interval excludes zero and the paired test passed. The interval need not exclude the practical margin."
             elif difference < 0 and high < 0 and p_value < 0.05:
                 decision = "worse"
                 reason = "Candidate performed worse on the held-out paired trials."
             else:
                 reason = "The measured difference does not clear the predeclared evidence threshold."
         return EvaluationReport(
-            evaluation_id=evaluation.id,
+            evaluation_id=evaluation.id, completeness='complete' if n == 30 else 'incomplete', missing_pairs=30-n,
             target_pairs=30,
             usable_pairs=n,
             baseline_successes=baseline_successes,

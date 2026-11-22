@@ -147,13 +147,7 @@ class TrialRunner:
     def label(
         self, trial_id: str, success: bool, failure_stage: str | None, note: str | None
     ) -> Trial:
-        trial = self.tasks.get_trial(trial_id)
-        if trial is None:
-            raise KeyError(trial_id)
-        if trial.status != "awaiting_label" or trial.episode_id is None:
-            raise TrialError("Attach a finished rollout before labelling the trial.")
-        self.episodes.label(trial.episode_id, success, failure_stage, note)
-        return self.tasks.transition(trial_id, "awaiting_label", "completed")
+        return self.tasks.complete_review(trial_id, success, failure_stage, note)
 
     def abandon(self, trial_id: str, reason: str) -> Trial:
         trial = self.tasks.get_trial(trial_id)

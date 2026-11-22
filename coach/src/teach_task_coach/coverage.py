@@ -2,6 +2,7 @@
 
 from pydantic import BaseModel
 
+from teach_task_coach.baseline_workflow import findings, scoreable
 from teach_task_coach.demos import DemoStore
 from teach_task_coach.storage import EpisodeStore
 from teach_task_coach.tasks import TaskStore
@@ -23,6 +24,7 @@ class CoveragePlan(BaseModel):
 
 
 def plan(task_id: str, tasks: TaskStore, episodes: EpisodeStore, demos: DemoStore) -> CoveragePlan:
+    setup_ids = {f.episode_id for f in findings(task_id, tasks, episodes)}
     totals = [0] * 9
     failures = [0] * 9
     kept = [0] * 9
@@ -30,12 +32,12 @@ def plan(task_id: str, tasks: TaskStore, episodes: EpisodeStore, demos: DemoStor
         if trial.status != "completed" or trial.episode_id is None:
             continue
         episode = episodes.get(trial.episode_id)
-        if episode is None or episode.success is None:
+        if episode is None or episode.id in setup_ids or not scoreable(episode, trial.status):
             continue
         totals[trial.start_cell] += 1
         failures[trial.start_cell] += int(not episode.success)
     for demo in demos.list(task_id):
-        if demo.decision == "keep" and demo.start_cell is not None:
+        if demo.decision == "keep" and demo.valid and demo.start_cell is not None:
             kept[demo.start_cell] += 1
 
     cells = [
@@ -64,8 +66,10 @@ def plan(task_id: str, tasks: TaskStore, episodes: EpisodeStore, demos: DemoStor
             reason="No baseline failures were observed. Add harder baseline setups before fine-tuning.",
             observed_failure_cells_covered=False,
         )
-    next_cell = max(candidates, key=lambda item: (item.priority, -item.cell))
-    covered = all(cell.kept_demos > 0 for cell in candidates)
+    uncovered = [cell for cell in candidates if cell.kept_demos == 0]
+    if not uncovered:
+        return CoveragePlan(cells=cells, next_cell=None, reason='Every observed failure cell has a valid kept demonstration.', observed_failure_cells_covered=True)
+    next_cell = max(uncovered, key=lambda item: (item.priority, -item.cell))
     return CoveragePlan(
         cells=cells,
         next_cell=next_cell.cell,
@@ -73,5 +77,5 @@ def plan(task_id: str, tasks: TaskStore, episodes: EpisodeStore, demos: DemoStor
             f"Cell {next_cell.cell + 1} had {next_cell.baseline_failures} failures in "
             f"{next_cell.baseline_runs} baseline runs and {next_cell.kept_demos} kept demos."
         ),
-        observed_failure_cells_covered=covered,
+        observed_failure_cells_covered=False,
     )

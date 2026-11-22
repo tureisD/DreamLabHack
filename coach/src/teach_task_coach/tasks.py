@@ -102,6 +102,21 @@ class TaskStore:
                 purpose TEXT NOT NULL DEFAULT 'baseline'
             );
             CREATE INDEX IF NOT EXISTS trials_task_id ON trials(task_id);
+            CREATE TABLE IF NOT EXISTS sim_baselines (
+                recording_key TEXT PRIMARY KEY,
+                trial_id TEXT NOT NULL UNIQUE REFERENCES trials(id)
+            );
+            CREATE TABLE IF NOT EXISTS workflow_findings (
+                id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id),
+                episode_id TEXT NOT NULL REFERENCES episodes(id), kind TEXT NOT NULL,
+                message TEXT NOT NULL, reviewed_at TEXT, reason TEXT
+            );
+            CREATE TRIGGER IF NOT EXISTS sim_baseline_label_status
+            AFTER UPDATE OF success ON episodes
+            BEGIN
+                UPDATE trials SET status = CASE WHEN NEW.success IS NULL THEN 'awaiting_label' ELSE 'completed' END
+                WHERE episode_id=NEW.id AND id IN (SELECT trial_id FROM sim_baselines);
+            END;
             CREATE TABLE IF NOT EXISTS heldout_scenes (
                 task_id TEXT NOT NULL REFERENCES tasks(id),
                 scene_index INTEGER NOT NULL,
@@ -300,6 +315,41 @@ class TaskStore:
             self._schema(connection)
             row = connection.execute("SELECT * FROM trials WHERE id = ?", (trial_id,)).fetchone()
         return None if row is None else Trial.model_validate(dict(row))
+
+    def complete_review(
+        self, trial_id: str, success: bool, failure_stage: str | None, note: str | None
+    ) -> Trial:
+        """Save the operator's initial trial verdict and finish the trial in one transaction."""
+        with self.db.connect() as connection:
+            self._schema(connection)
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM trials WHERE id = ?", (trial_id,)).fetchone()
+            if row is None:
+                raise KeyError(trial_id)
+            if row["episode_id"] is None or row["status"] not in ("awaiting_label", "completed"):
+                raise TrialStateError("Attach a finished rollout before labelling the trial.")
+            episode = connection.execute(
+                "SELECT success, failure_stage, note, review_revision FROM episodes WHERE id = ?",
+                (row["episode_id"],),
+            ).fetchone()
+            if episode is None:
+                raise TrialStateError("Attached episode is missing.")
+            verdict = (int(success), failure_stage, note)
+            matches = (episode["success"], episode["failure_stage"], episode["note"]) == verdict
+            if not matches and (episode["review_revision"] != 0 or row["status"] == "completed"):
+                raise TrialStateError("A review already exists. Open Run review to compare or correct it.")
+            if row["status"] == "completed":
+                raise TrialStateError("This trial has already been completed.")
+            if not matches:
+                connection.execute(
+                    """UPDATE episodes SET success = ?, failure_stage = ?, note = ?,
+                       review_revision = review_revision + 1 WHERE id = ?""",
+                    (*verdict, row["episode_id"]),
+                )
+            # Imported simulation baselines also mirror Run review edits through a trigger.
+            connection.execute("UPDATE trials SET status = 'completed', last_error = NULL WHERE id = ?", (trial_id,))
+            saved = connection.execute("SELECT * FROM trials WHERE id = ?", (trial_id,)).fetchone()
+            return Trial.model_validate(dict(saved))
 
     def warmup_episode_ids(self, trial_id: str) -> list[str]:
         with self.db.connect() as connection:

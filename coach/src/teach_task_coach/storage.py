@@ -17,8 +17,14 @@ def default_data_dir() -> Path:
     if configured:
         return Path(configured).expanduser()
     if os.name == "nt":
-        return Path(os.getenv("LOCALAPPDATA", str(Path.home() / "AppData/Local"))) / "TeachTaskCoach"
+        return (
+            Path(os.getenv("LOCALAPPDATA", str(Path.home() / "AppData/Local"))) / "TeachTaskCoach"
+        )
     return Path(os.getenv("XDG_DATA_HOME", "~/.local/share")).expanduser() / "teach-task-coach"
+
+
+class StaleReviewError(ValueError):
+    """A different writer has already saved a newer operator review."""
 
 
 class CoachDatabase:
@@ -41,9 +47,28 @@ class CoachDatabase:
                     summary_json TEXT NOT NULL,
                     success INTEGER,
                     failure_stage TEXT,
-                    note TEXT
+                    note TEXT,
+                    review_revision INTEGER NOT NULL DEFAULT 0
                 )"""
             )
+
+            def has_revision() -> bool:
+                return any(
+                    row["name"] == "review_revision"
+                    for row in connection.execute("PRAGMA table_info(episodes)")
+                )
+
+            if not has_revision():
+                # Another process can open an older workspace at the same time.
+                connection.execute("BEGIN IMMEDIATE")
+                if not has_revision():
+                    connection.execute(
+                        "ALTER TABLE episodes ADD COLUMN review_revision INTEGER NOT NULL DEFAULT 0"
+                    )
+                    connection.execute(
+                        "UPDATE episodes SET review_revision = 1 WHERE success IS NOT NULL OR failure_stage IS NOT NULL OR note IS NOT NULL"
+                    )
+                connection.commit()
             yield connection
             connection.commit()
         finally:
@@ -56,8 +81,26 @@ class EpisodeStore:
         self.data_dir = self.db.data_dir
 
     def upsert(self, episode: EpisodeSummary) -> None:
-        payload = episode.model_dump(exclude={"success", "failure_stage", "note"})
+        payload = episode.model_dump(
+            exclude={"success", "failure_stage", "note", "review_revision"}
+        )
         with self.db.connect() as connection:
+            if episode.recording_key:
+                connection.execute("BEGIN IMMEDIATE")
+                original = connection.execute(
+                    "SELECT id, source_path FROM episodes WHERE json_extract(summary_json,'$.recording_key')=? ORDER BY rowid LIMIT 1",
+                    (episode.recording_key,),
+                ).fetchone()
+                if original is not None and original["id"] != episode.id:
+                    if Path(original["source_path"]).is_dir():
+                        return
+                    # Relocation: preserve the first ID, label and task association.
+                    payload["id"] = original["id"]
+                    connection.execute(
+                        "UPDATE episodes SET source_path=?, summary_json=? WHERE id=?",
+                        (episode.source_path, json.dumps(payload), original["id"]),
+                    )
+                    return
             connection.execute(
                 """INSERT INTO episodes (id, source_path, summary_json)
                    VALUES (?, ?, ?)
@@ -74,19 +117,39 @@ class EpisodeStore:
 
     def get(self, episode_id: str) -> EpisodeSummary | None:
         with self.db.connect() as connection:
-            row = connection.execute("SELECT * FROM episodes WHERE id = ?", (episode_id,)).fetchone()
+            row = connection.execute(
+                "SELECT * FROM episodes WHERE id = ?", (episode_id,)
+            ).fetchone()
         return None if row is None else self._decode(row)
 
     def label(
-        self, episode_id: str, success: bool | None, failure_stage: str | None, note: str | None
+        self,
+        episode_id: str,
+        success: bool | None,
+        failure_stage: str | None,
+        note: str | None,
+        *,
+        expected_revision: int | None = None,
     ) -> EpisodeSummary | None:
         with self.db.connect() as connection:
-            cursor = connection.execute(
-                "UPDATE episodes SET success = ?, failure_stage = ?, note = ? WHERE id = ?",
-                (None if success is None else int(success), failure_stage, note, episode_id),
-            )
-            changed = cursor.rowcount
-        return self.get(episode_id) if changed else None
+            saved = connection.execute(
+                """UPDATE episodes SET success = ?, failure_stage = ?, note = ?,
+                       review_revision = review_revision + 1
+                   WHERE id = ? AND (? IS NULL OR review_revision = ?) RETURNING *""",
+                (
+                    None if success is None else int(success),
+                    failure_stage,
+                    note,
+                    episode_id,
+                    expected_revision,
+                    expected_revision,
+                ),
+            ).fetchone()
+            if saved is not None:
+                return self._decode(saved)
+            if connection.execute("SELECT 1 FROM episodes WHERE id = ?", (episode_id,)).fetchone():
+                raise StaleReviewError("A newer operator review exists. Compare it before saving.")
+            return None
 
     @staticmethod
     def _decode(row: sqlite3.Row) -> EpisodeSummary:
@@ -96,5 +159,6 @@ class EpisodeStore:
                 "success": None if row["success"] is None else bool(row["success"]),
                 "failure_stage": row["failure_stage"],
                 "note": row["note"],
+                "review_revision": row["review_revision"],
             }
         )

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import secrets
-from contextlib import contextmanager
-from datetime import datetime, timezone
-from uuid import uuid4
 import sys
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import av
 import mujoco
@@ -23,13 +24,17 @@ sys.path.insert(0, str(SIM))
 import mock_pickups
 from yam_env import YamEnv
 
+from teach_task_coach.pickup_evidence import COLUMNS, TRACE
+
 ROOT = Path.cwd() / "yam_sim_dataset_20hz"
 TASK = "pick up the apple"
 FPS = 20
 ROLES = {"top": "overhead", "left": "wrist_l", "right": "wrist_r"}
 PARTS = {
-    "right_arm": [0, 6], "right_gripper": [6, 7],
-    "left_arm": [7, 13], "left_gripper": [13, 14],
+    "right_arm": [0, 6],
+    "right_gripper": [6, 7],
+    "left_arm": [7, 13],
+    "left_gripper": [13, 14],
 }
 CONFIG = {
     "state": PARTS,
@@ -58,6 +63,13 @@ class RecordingYamEnv(YamEnv):
         self.states: list[np.ndarray] = []
         self.actions: list[np.ndarray] = []
         self.video_poses = [] if defer_video else None
+        self.apple_trace = []
+        self.apple_body = self.model.body("apple").id
+        self.tip_bodies = {
+            self.model.body(f"{side}_tip_{tip}").id: (hand, 1 << index)
+            for hand, side in enumerate(("left", "right"))
+            for index, tip in enumerate(("left", "right"))
+        }
         self.outputs = {}
         for role in ROLES.values():
             video = self.folder / f"videos/chunk-000/observation.images.{role}/episode_000000.mp4"
@@ -70,6 +82,25 @@ class RecordingYamEnv(YamEnv):
             self.outputs[role] = (container, stream)
 
     def step(self, left, right):
+        # Sample before step, like the review video. Deferred rendering rewinds qpos in close().
+        if self.task.strip().casefold() == TASK:
+            fingers = [0, 0]
+            other = False
+            for c in self.data.contact:
+                if c.dist > 0 or c.efc_address < 0 or min(c.geom1, c.geom2) < 0:
+                    continue
+                a, b = self.model.geom_bodyid[[c.geom1, c.geom2]]
+                if self.apple_body not in (a, b):
+                    continue
+                tip = self.tip_bodies.get(b if a == self.apple_body else a)
+                if tip is None:
+                    other = True
+                else:
+                    hand, bit = tip
+                    fingers[hand] |= bit
+            self.apple_trace.append(
+                (len(self.states), self.data.body("apple").xpos[2].item(), *fingers, int(other))
+            )
         state = self.state()
         self.states.append(np.r_[state["right"], state["left"]].astype(np.float32))
         self.actions.append(np.r_[right, left].astype(np.float32))
@@ -84,7 +115,9 @@ class RecordingYamEnv(YamEnv):
     def _write_video_frame(self):
         images = self.images()
         for camera, role in ROLES.items():
-            rgb = np.asarray(Image.fromarray(images[camera]).resize((320, 176), Image.Resampling.BILINEAR))
+            rgb = np.asarray(
+                Image.fromarray(images[camera]).resize((320, 176), Image.Resampling.BILINEAR)
+            )
             container, stream = self.outputs[role]
             frame = av.VideoFrame.from_ndarray(rgb, format="rgb24")
             for packet in stream.encode(frame):
@@ -102,6 +135,11 @@ class RecordingYamEnv(YamEnv):
                 container.mux(packet)
             container.close()
         self._write_metadata()
+        if self.apple_trace:
+            with (self.folder / TRACE).open("w", newline="", encoding="ascii") as stream:
+                writer = csv.writer(stream, lineterminator="\n")
+                writer.writerow(COLUMNS)
+                writer.writerows(self.apple_trace)
         super().close()
 
     def _write_metadata(self):
@@ -112,29 +150,48 @@ class RecordingYamEnv(YamEnv):
             flat = np.asarray(values, dtype=np.float32).reshape(-1)
             offsets = pa.array(np.arange(0, flat.size + 1, dim, dtype=np.int32))
             vectors[name] = pa.ListArray.from_arrays(offsets, pa.array(flat))
-        table = pa.table(vectors | {
-            "timestamp": np.arange(n) / FPS,
-            "episode_index": np.zeros(n, dtype=np.int64),
-        })
+        table = pa.table(
+            vectors
+            | {
+                "timestamp": np.arange(n) / FPS,
+                "episode_index": np.zeros(n, dtype=np.int64),
+            }
+        )
         data = self.folder / "data/chunk-000/episode_000000.parquet"
         data.parent.mkdir(parents=True, exist_ok=True)
         pq.write_table(table, data)
         meta = self.folder / "meta"
         meta.mkdir(parents=True, exist_ok=True)
-        feature = {"dtype": "float32", "shape": [dim], "names": [f"joint_{i}" for i in range(dim - 1)] + ["gripper"]}
-        video_feature = {"dtype": "video", "shape": [176, 320, 3], "names": ["height", "width", "channels"]}
+        feature = {
+            "dtype": "float32",
+            "shape": [dim],
+            "names": [f"joint_{i}" for i in range(dim - 1)] + ["gripper"],
+        }
+        video_feature = {
+            "dtype": "video",
+            "shape": [176, 320, 3],
+            "names": ["height", "width", "channels"],
+        }
         info = {
-            "codebase_version": "v2.1", "total_episodes": 1, "total_frames": n,
-            "fps": FPS, "chunks_size": 1000,
+            "codebase_version": "v2.1",
+            "total_episodes": 1,
+            "total_frames": n,
+            "fps": FPS,
+            "chunks_size": 1000,
             "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
             "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
             "features": {"action": feature, "observation.state": feature}
             | {f"observation.images.{role}": video_feature for role in ROLES.values()},
         }
         (meta / "info.json").write_text(json.dumps(info), encoding="utf-8")
-        (meta / "tasks.jsonl").write_text(json.dumps({"task_index": 0, "task": self.task}) + "\n", encoding="utf-8")
-        (meta / "episodes.jsonl").write_text(json.dumps({"episode_index": 0, "tasks": [self.task], "length": n}) + "\n", encoding="utf-8")
-        print(f"recorded {self.folder.name}: {n} frames, {n/FPS:.1f}s", flush=True)
+        (meta / "tasks.jsonl").write_text(
+            json.dumps({"task_index": 0, "task": self.task}) + "\n", encoding="utf-8"
+        )
+        (meta / "episodes.jsonl").write_text(
+            json.dumps({"episode_index": 0, "tasks": [self.task], "length": n}) + "\n",
+            encoding="utf-8",
+        )
+        print(f"recorded {self.folder.name}: {n} frames, {n / FPS:.1f}s", flush=True)
 
 
 def scene_seed(value):
@@ -147,9 +204,10 @@ def scene_seed(value):
 @contextmanager
 def recording(root, task, checkpoint, seed, source, *, start_pose="home"):
     root.mkdir(parents=True, exist_ok=True)
-    folder = root / f"yam-{uuid4().hex}"
+    recording_id = uuid4().hex
+    folder = root / f"yam-{recording_id}"
     folder.mkdir()
-    started = datetime.now(timezone.utc).isoformat()
+    started = datetime.now(UTC).isoformat()
     env = RecordingYamEnv(folder, task, seed, defer_video=source == "model", start_pose=start_pose)
     details = {"source": source, "seed": seed, "apple_xy_m": env.apple_xy, "start_pose": start_pose}
     status, reason, error = "complete", "finished", None
@@ -162,11 +220,20 @@ def recording(root, task, checkpoint, seed, source, *, start_pose="home"):
         env.close()
         frames = len(env.states)
         info = {
-            "collection_mode": "simulation", "simulation": details,
-            "robot_name": "YAM simulator", "body": "yam", "task": task,
-            "checkpoint": checkpoint, "started_at_utc": started,
-            "frames": frames, "fps": FPS, "duration_s": frames / FPS,
-            "status": status if frames else "empty", "stop_reason": reason, "error": error,
+            "collection_mode": "simulation",
+            "recording_id": recording_id,
+            "simulation": details,
+            "robot_name": "YAM simulator",
+            "body": "yam",
+            "task": task,
+            "checkpoint": checkpoint,
+            "started_at_utc": started,
+            "frames": frames,
+            "fps": FPS,
+            "duration_s": frames / FPS,
+            "status": status if frames else "empty",
+            "stop_reason": reason,
+            "error": error,
         }
         pending = folder / "rollout.json.tmp"
         pending.write_text(json.dumps(info, indent=2), encoding="utf-8")
@@ -174,22 +241,35 @@ def recording(root, task, checkpoint, seed, source, *, start_pose="home"):
         print(f"Review {folder} (scene seed {seed})", flush=True)
 
 
-if __name__ == "__main__":
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT)
     parser.add_argument("--episodes", type=int, default=2)
-    parser.add_argument("--start-pose", choices=("home", "wrist-visible"), default="home")
     parser.add_argument("--seed", type=scene_seed, help="First scene seed; increments per episode")
-    args = parser.parse_args()
+    parser.add_argument("--start-pose", choices=("home", "wrist-visible"), default="home")
+    args = parser.parse_args(argv)
     if args.episodes < 1:
         parser.error("--episodes must be positive")
     first_seed = args.seed if args.seed is not None else secrets.randbits(32)
     failures = 0
     for index in range(args.episodes):
-        with recording(args.output, TASK, "scripted-yam", first_seed + index, "scripted", start_pose=args.start_pose) as (env, details):
+        with recording(
+            args.output,
+            TASK,
+            "scripted-yam",
+            first_seed + index,
+            "scripted",
+            start_pose=args.start_pose,
+        ) as (env, details):
             result = mock_pickups.run_trial("apple", env=env, snapshot_dir=env.folder)
             details["script_result"] = result
             failures += int(not result["passed"])
             (env.folder / "embodiment.json").write_text(json.dumps(CONFIG), encoding="utf-8")
     if failures:
-        raise SystemExit(f"{failures} scripted pickups failed the simulator check. Review before training.")
+        raise SystemExit(
+            f"{failures} scripted pickups failed the simulator check. Review before training."
+        )
+
+
+if __name__ == "__main__":
+    main()

@@ -14,6 +14,12 @@
 
 </div>
 
+## DreamLabHack: test an apple pickup
+
+This branch (`codex/teach-task-coach-liam`) extends the [Team Coach](https://github.com/tureisD/DreamLabHack/tree/codex/teach-task-coach). Start with the [offline Coach walkthrough](coach/README.md#offline-apple-pickup): review a recorded attempt, assign it to a task and starting position, then see how a reviewed demonstration changes the collection recommendation. The example uses simulator fixtures, not a trained candidate checkpoint.
+
+The [standalone statistical evaluator](https://github.com/tureisD/DreamLabHack/tree/codex/stat-eval-implementation) is separate. Its independent-trial statistics do not apply to these paired simulator runs.
+
 ## What is this library for
 
 `dreamlabs` is the Python client for DreamAPI, which hosts **Dream-1**, the Dream Labs robot model. Dream-1 looks at

@@ -12,7 +12,7 @@ type Job = {
   id: string; dataset_version_id: string; steps: number; lr_schedule: string; base_share: number;
   use_eef: boolean; status: string; remote_job_id: string | null;
   checkpoint: string | null; error: string | null;
-  resume_from: string | null;
+  resume_from: string | null; failed_phase?: string; failed_at?: string; failure_reason?: string; retry_used?: boolean;
 };
 
 async function json<T>(url: string, method = 'GET', body?: unknown): Promise<T> {
@@ -27,6 +27,8 @@ async function json<T>(url: string, method = 'GET', body?: unknown): Promise<T> 
   }
   return (await response.json()) as T;
 }
+
+import { initialTask, selectTask } from './workspaceRoute';
 
 export default function Training() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -43,9 +45,12 @@ export default function Training() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void json<Task[]>('/api/tasks').then((values) => { setTasks(values); if (values.length) setTaskId(values[0].id); }).catch((caught: Error) => setError(caught.message));
-    void json<Embodiment[]>('/api/embodiments').then((values) => { setBodies(values); if (values.length) setEmbodiment(values[0].name); }).catch((caught: Error) => setError(caught.message));
+    void json<Task[]>('/api/tasks').then((values) => { setTasks(values); if (values.length) setTaskId(initialTask(values)?.id || ''); }).catch((caught: Error) => setError(caught.message));
   }, []);
+
+  function loadEmbodiments(){
+    void json<Embodiment[]>('/api/embodiments').then((values) => { setBodies(values); if (values.length) setEmbodiment(values[0].name); }).catch((caught: Error) => setError(caught.message));
+  }
 
   useEffect(() => {
     if (!taskId) return;
@@ -89,6 +94,14 @@ export default function Training() {
     finally { setBusy(false); }
   }
 
+  async function retryProcessing(job: Job) {
+    if (!window.confirm('Retry processing the existing uploaded dataset? When it is ready, the previously authorized paid training request will continue. No additional training job is authorized.')) return;
+    setBusy(true); setError('');
+    try { await json<Job>(`/api/finetunes/${job.id}/retry-processing`, 'POST'); setJobs(await json<Job[]>(`/api/tasks/${taskId}/finetunes`)); }
+    catch (error) { setError(error instanceof Error ? error.message : 'Processing retry was not queued.'); }
+    finally { setBusy(false); }
+  }
+
   async function continueJob(job: Job) {
     if (!job.checkpoint || !window.confirm(`Submit another paid 500-step FaaS job from ${job.checkpoint}? The paired evaluation must show a positive but inconclusive gain.`)) return;
     setBusy(true); setError(''); setMessage('');
@@ -108,7 +121,8 @@ export default function Training() {
     {error && <div className="alert" role="alert">{error}</div>}
     {message && <div className="notice" role="status">{message}</div>}
     <div className="training-controls card">
-      <label>Task<select value={taskId} onChange={(event) => setTaskId(event.target.value)}>{tasks.map((task) => <option key={task.id} value={task.id}>{task.name}</option>)}</select></label>
+      <label>Task<select value={taskId} onChange={(event) => { selectTask(event.target.value); setTaskId(event.target.value); }}>{tasks.map((task) => <option key={task.id} value={task.id}>{task.name}</option>)}</select></label>
+      <button type="button" className="secondary" onClick={loadEmbodiments}>Load Dream embodiments</button>
       <label>Registered embodiment<select value={embodiment} onChange={(event) => setEmbodiment(event.target.value)}>{bodies.map((body) => <option key={body.name} value={body.name}>{body.name} · {body.video_roles.join(', ')}</option>)}</select></label>
       <button disabled={busy || !taskId || !embodiment} onClick={() => void createDataset()}>Create dataset version</button>
     </div>
@@ -128,7 +142,7 @@ export default function Training() {
     </section>
     <section className="card training-list"><h2>Fine-tune jobs</h2>
       {jobs.length === 0 && <p>No jobs submitted.</p>}
-      {jobs.map((job) => <div className="training-row" key={job.id}><div><strong>Job {job.id.slice(0, 8)}</strong><small>{job.steps} steps · {job.lr_schedule} · base share {job.base_share}{job.resume_from ? ` · resumed from ${job.resume_from}` : ''}</small><small>Status: {job.status}{job.remote_job_id ? ` · ${job.remote_job_id}` : ''}</small>{job.checkpoint && <small className="model-ready">Checkpoint: {job.checkpoint}</small>}{job.error && <small className="trial-error">{job.error}</small>}</div>{job.status === 'succeeded' && job.lr_schedule === 'constant' && job.checkpoint && !jobs.some((other) => other.resume_from === job.checkpoint) && <button className="secondary" disabled={busy} onClick={() => void continueJob(job)}>Continue 500 steps</button>}</div>)}
+      {jobs.map((job) => <div className="training-row" key={job.id}><div><strong>Job {job.id.slice(0, 8)}</strong><small>{job.steps} steps · {job.lr_schedule} · base share {job.base_share}{job.resume_from ? ` · resumed from ${job.resume_from}` : ''}</small><small>Status: {job.status}{job.remote_job_id ? ` · ${job.remote_job_id}` : ''}</small>{job.checkpoint && <small className="model-ready">Checkpoint: {job.checkpoint}</small>}{job.error && <small className="trial-error">{job.error}</small>}{job.failed_at && <small>First failure: {job.failed_phase} · {job.failed_at} · {job.failure_reason}</small>}</div>{job.status === 'failed' && job.failed_phase === 'processing' && !job.retry_used && <button disabled={busy} onClick={()=>void retryProcessing(job)}>Retry processing</button>}{job.status === 'succeeded' && job.lr_schedule === 'constant' && job.checkpoint && !jobs.some((other) => other.resume_from === job.checkpoint) && <button className="secondary" disabled={busy} onClick={() => void continueJob(job)}>Continue 500 steps</button>}</div>)}
     </section>
   </main>;
 }

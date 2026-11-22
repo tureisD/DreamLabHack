@@ -14,6 +14,7 @@ type Trial = {
   episode_id: string | null; last_error: string | null;
 };
 type Report = {
+  rule_version: string; completeness: 'incomplete' | 'complete';
   usable_pairs: number; target_pairs: number; baseline_successes: number; candidate_successes: number;
   baseline_only: number; candidate_only: number; paired_difference: number | null;
   ci_low: number | null; ci_high: number | null; exact_p_value: number | null;
@@ -35,6 +36,8 @@ async function json<T>(url: string, method = 'GET', body?: unknown): Promise<T> 
 }
 
 function percent(value: number | null) { return value === null ? '—' : `${(value * 100).toFixed(1)}%`; }
+
+import { initialTask, selectTask } from './workspaceRoute';
 
 export default function EvaluationPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -58,7 +61,7 @@ export default function EvaluationPage() {
 
   useEffect(() => {
     void json<Task[]>('/api/tasks').then((values) => {
-      setTasks(values); if (values.length) setTaskId(values[0].id);
+      setTasks(values); if (values.length) setTaskId(initialTask(values)?.id || '');
     }).catch((caught: Error) => setError(caught.message));
     void json<{ configured: boolean }>('/api/scene-adapter/status').then((value) => setSceneAdapter(value.configured));
   }, []);
@@ -195,7 +198,7 @@ export default function EvaluationPage() {
     {message && <div className="notice" role="status">{message}</div>}
     <section className="card">
       <div className="training-controls">
-        <label>Task<select value={taskId} onChange={(event) => { setTaskId(event.target.value); setSelectedId(''); }}><option value="">Choose a task</option>{tasks.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}</select></label>
+        <label>Task<select value={taskId} onChange={(event) => { selectTask(event.target.value); setTaskId(event.target.value); setSelectedId(''); }}><option value="">Choose a task</option>{tasks.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}</select></label>
         <label>Fine-tuned checkpoint<select value={jobId} onChange={(event) => setJobId(event.target.value)}><option value="">Choose a completed job</option>{candidates.map((job) => <option key={job.id} value={job.id}>{job.checkpoint}</option>)}</select></label>
         <label>Minimum useful gain<input type="number" min="0" max="100" step="1" value={Math.round(minimumEffect * 100)} onChange={(event) => setMinimumEffect(Number(event.target.value) / 100)} />%</label>
         <label>After a verified improvement<select value={autoPromote ? 'yes' : 'no'} onChange={(event) => setAutoPromote(event.target.value === 'yes')}><option value="no">Review before switching</option><option value="yes">Automatically use candidate for future coach runs</option></select></label>
@@ -208,8 +211,8 @@ export default function EvaluationPage() {
     </section>
 
     {selected && report && <section className="card evaluation-report">
-      <h2>Verdict: {report.decision}</h2>
-      <p>{report.reason}</p>
+      <h2>{report.completeness === 'incomplete' ? 'Incomplete comparison' : `Verdict: ${report.decision}`}</h2>
+      <p>{report.reason}</p><small>Decision rule: {report.rule_version}</small>
       <div className="evaluation-metrics">
         <div><strong>{report.usable_pairs}/{report.target_pairs}</strong><span>usable pairs</span></div>
         <div><strong>{report.baseline_successes}/{report.usable_pairs}</strong><span>baseline successes</span></div>

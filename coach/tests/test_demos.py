@@ -42,7 +42,16 @@ def make_demo(root, *, with_video=True):
     if with_video:
         video = folder / "videos/chunk-000/observation.images.overhead/episode_000000.mp4"
         video.parent.mkdir(parents=True)
-        video.write_bytes(b"video fixture")
+        with av.open(str(video), 'w') as container:
+            stream = container.add_stream('mpeg4', rate=20)
+            stream.width, stream.height, stream.pix_fmt = 64, 48, 'yuv420p'
+            pattern = np.arange(48*64, dtype=np.uint16).reshape(48,64)
+            for i in range(100):
+                frame = av.VideoFrame.from_ndarray(((pattern + 3*i) % 256).astype('uint8'), format='gray')
+                for packet in stream.encode(frame):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
     return folder
 
 
@@ -50,7 +59,7 @@ def test_demo_qc_flags_idle_start_and_missing_video(tmp_path):
     folder = make_demo(tmp_path)
     demo = read_demo(folder, "task-id")
     assert demo.valid
-    assert {finding.code for finding in demo.findings} == {"idle_start", "video_review"}
+    assert {finding.code for finding in demo.findings} == {"idle_start"}
 
     (folder / "videos/chunk-000/observation.images.overhead/episode_000000.mp4").unlink()
     demo = read_demo(folder, "task-id")
@@ -76,7 +85,8 @@ def test_demo_qc_flags_dark_camera_and_abrupt_action(tmp_path):
     actions[50] = [10.0, 0.0]
     pq.write_table(pa.table({"action": pa.array(actions)}), folder / "data/chunk-000/episode_000000.parquet")
     demo = read_demo(folder, "task-id")
-    assert {finding.code for finding in demo.findings} == {"possible_occlusion", "frozen_camera", "abrupt_action"}
+    assert {finding.code for finding in demo.findings} == {"possible_occlusion", "frozen_camera", "abrupt_action", "video_frames"}
+    assert not demo.valid
 
 
 def test_demo_import_review_and_coverage_plan(tmp_path):
@@ -107,7 +117,7 @@ def test_demo_import_review_and_coverage_plan(tmp_path):
 
     assert client.post(f"/api/tasks/{task.id}/demos/import").json()["imported"] == 1
     demo_id = client.get(f"/api/tasks/{task.id}/demos").json()[0]["id"]
-    assert client.get(f"/api/demos/{demo_id}/video/overhead").content == b"video fixture"
+    assert client.get(f"/api/demos/{demo_id}/video/overhead").content[4:8] == b'ftyp'
     assert client.post(f"/api/demos/{demo_id}/decision", json={"decision": "keep"}).status_code == 422
 
     trial = task_store.create_trial(task.id, TrialInput(start_cell=4))

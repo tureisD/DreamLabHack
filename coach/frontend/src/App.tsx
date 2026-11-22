@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Activity, Aperture, BookOpen, ChevronDown, Clapperboard, FlaskConical, Layers3, ListChecks, Monitor, SlidersHorizontal } from 'lucide-react';
+import { readRoute, screenHref, type Screen } from './workspaceRoute';
 import Runs from './Runs';
 import Tasks from './Tasks';
 import Demos from './Demos';
@@ -112,20 +114,30 @@ function Preflight() {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<'guide' | 'preflight' | 'runs' | 'tasks' | 'demos' | 'training' | 'evaluation'>('guide');
+  const [route, setRoute] = useState(() => readRoute());
+  useEffect(() => {
+    const sync = () => setRoute(readRoute());
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
+  }, []);
+  const { screen, query } = route;
+  const views = [
+    { id: 'runs', title: 'Run review', icon: Clapperboard }, { id: 'tasks', title: 'Tasks', icon: ListChecks },
+    { id: 'demos', title: 'Demonstrations', icon: Layers3 }, { id: 'guide', title: 'Guide', icon: BookOpen },
+    { id: 'evaluation', title: 'Evaluation', icon: FlaskConical }, { id: 'training', title: 'Training', icon: SlidersHorizontal },
+    { id: 'preflight', title: 'Preflight', icon: Activity },
+  ] as const;
   return (
     <>
-      <nav className="top-nav" aria-label="Coach sections">
-        <span className="brand">Teach it a task</span>
-        <button className={screen === 'guide' ? 'nav-active' : ''} onClick={() => setScreen('guide')}>Guide</button>
-        <button className={screen === 'preflight' ? 'nav-active' : ''} onClick={() => setScreen('preflight')}>Preflight</button>
-        <button className={screen === 'tasks' ? 'nav-active' : ''} onClick={() => setScreen('tasks')}>Tasks</button>
-        <button className={screen === 'runs' ? 'nav-active' : ''} onClick={() => setScreen('runs')}>Run review</button>
-        <button className={screen === 'demos' ? 'nav-active' : ''} onClick={() => setScreen('demos')}>Demos</button>
-        <button className={screen === 'training' ? 'nav-active' : ''} onClick={() => setScreen('training')}>Training</button>
-        <button className={screen === 'evaluation' ? 'nav-active' : ''} onClick={() => setScreen('evaluation')}>Evaluation</button>
-      </nav>
-      {screen === 'guide' ? <Guide /> : screen === 'preflight' ? <Preflight /> : screen === 'tasks' ? <Tasks /> : screen === 'demos' ? <Demos /> : screen === 'training' ? <Training /> : screen === 'evaluation' ? <EvaluationPage /> : <Runs />}
+      <aside className="workspace-rail">
+        <a className="product-mark" href={screenHref('runs')} aria-label="DreamLab Coach home"><Aperture aria-hidden="true" size={27} /><span>DreamLab<strong>Coach</strong></span></a>
+        <nav className="workspace-nav" aria-label="Coach sections">{views.map(({ id, title, icon: Icon }) => <a key={id} aria-current={screen === id ? 'page' : undefined} href={screenHref(id)}><Icon aria-hidden="true" size={18} />{title}</a>)}</nav>
+        <label className="mobile-views"><select aria-label="Coach section" value={screen} onChange={e => { window.location.hash = screenHref(e.target.value as Screen); }}>{views.map(v => <option key={v.id} value={v.id}>{v.title}</option>)}</select><ChevronDown aria-hidden="true" size={16} /></label>
+        <div className="local-indicator"><Monitor size={16} aria-hidden="true" />Local workspace</div>
+      </aside>
+      <div className="workspace-content" key={`${screen}:${query.get('task') || ''}`}>
+        {screen === 'guide' ? <Guide /> : screen === 'preflight' ? <Preflight /> : screen === 'tasks' ? <Tasks /> : screen === 'demos' ? <Demos /> : screen === 'training' ? <Training /> : screen === 'evaluation' ? <EvaluationPage /> : <Runs requested={query.get('run')} taskPrompt={query.get('prompt') || ''} />}
+      </div>
     </>
   );
 }

@@ -82,25 +82,31 @@ def _dim(features: dict[str, Any], key: str) -> int | None:
     return shape[0] if isinstance(shape, list) and len(shape) == 1 and isinstance(shape[0], int) else None
 
 
-def _camera_review(path: Path, fps: float) -> list[DemoFinding]:
+def _camera_review(path: Path, fps: float, frames: int) -> list[DemoFinding]:
     """Flag persistently dark or textureless sampled frames as possible occlusion."""
     try:
         with av.open(str(path)) as container:
             stream = container.streams.video[0]
+            findings = []
+            if stream.average_rate is None or not np.isclose(float(stream.average_rate), fps, rtol=1e-4):
+                findings.append(DemoFinding(code="video_fps", severity="error", message=f"{path.parent.name}: video FPS does not match metadata."))
+            decoded = 0
             samples = []
             fingerprints = []
             stride = max(1, round(fps))
             for index, frame in enumerate(container.decode(stream)):
-                if index >= 300:
+                decoded = index + 1
+                if decoded > frames:
                     break
-                if index % stride:
+                if index >= 300 or index % stride:
                     continue
                 gray = frame.to_ndarray(format="gray")
                 samples.append((float(np.mean(gray)), float(np.std(gray))))
                 fingerprints.append(hashlib.sha256(gray.tobytes()).digest())
     except (OSError, ValueError, av.FFmpegError, IndexError):
-        return [DemoFinding(code="video_review", severity="review", message=f"Could not inspect {path.parent.name} video frames; review it manually.")]
-    findings = []
+        return [DemoFinding(code="video_decode", severity="error", message=f"Could not decode {path.parent.name} video.")]
+    if decoded != frames:
+        findings.append(DemoFinding(code="video_frames", severity="error", message=f"{path.parent.name}: expected {frames} decodable frames, found {decoded}."))
     if len(samples) >= 3 and sum(mean < 12 or spread < 5 for mean, spread in samples) / len(samples) >= 0.8:
         findings.append(DemoFinding(code="possible_occlusion", severity="review", message=f"{path.parent.name} is dark or nearly textureless in most sampled frames; check camera visibility."))
     if any(len(set(fingerprints[index : index + 4])) == 1 for index in range(max(0, len(fingerprints) - 3))):
@@ -127,7 +133,7 @@ def read_demo(folder: Path, task_id: str) -> Demo:
     except (TypeError, ValueError) as exc:
         raise DemoError("Episode frame count or rate is invalid.") from exc
     findings: list[DemoFinding] = []
-    if fps <= 0 or frames <= 0:
+    if not np.isfinite(fps) or fps <= 0 or frames <= 0:
         findings.append(DemoFinding(code="empty", severity="error", message="Episode has no usable frames or rate."))
     if not cameras:
         findings.append(DemoFinding(code="no_cameras", severity="error", message="No camera feature is recorded."))
@@ -137,8 +143,10 @@ def read_demo(folder: Path, task_id: str) -> Demo:
         videos = [path for path in (folder / "videos").rglob("*.mp4") if key in path.parts]
         if not videos:
             findings.append(DemoFinding(code="missing_video", severity="error", message=f"Camera {key} has no video file."))
-        else:
-            findings.extend(_camera_review(videos[0], fps))
+        elif len(videos) != 1 or not videos[0].resolve().is_relative_to(folder):
+            findings.append(DemoFinding(code="camera_files", severity="error", message=f"Expected one local video for {key}."))
+        elif np.isfinite(fps) and fps > 0 and frames > 0:
+            findings.extend(_camera_review(videos[0], fps, frames))
     parquet_files = sorted((folder / "data").rglob("*.parquet"))
     if not parquet_files:
         findings.append(DemoFinding(code="missing_actions", severity="error", message="No action parquet file is present."))
