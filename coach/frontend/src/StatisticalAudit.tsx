@@ -16,7 +16,7 @@ type SamplePlan = {
   power_at_budget: number; max_trials_per_arm: number;
 };
 type PairAttempt = {
-  outcome: string; held_lift_m: number | null; first_close_after_warmup_s: number | null;
+  trial_id: string; outcome: string; held_lift_m: number | null; first_close_after_warmup_s: number | null;
   model_action_rows: number | null; replay_max_state_error_m: number | null;
   interventions?: number; duration_s?: number | null; first_response_s?: number | null;
 };

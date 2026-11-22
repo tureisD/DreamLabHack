@@ -8,6 +8,7 @@ import json
 import random
 import subprocess
 import sys
+from collections import OrderedDict
 from collections.abc import Callable
 from importlib.resources import files
 from pathlib import Path
@@ -18,7 +19,7 @@ from zipfile import ZipFile
 
 from dream.errors import DreamError
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from teach_task_coach.demos import DemoStore, read_demo
 from teach_task_coach.faas import FaaSStore
@@ -70,6 +71,20 @@ class ExistingCheckpoint(BaseModel):
     steps: int | None
 
 
+class TrialDiagnosis(BaseModel):
+    code: str
+    title: str
+    summary: str
+    evidence: list[str]
+    next_step: str | None = None
+
+
+class TrainingTrialDiagnosis(BaseModel):
+    scene: int
+    seed: int
+    diagnosis: TrialDiagnosis
+
+
 class YamJob(BaseModel):
     id: str
     kind: Literal["collection", "import", "comparison"]
@@ -79,6 +94,7 @@ class YamJob(BaseModel):
     demos: int = 0
     state: Literal["running", "stopping", "completed", "cancelled", "failed"] = "running"
     message: str
+    training_trial_diagnostics: list[TrainingTrialDiagnosis] = Field(default_factory=list)
 
 
 class YamComparison(BaseModel):
@@ -88,8 +104,72 @@ class YamComparison(BaseModel):
     report: PairedReport
 
 
+class YamComparisonDiagnostics(BaseModel):
+    evaluation_id: str
+    trials: dict[str, TrialDiagnosis]
+
+
+class SavedDiagnosis(BaseModel):
+    checkpoint: str
+    seed: int
+    outcome: Literal["success", "failure", "invalid"]
+    diagnosis: TrialDiagnosis
+
+
 class SimulatorRunError(RuntimeError):
-    pass
+    def __init__(self, message: str, code: str = "unverified_rollout") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def unverified_rollout(code: str) -> TrialDiagnosis:
+    causes = {
+        "simulator_timeout": ("Simulation timed out", "The recorder or replay did not finish within its time limit."),
+        "recording_failed": ("Recording failed", "The simulator could not finish recording the model's actions."),
+        "replay_failed": ("Replay could not be verified", "The local scorer could not verify this recorded trajectory."),
+        "short_recording": ("Rollout stopped before scoring", "The recording ended before the planned action budget was used."),
+        "missing_height": ("Apple height was missing", "The recording did not supply the height needed to score the hold."),
+    }
+    title, summary = causes.get(code, (
+        "Trial could not be scored", "There is no verified result for this recording."
+    ))
+    return TrialDiagnosis(
+        code=code, title=title, summary=summary,
+        evidence=["This attempt cannot establish whether the grasp succeeded or failed."],
+        next_step="Check the simulator run status, then repeat the trial to get a scored result.",
+    )
+
+
+def saved_metrics_diagnosis(attempt: PairAttempt, threshold_m: float) -> TrialDiagnosis:
+    if attempt.outcome in ("invalid", "unknown"):
+        return unverified_rollout("unverified_rollout")
+    evidence = []
+    if attempt.held_lift_m is not None:
+        evidence.append(f"Best two-second lift: {max(0, attempt.held_lift_m) * 100:.2f} cm.")
+    if attempt.peak_lift_m is not None:
+        evidence.append(f"Peak lift: {max(0, attempt.peak_lift_m) * 100:.2f} cm.")
+    if attempt.first_close_after_warmup_s is not None:
+        evidence.append(f"First recorded left-gripper close command: {attempt.first_close_after_warmup_s:.2f} s after warm-up.")
+    if attempt.outcome == "success":
+        return TrialDiagnosis(
+            code="passed", title="Lift and hold passed",
+            summary="The saved score confirms the apple met the height and hold rule.",
+            evidence=evidence,
+        )
+    target = threshold_m * 100
+    if attempt.peak_lift_m is None:
+        title, summary = "Cause unavailable", "The saved result records a miss without enough evidence to locate the cause."
+    elif attempt.peak_lift_m >= threshold_m:
+        title = "Lift was too brief"
+        summary = f"The apple reached {target:g} cm but did not stay there for two continuous seconds."
+    else:
+        title = "Lift stayed below target"
+        summary = f"The apple never reached the {target:g} cm target. The score alone cannot distinguish a missed grasp from a weak lift."
+    return TrialDiagnosis(
+        code="saved_score_only", title=title, summary=summary,
+        evidence=[*evidence, "Verified replay details are unavailable for this trial."],
+        next_step="Inspect the original trace or repeat the scene to see what happened at the grasp.",
+    )
 
 
 def write_json(path: Path, data: str) -> None:
@@ -108,11 +188,14 @@ def command(script: str, *args: str, timeout: int, cancel: Event | None = None) 
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.TimeoutExpired as exc:
-        raise SimulatorRunError("The simulator exceeded its time limit. Check Dream model availability.") from exc
+        raise SimulatorRunError(
+            "The simulator exceeded its time limit. Check Dream model availability.", "simulator_timeout",
+        ) from exc
     if result.returncode:
         # Child diagnostics can include provider responses. Only expose fixed guidance to chat.
         raise SimulatorRunError(
-            "A Dream rollout or local replay failed. Check the selected checkpoint and Dream access before retrying."
+            "A Dream rollout or local replay failed. Check the selected checkpoint and Dream access before retrying.",
+            "recording_failed" if script == "record_dream_model_rollout.py" else "replay_failed",
         )
     return result.stdout
 
@@ -137,6 +220,8 @@ class YamWorkflow:
         self.preflight = preflight
         self.list_finetunes = list_finetunes
         self.lock = Lock()
+        self._diagnosis_lock = Lock()
+        self._diagnosis_cache: OrderedDict[tuple[str, str, str], TrialDiagnosis] = OrderedDict()
         self.cancel = Event()
         self._reset_lock = Lock()
         self._reset_requested = Event()
@@ -384,28 +469,55 @@ class YamWorkflow:
             str(REQUESTS_PER_TRIAL), "--score-only", timeout=660, cancel=self._reset_requested,
         )
         args = ("--held-out-seed", str(seed)) if heldout else ()
-        score = workflow_result(str(folder), *args, cancel=self._reset_requested)
-        if (
-            score["seed"] != seed or score["checkpoint"] != checkpoint
-            or score["model_action_rows"] < MIN_ACTION_ROWS or score["height_source"] != "recorded"
-        ):
-            raise SimulatorRunError("A rollout ended before the full action budget or lacked recorded height.")
+        score = workflow_result(str(folder), *args, "--diagnose", cancel=self._reset_requested)
+        if score["seed"] != seed or score["checkpoint"] != checkpoint:
+            raise SimulatorRunError("The saved rollout did not match the selected scene and checkpoint.")
+        if score["model_action_rows"] < MIN_ACTION_ROWS:
+            raise SimulatorRunError("The rollout ended before the full action budget.", "short_recording")
+        if score["height_source"] != "recorded":
+            raise SimulatorRunError("The rollout lacked recorded apple height.", "missing_height")
+        try:
+            diagnosis = TrialDiagnosis.model_validate(score.get("diagnosis"))
+        except ValidationError:
+            score["diagnosis"] = None
+        else:
+            score["diagnosis"] = diagnosis
+            self._save_diagnosis(folder, checkpoint, seed, "success" if score["success"] else "failure", diagnosis)
         return score
+
+    @staticmethod
+    def _save_diagnosis(folder: Path, checkpoint: str, seed: int,
+                        outcome: Literal["success", "failure", "invalid"], diagnosis: TrialDiagnosis) -> None:
+        saved = SavedDiagnosis(checkpoint=checkpoint, seed=seed, outcome=outcome, diagnosis=diagnosis)
+        try:
+            folder.mkdir(exist_ok=True)
+            write_json(folder / "diagnosis.json", saved.model_dump_json())
+        except OSError:
+            # A derived diagnostic must not invalidate the authoritative score.
+            pass
 
     def _collect(self, job: YamJob, folder: Path, seeds: list[int]) -> None:
         eligible = folder / "failures"
         eligible.mkdir()
         failures = 0
+        diagnosed = []
         for index, seed in enumerate(seeds, 1):
             if self._stopped():
                 return
             self._update(message=f"Recording Dream-1 on training scene {index} of {job.total}.")
-            score = self._record(folder / f"training-{index}", BASE, seed)
+            try:
+                score = self._record(folder / f"training-{index}", BASE, seed)
+            except SimulatorRunError as exc:
+                diagnosed.append(TrainingTrialDiagnosis(scene=index, seed=seed, diagnosis=unverified_rollout(exc.code)))
+                self._update(training_trial_diagnostics=diagnosed.copy())
+                raise
+            if score.get("diagnosis") is not None:
+                diagnosed.append(TrainingTrialDiagnosis(scene=index, seed=seed, diagnosis=score["diagnosis"]))
             if not score["success"]:
                 source = Path(score["folder"])
                 source.rename(eligible / source.name)
                 failures += 1
-            self._update(completed=index)
+            self._update(completed=index, training_trial_diagnostics=diagnosed.copy())
         if self._stopped():
             return
         if failures == 0:
@@ -432,14 +544,97 @@ class YamWorkflow:
         with self.lock:
             write_json(folder / "comparison-evidence.json", snapshot.model_dump_json(indent=2))
 
-    def comparison(self, task_id: str) -> YamComparison | None:
+    def _comparison_snapshot(self, task_id: str) -> PairedRequest | None:
         path = self.root / task_id / "comparison-evidence.json"
         with self.lock:
             if not path.is_file():
                 return None
-            snapshot = PairedRequest.model_validate_json(path.read_text(encoding="utf-8"))
+            return PairedRequest.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def comparison(self, task_id: str) -> YamComparison | None:
+        snapshot = self._comparison_snapshot(task_id)
+        if snapshot is None:
+            return None
         return YamComparison(task_id=task_id, baseline=snapshot.plan.baseline_checkpoint,
                              candidate=snapshot.plan.candidate_checkpoint, report=evaluate_paired(snapshot))
+
+    def comparison_diagnostics(self, task_id: str) -> YamComparisonDiagnostics | None:
+        snapshot = self._comparison_snapshot(task_id)
+        if snapshot is None:
+            return None
+        plan = snapshot.plan
+        threshold = plan.simulator_hold_threshold_m or 0.08
+        trials = {}
+        for pair in snapshot.pairs:
+            for role, attempt in (("baseline", pair.baseline), ("candidate", pair.candidate)):
+                if attempt is None:
+                    continue
+                diagnosis = None
+                if (
+                    pair.scenario_id.isascii() and pair.scenario_id.isdecimal()
+                    and len(pair.scenario_id) <= 10 and len(plan.evaluation_id) == 32
+                    and all(char in "0123456789abcdef" for char in plan.evaluation_id)
+                ):
+                    seed = int(pair.scenario_id)
+                    expected = f"{plan.evaluation_id}-{seed}-{role}"
+                    if seed < 2**32 and attempt.trial_id == expected and attempt.source_uri == f"local-rollout://{expected}":
+                        diagnosis = self._local_trial_diagnosis(task_id, seed, attempt, threshold)
+                trials[attempt.trial_id] = diagnosis or saved_metrics_diagnosis(attempt, threshold)
+        return YamComparisonDiagnostics(evaluation_id=plan.evaluation_id, trials=trials)
+
+    def _local_trial_diagnosis(
+        self, task_id: str, seed: int, attempt: PairAttempt, threshold: float,
+    ) -> TrialDiagnosis | None:
+        task_folder = (self.root / task_id).resolve()
+        trial = (task_folder / attempt.trial_id).resolve()
+        if task_folder.parent != self.root.resolve() or trial.parent != task_folder or not trial.is_dir():
+            return None
+        try:
+            path = (trial / "diagnosis.json").resolve()
+            if path.parent == trial:
+                saved = SavedDiagnosis.model_validate_json(path.read_text(encoding="utf-8"))
+                if (saved.seed, saved.checkpoint, saved.outcome) == (seed, attempt.checkpoint_id, attempt.outcome):
+                    return saved.diagnosis
+        except (OSError, ValidationError):
+            pass
+        if attempt.outcome not in ("success", "failure"):
+            return None
+        key = (task_id, attempt.trial_id, attempt.outcome)
+        with self._diagnosis_lock:
+            if key in self._diagnosis_cache:
+                self._diagnosis_cache.move_to_end(key)
+                return self._diagnosis_cache[key]
+            diagnosis = self._replay_diagnosis(trial, seed, attempt) or saved_metrics_diagnosis(attempt, threshold)
+            self._diagnosis_cache[key] = diagnosis
+            if len(self._diagnosis_cache) > 128:
+                self._diagnosis_cache.popitem(last=False)
+            return diagnosis
+
+    @staticmethod
+    def _replay_diagnosis(trial: Path, seed: int, attempt: PairAttempt) -> TrialDiagnosis | None:
+        try:
+            [sidecar] = trial.glob("*/rollout.json")
+            parquet = sidecar.parent / "data/chunk-000/episode_000000.parquet"
+            if not sidecar.resolve().is_relative_to(trial) or not parquet.resolve().is_relative_to(trial):
+                return None
+            metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+            if (
+                metadata["status"] != "complete" or metadata["simulation"]["source"] != "model"
+                or metadata["simulation"]["seed"] != seed or metadata["checkpoint"] != attempt.checkpoint_id
+            ):
+                return None
+            score = workflow_result(str(trial), "--held-out-seed", str(seed), "--diagnose", timeout=15)
+            if (
+                score["seed"] != seed or score["checkpoint"] != attempt.checkpoint_id
+                or score["model_action_rows"] != attempt.model_action_rows
+                or score["success"] != (attempt.outcome == "success")
+                or score["height_source"] != attempt.height_source
+                or attempt.held_lift_m is None or abs(score["held_lift_m"] - attempt.held_lift_m) > 0.0001
+            ):
+                return None
+            return TrialDiagnosis.model_validate(score.get("diagnosis"))
+        except (OSError, ValueError, KeyError, TypeError, SimulatorRunError):
+            return None
 
     def _compare(self, job: YamJob, folder: Path, seeds: list[int], candidate: str) -> None:
         plan = PairPlan(
@@ -463,9 +658,10 @@ class YamWorkflow:
                 trial = f"{job.id}-{seed}-{role}"
                 try:
                     score = self._record(folder / trial, checkpoint, seed, heldout=True)
-                except SimulatorRunError:
+                except SimulatorRunError as exc:
                     if self._reset_requested.is_set():
                         return
+                    self._save_diagnosis(folder / trial, checkpoint, seed, "invalid", unverified_rollout(exc.code))
                     attempts[role] = PairAttempt(
                         trial_id=trial, episode_id=trial, checkpoint_id=checkpoint,
                         source_uri=f"local-rollout://{trial}", session_id=trial,
@@ -546,5 +742,13 @@ def yam_router(workflow: YamWorkflow) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Simulator task not found.") from exc
         return workflow.comparison(normalized)
+
+    @router.get("/comparisons/{task_id}/diagnostics", response_model=YamComparisonDiagnostics | None)
+    def comparison_diagnostics(task_id: str) -> YamComparisonDiagnostics | None:
+        try:
+            normalized = UUID(hex=task_id).hex
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Simulator task not found.") from exc
+        return workflow.comparison_diagnostics(normalized)
 
     return router

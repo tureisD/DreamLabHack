@@ -2,7 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 import type { ScenePreset } from './SceneTask';
 import type { PairedReport } from './StatisticalAudit';
 import { YamComparisonPlan, YamComparisonProgress } from './YamComparisonExplanation';
-import YamComparisonReview from './YamComparisonReview';
+import YamComparisonReview, { YamTrialDiagnosisDetails } from './YamComparisonReview';
+
+export type YamTrialDiagnosis = {
+  code: string;
+  title: string;
+  summary: string;
+  evidence: string[];
+  next_step: string | null;
+};
+
+export type YamComparisonDiagnostics = { evaluation_id: string; trials: Record<string, YamTrialDiagnosis> };
 
 export type YamJob = {
   id: string;
@@ -13,6 +23,7 @@ export type YamJob = {
   demos: number;
   state: 'running' | 'stopping' | 'completed' | 'cancelled' | 'failed';
   message: string;
+  training_trial_diagnostics?: { scene: number; seed: number; diagnosis: YamTrialDiagnosis }[];
 };
 
 export type TaskPipeline = {
@@ -114,8 +125,18 @@ export default function YamChatWorkflow({
         </>}
       </div>
       {running && <button type="button" className="yam-secondary" disabled={busy} onClick={() => void act(stop)}>Quit run</button>}
-      {job.kind === 'comparison' && job.state === 'completed' && <YamComparisonReview
-        key={job.id} job={job} report={comparisonReport} onConfirmFresh={ready && dreamReady ? planFreshComparison : undefined} />}
+      {job.kind === 'comparison' && (job.state === 'completed' || Boolean(comparisonReport?.pairs.length)) && <YamComparisonReview
+        key={job.id} job={job} report={comparisonReport}
+        onConfirmFresh={!running && ready && dreamReady ? planFreshComparison : undefined} />}
+      {job.kind === 'collection' && Boolean(job.training_trial_diagnostics?.length) && <details className="yam-comparison-review">
+        <summary>Training scene diagnoses</summary>
+        <ol className="yam-diagnostic-list">
+          {job.training_trial_diagnostics?.map(({ scene, diagnosis }) => <li className="yam-diagnostic-scene" key={scene}>
+            <h3>Scene {scene}</h3>
+            <YamTrialDiagnosisDetails diagnosis={diagnosis} />
+          </li>)}
+        </ol>
+      </details>}
     </div>}
 
     {mode === 'scene' && <div className="yam-panel">

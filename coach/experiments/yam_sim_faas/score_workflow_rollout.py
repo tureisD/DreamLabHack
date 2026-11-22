@@ -13,6 +13,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("rollout", type=Path)
     parser.add_argument("--held-out-seed", type=int)
+    parser.add_argument("--diagnose", action="store_true", help="Explain the recorded task outcome.")
     parser.add_argument("--collect-into", type=Path)
     parser.add_argument("--max-demos", type=int, default=4)
     args = parser.parse_args()
@@ -32,6 +33,7 @@ def main() -> None:
         sidecar.parent,
         training_candidate=held_out is None,
         evaluation_seeds=None if held_out is None else {held_out},
+        diagnostics=args.diagnose,
     )
     print("WORKFLOW_RESULT=" + json.dumps({**result, "started_at": metadata["started_at_utc"]}))
 

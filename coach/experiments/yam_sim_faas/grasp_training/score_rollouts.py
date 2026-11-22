@@ -9,13 +9,15 @@ import pyarrow.parquet as pq
 from batch import CONFIRMATION, HOLDOUT, SECOND_CONFIRMATION, SEEDS
 from build_batch import initialize_replay
 from record_yam_demos import TASK, YamEnv
+from rollout_diagnosis import GraspReplay, diagnose_rollout
 
 RESERVED = HOLDOUT | CONFIRMATION | SECOND_CONFIRMATION
 PREVIOUS_TRAINING = set().union(*SEEDS.values())
 
 
 def score(
-    folder: Path, *, training_candidate: bool = False, evaluation_seeds: set[int] | None = None
+    folder: Path, *, training_candidate: bool = False, evaluation_seeds: set[int] | None = None,
+    diagnostics: bool = False,
 ) -> dict:
     info = json.loads((folder / "rollout.json").read_text(encoding="utf-8"))
     scene = info["simulation"]
@@ -40,6 +42,7 @@ def score(
         raise ValueError(f"{folder}: no complete model action chunk")
 
     env = YamEnv()
+    replay_diagnosis = GraspReplay(env) if diagnostics else None
     heights = []
     max_state_error = 0.0
     try:
@@ -48,6 +51,8 @@ def score(
             measured = env.state()
             actual = np.r_[measured["right"], measured["left"]]
             max_state_error = max(max_state_error, float(np.max(np.abs(states[index] - actual))))
+            if replay_diagnosis is not None:
+                replay_diagnosis.observe(env)
             env.step(row[7:], row[:7])
             heights.append(float(env.data.body("apple").xpos[2]))
     finally:
@@ -71,7 +76,7 @@ def score(
     held_by_start = np.min(np.lib.stride_tricks.sliding_window_view(rise, 41), axis=1)
     held_start = int(np.argmax(held_by_start))
     held = float(held_by_start[held_start])
-    return {
+    result = {
         "folder": str(folder.resolve()),
         "seed": scene["seed"],
         "checkpoint": info["checkpoint"],
@@ -87,13 +92,17 @@ def score(
         "held_window_start_s": held_start / 20,
         "success": held >= 0.08,
     }
+    if replay_diagnosis is not None:
+        result["diagnosis"] = diagnose_rollout(actions, rise, replay_diagnosis, result["height_source"])
+    return result
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("folders", nargs="+", type=Path, help="Completed held-out model rollout folders")
+    parser.add_argument("--diagnose", action="store_true", help="Explain recorded task outcomes.")
     args = parser.parse_args()
-    print(json.dumps([score(folder) for folder in args.folders], indent=2))
+    print(json.dumps([score(folder, diagnostics=args.diagnose) for folder in args.folders], indent=2))
 
 
 if __name__ == "__main__":

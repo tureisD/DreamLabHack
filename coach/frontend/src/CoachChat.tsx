@@ -7,7 +7,7 @@ import ChatToolPanel, { type ChatTool } from './ChatToolPanel';
 import SceneTask, { type ScenePreset } from './SceneTask';
 import SimCorrect from './SimCorrect';
 import type { PairedReport } from './StatisticalAudit';
-import YamChatWorkflow, { type SimulatorMode, type TaskPipeline, type YamJob } from './YamChatWorkflow';
+import YamChatWorkflow, { type SimulatorMode, type TaskPipeline, type YamComparisonDiagnostics, type YamJob } from './YamChatWorkflow';
 import { YamComparisonPlan } from './YamComparisonExplanation';
 
 type Screen = 'preflight' | 'tasks' | 'demos' | 'training' | 'evaluation' | 'statistical';
@@ -28,6 +28,7 @@ type WorkSurface =
 const hosted = Boolean(document.querySelector('meta[name="dreamcoach-mode"][content="hosted"]'));
 
 const simulatorHelpPattern = /simulator screen|set up the YAM simulator/i;
+const trialExplanationPattern = /diagnos|what went wrong|(?:why|explain).*(?:run|trial|comparison|pick|scene|grasp|fail|result|miss|robot)/i;
 
 async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(path, { method, cache: 'no-store', headers: body === undefined ? undefined : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -165,7 +166,7 @@ export default function CoachChat({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function workflowState(taskId = activeTaskId, mode = simulatorMode) {
+  async function workflowState(taskId = activeTaskId, mode = simulatorMode, includeTrialDiagnoses = false) {
     const version = sessionVersion.current;
     const [dream, preflight, current, sim, latestWorkflow] = await Promise.all([
       api<Account>('/api/account/status'),
@@ -190,10 +191,31 @@ export default function CoachChat({
       api<unknown[]>(`/api/tasks/${current.id}/evaluations`),
       api<{ report: PairedReport } | null>(`/api/simulator/comparisons/${current.id}`),
     ]) : null;
-    const report = taskData?.[5]?.report ?? null;
+    const savedReport = taskData?.[5]?.report ?? null;
+    const report = workflow?.kind === 'comparison' && savedReport?.evaluation_id !== workflow.id ? null : savedReport;
+    const diagnostics = includeTrialDiagnoses && current && report
+      ? await api<YamComparisonDiagnostics | null>(`/api/simulator/comparisons/${current.id}/diagnostics`).catch(() => null)
+      : null;
+    const pairedDiagnoses = report && diagnostics?.evaluation_id === report.evaluation_id
+      ? report.pairs.flatMap((pair, index) => (['baseline', 'candidate'] as const).flatMap((model) => {
+        const attempt = pair[model];
+        if (!attempt) return [];
+        const diagnosis = diagnostics.trials[attempt.trial_id];
+        return diagnosis ? [{ scene: index + 1, model, outcome: attempt.outcome, diagnosis }] : [];
+      }))
+      : [];
+    const trialDiagnoses = includeTrialDiagnoses ? [
+      ...pairedDiagnoses,
+      ...(workflow?.training_trial_diagnostics ?? []).map(({ scene, diagnosis }) => ({
+        scene, model: 'baseline', outcome: undefined, diagnosis,
+      })),
+    ].slice(0, 8).map(({ diagnosis, ...trial }) => ({
+      ...trial, ...diagnosis, evidence: diagnosis.evidence.slice(0, 2),
+    })) : [];
     return {
       simulator_mode: mode,
-      simulator_comparison: report && (workflow?.kind !== 'comparison' || report.evaluation_id === workflow.id) ? {
+      simulator_trial_diagnostics: trialDiagnoses,
+      simulator_comparison: report ? {
         decision: report.decision,
         baseline_successes: report.baseline_successes, baseline_attempted: report.baseline_attempted,
         candidate_successes: report.candidate_successes, candidate_attempted: report.candidate_attempted,
@@ -230,7 +252,10 @@ export default function CoachChat({
     const version = sessionVersion.current;
     setBusy(true); setError('');
     try {
-      const state = stage === 'introduction' ? { introduction_only: true } : await workflowState(taskId, mode);
+      const lastMessage = history[history.length - 1];
+      const state = stage === 'introduction' ? { introduction_only: true } : await workflowState(
+        taskId, mode, lastMessage?.role === 'user' && trialExplanationPattern.test(lastMessage.content),
+      );
       if (version !== sessionVersion.current) return;
       const transcript = history.slice(-24).map(({ role, content }) => ({ role, content }));
       const result = await api<Reply>('/api/assistant/chat', 'POST', { messages: transcript, state, stage });

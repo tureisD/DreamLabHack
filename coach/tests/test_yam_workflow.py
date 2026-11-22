@@ -126,6 +126,78 @@ def test_chat_collection_and_live_paired_comparison(tmp_path, monkeypatch):
     assert reloaded.get(url).json()["report"] == report
 
 
+def test_saved_comparison_diagnostics_replay_verified_trace_once(tmp_path, monkeypatch):
+    client = TestClient(create_app(store=EpisodeStore(tmp_path)))
+    task_id, evaluation_id = "0" * 32, "1" * 32
+    seed = 2**31 + 5
+    folder = tmp_path / "yam-workflow" / task_id
+    folder.mkdir()
+    url = f"/api/simulator/comparisons/{task_id}"
+    assert client.get(f"{url}/diagnostics").json() is None
+
+    def saved_attempt(role, checkpoint):
+        trial = f"{evaluation_id}-{seed}-{role}"
+        source = folder / trial / "recorded"
+        source.mkdir(parents=True)
+        (source / "rollout.json").write_text(json.dumps({
+            "status": "complete",
+            "simulation": {"source": "model", "seed": seed},
+            "checkpoint": checkpoint if role == "baseline" else "test/wrong-checkpoint",
+        }), encoding="utf-8")
+        return {
+            "trial_id": trial, "episode_id": trial, "checkpoint_id": checkpoint,
+            "source_uri": f"local-rollout://{trial}", "session_id": trial,
+            "outcome": "failure", "training_exposure": "held_out",
+            "model_action_rows": MIN_ACTION_ROWS, "held_lift_m": 0.02, "peak_lift_m": 0.09,
+            "height_source": "recorded",
+        }
+
+    baseline = saved_attempt("baseline", BASE)
+    candidate = saved_attempt("candidate", CANDIDATE)
+    proof = folder / "comparison-evidence.json"
+    proof.write_text(json.dumps({
+        "plan": {
+            "evaluation_id": evaluation_id, "task": PROMPT, "success_rule": SUCCESS_RULE,
+            "baseline_checkpoint": BASE, "candidate_checkpoint": CANDIDATE,
+            "collection_mode": "simulation", "planned_pairs": 1,
+            "reset_protocol": "Repeat seed.", "assignment_protocol": "Base first.",
+            "simulator_hold_threshold_m": 0.08, "required_model_rows": MIN_ACTION_ROWS,
+            "created_at": dt.datetime.now(dt.UTC).isoformat(),
+        },
+        "pairs": [{"pair_id": str(seed), "scenario_id": str(seed), "baseline": baseline, "candidate": candidate}],
+    }), encoding="utf-8")
+    original = proof.read_bytes()
+    diagnosis = {
+        "code": "grip_lost", "title": "Lift was too brief",
+        "summary": "The recorded height dropped below the threshold.",
+        "evidence": ["The peak lift was 9 cm."], "next_step": "Inspect the grasp while lifting.",
+    }
+    scored = []
+
+    def replay(trial, *options, **_kwargs):
+        assert Path(trial).name == baseline["trial_id"]
+        assert options == ("--held-out-seed", str(seed), "--diagnose")
+        scored.append(trial)
+        return {
+            "seed": seed, "checkpoint": BASE, "model_action_rows": MIN_ACTION_ROWS,
+            "height_source": "recorded", "success": False, "held_lift_m": 0.02,
+            "diagnosis": diagnosis,
+        }
+
+    monkeypatch.setattr(yam_workflow, "workflow_result", replay)
+    response = client.get(f"{url}/diagnostics")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["evaluation_id"] == evaluation_id
+    assert result["trials"][baseline["trial_id"]] == diagnosis
+    fallback = result["trials"][candidate["trial_id"]]
+    assert fallback["code"] == "saved_score_only"
+    assert fallback["summary"] == "The apple reached 8 cm but did not stay there for two continuous seconds."
+    assert client.get(f"{url}/diagnostics").json() == result
+    assert len(scored) == 1
+    assert proof.read_bytes() == original
+
+
 def test_bundled_data_is_available_without_dream_access(tmp_path):
     client = TestClient(create_app(store=EpisodeStore(tmp_path)))
     response = client.post("/api/simulator/collect", json={"source": "bundled"})
