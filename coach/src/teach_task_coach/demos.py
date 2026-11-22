@@ -151,6 +151,15 @@ def read_demo(folder: Path, task_id: str) -> Demo:
             if actions.ndim != 2 or actions.shape[0] != frames:
                 findings.append(DemoFinding(code="action_rows", severity="error", message="Action rows do not match metadata."))
             elif actions.shape[0] > 1:
+                if (folder / "click_correction.json").is_file() and actions.shape[1] == 14:
+                    # The YAM click teacher holds the unused arm fixed. Its wrist
+                    # image can be identical for seconds without a camera fault.
+                    for role, arm in (("wrist_r", actions[:, :7]), ("wrist_l", actions[:, 7:])):
+                        if np.max(np.abs(np.diff(arm, axis=0))) < 0.001:
+                            findings = [finding for finding in findings if not (
+                                finding.code == "frozen_camera" and
+                                f"observation.images.{role}" in finding.message
+                            )]
                 movement = np.linalg.norm(np.diff(actions, axis=0), axis=1)
                 moving = np.flatnonzero(movement > 0.005)
                 stationary_share = float(np.mean(movement <= 0.005))

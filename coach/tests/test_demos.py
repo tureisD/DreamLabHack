@@ -96,6 +96,34 @@ def test_demo_qc_does_not_call_named_gripper_close_a_joint_jerk(tmp_path):
     assert "abrupt_action" in {finding.code for finding in demo.findings}
 
 
+def test_simulator_inactive_wrist_is_not_reported_as_broken_camera(tmp_path):
+    folder = make_demo(tmp_path)
+    info_path = folder / "meta/info.json"
+    info = json.loads(info_path.read_text())
+    info["features"]["action"]["shape"] = [14]
+    info["features"]["observation.images.wrist_r"] = {"shape": [3, 48, 64]}
+    info_path.write_text(json.dumps(info))
+    wrist = folder / "videos/chunk-000/observation.images.wrist_r/episode_000000.mp4"
+    wrist.parent.mkdir(parents=True)
+    frame = av.VideoFrame.from_ndarray(np.random.default_rng(7).integers(
+        0, 256, (48, 64, 3), dtype=np.uint8), format="rgb24")
+    with av.open(str(wrist), mode="w") as container:
+        stream = container.add_stream("mpeg4", rate=20)
+        stream.width, stream.height = 64, 48
+        stream.pix_fmt = "yuv420p"
+        for _ in range(100):
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+    actions = [[0.0] * 7 + [index * 0.01] + [0.0] * 6 for index in range(100)]
+    pq.write_table(pa.table({"action": pa.array(actions)}),
+                   folder / "data/chunk-000/episode_000000.parquet")
+    assert "frozen_camera" in {finding.code for finding in read_demo(folder, "task").findings}
+    (folder / "click_correction.json").write_text('{}')
+    assert "frozen_camera" not in {finding.code for finding in read_demo(folder, "task").findings}
+
+
 def test_demo_import_review_and_coverage_plan(tmp_path):
     source = tmp_path / "demos"
     source.mkdir()

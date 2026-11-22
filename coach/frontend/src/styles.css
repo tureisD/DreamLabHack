@@ -203,3 +203,10 @@ button.secondary { background: #e6eef2; color: #23546a; }
 .chat-footer button, .chat-action .secondary { background: #e6f1f5; color: #176883; }
 .chat-setup .chat-secret { margin-top: 20px; }
 @media (max-width: 700px) { .chat-thread { min-height: 300px; padding: 16px; } .chat-bubble { max-width: 95%; } .chat-action, .chat-composer { margin: 12px; padding: 12px; } .chat-footer { padding: 0 12px 15px; } }
+
+.sim-image-wrap { position: relative; width: min(100%, 640px); margin: 18px 0; }
+.sim-image-wrap img { display: block; width: 100%; height: auto; border-radius: 12px; cursor: crosshair; }
+.sim-marker, .sim-click { position: absolute; transform: translate(-50%, -50%); border-radius: 999px; pointer-events: none; font-size: 11px; font-weight: 700; }
+.sim-marker { padding: 3px 6px; background: #fffdf0d9; color: #302b29; border: 1px solid #e5b992; }
+.sim-click { display: grid; place-items: center; width: 25px; height: 25px; color: #fff; background: #a42a2a; border: 2px solid #fff; box-shadow: 0 1px 5px #0008; }
+.sim-correct .training-controls { margin-top: 16px; }

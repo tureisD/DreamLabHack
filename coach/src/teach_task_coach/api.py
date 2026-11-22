@@ -58,6 +58,7 @@ from teach_task_coach.preflight import PreflightResult, PreflightService
 from teach_task_coach.repair import RepairReport, RepairRequest, RepairStore, RepairStudy
 from teach_task_coach.rollout_audit import IntentAudit, audit_rollout
 from teach_task_coach.scene import PlacementResult, SceneAdapter
+from teach_task_coach.sim_correction import SimCorrectionService
 from teach_task_coach.station import StationRejected, StationUnavailable
 from teach_task_coach.storage import EpisodeStore
 from teach_task_coach.tasks import Task, TaskInput, TaskStore, Trial, TrialInput, TrialStateError
@@ -68,6 +69,14 @@ from teach_task_coach.trials import TrialError, TrialRunner
 class ImportResult(BaseModel):
     imported: int
     skipped: list[str]
+
+
+class SimCorrectionInput(BaseModel):
+    kind: Literal["lift", "bowl"]
+    fruit: Literal["apple", "banana"]
+    seed: int = Field(ge=0, le=2**32 - 1)
+    object_pixel: tuple[float, float]
+    target_pixel: tuple[float, float] | None = None
 
 
 class StatisticalPlanRequest(BaseModel):
@@ -187,6 +196,7 @@ def create_app(
     runner = trial_runner or TrialRunner(tasks, episodes, preflight.station, rollouts)
     demos = demo_store or DemoStore(episodes.data_dir)
     recorder = demo_scanner or DemoScanner()
+    sim_correction = SimCorrectionService(recorder.root, demos)
     teleop = SO101Recorder(recorder, preflight.station)
     faas = faas_store or FaaSStore(episodes.data_dir)
     dream = dream_gateway or DreamGateway()
@@ -235,6 +245,32 @@ def create_app(
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/sim-correction/scene")
+    def sim_correction_scene(fruit: str = "apple", seed: int = 41) -> dict:
+        try:
+            return sim_correction.preview(fruit, seed)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post("/api/tasks/{task_id}/sim-correction")
+    def start_sim_correction(task_id: str, value: SimCorrectionInput) -> dict:
+        task = tasks.get_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        try:
+            return sim_correction.start(task_id, task.prompt, value.kind, value.fruit,
+                                        value.seed, value.object_pixel, value.target_pixel)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/sim-correction/status")
+    def sim_correction_status() -> dict:
+        return sim_correction.status()
 
     @app.post("/api/coach-effect/analyze")
     def analyze_operator_study(value: CoachEffectInput) -> dict:
