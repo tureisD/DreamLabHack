@@ -14,6 +14,7 @@ def test_bowl_evaluation_scores_a_real_scripted_release(tmp_path, monkeypatch):
     from click_to_correct import Goal, execute
     from record_yam_demos import recording
     from score_rollouts import score
+    from score_workflow_rollout import score_trial
 
     seed = 2**31 + 41
     with recording(tmp_path, BOWL_PROMPT, "fixture/bowl", seed, "model", videos=False) as (env, details):
@@ -23,8 +24,9 @@ def test_bowl_evaluation_scores_a_real_scripted_release(tmp_path, monkeypatch):
             state = env.state()
             env.step(state["left"], state["right"])
         details.update(model_action_rows=576, split="heldout")
-    result = score(env.folder, evaluation_seeds={seed}, diagnostics=True)
+    result = score_trial(tmp_path, seed, diagnose=True)
     assert result["success"]
+    assert result["task"] == BOWL_PROMPT and result["started_at"]
     assert result["bowl_placement"]["settled_s"] >= 1
     assert result["diagnosis"]["code"] == "bowl_placed"
     with pytest.raises(ValueError, match="not an eligible"):

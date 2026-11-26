@@ -473,6 +473,7 @@ def test_bowl_comparison_uses_verified_demos_and_frozen_placement_rule(tmp_path,
         return {
             "started_at": dt.datetime.now(dt.UTC), "success": placed,
             "held_lift_m": 0.1, "peak_lift_m": 0.13,
+            "duration_s": 33, "first_close_after_warmup_s": 2.5,
             "model_action_rows": MIN_ACTION_ROWS, "replay_max_state_error": 0.001,
             "bowl_placement": {
                 "settled_s": 1.5 if placed else 0, "final_distance_m": 0.024 if placed else 0.21,
