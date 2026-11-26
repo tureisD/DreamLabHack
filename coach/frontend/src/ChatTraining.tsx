@@ -207,10 +207,10 @@ export default function ChatTraining({ taskId, onClose, onCheckpointReady }: {
         </select></label>
         <button type="button" disabled={!embodiment || !keptDemos.length || busy} onClick={validateDataset}>Validate dataset</button>
       </div>}
-      {embodiments && cameraRoles.length > 0 && !matchingBodies?.length && <p>
-        Register a setup with these camera roles in your Dream Labs account: {cameraRoles.join(', ')}.{' '}
+      {embodiments && cameraRoles.length > 0 && !matchingBodies?.length && <div className="chat-workspace-actions">
+        <p>Register a setup with these camera roles in your Dream Labs account: {cameraRoles.join(', ')}.</p>
         <button type="button" className="secondary" onClick={() => setBodyReload((value) => value + 1)}>Refresh setups</button>
-      </p>}
+      </div>}
     </>}
     {!showPreparation && dataset?.status === 'pending_validation' && !job && <p className="chat-training-status" role="status">
       Validating {dataset.demo_ids.length} {dataset.demo_ids.length === 1 ? 'demonstration' : 'demonstrations'} in the background.

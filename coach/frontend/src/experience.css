@@ -6,6 +6,7 @@
   --paper: #fffaf5;
   --wash: #ffeddf;
   --panel-shadow: 0 2px 2px #6135200e, 0 24px 64px #69453139, 0 0 0 1px #a8725d26;
+  --chat-gutter: clamp(14px, 3vw, 25px);
   position: relative;
   isolation: isolate;
   min-height: 100dvh;
@@ -100,7 +101,8 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
 
 .coach-experience .chat-panel-top {
   flex-basis: 60px;
-  padding-inline: clamp(16px, 3vw, 25px);
+  gap: 10px;
+  padding-inline: var(--chat-gutter);
   border-bottom: 1px solid var(--edge);
   background: linear-gradient(100deg, #fff9ee, #ffebda 64%, #fae2dc);
 }
@@ -132,7 +134,7 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
 .coach-experience .chat-page .chat-thread {
   background: linear-gradient(147deg, #fffdf9 30%, #fff5ed 100%);
   backdrop-filter: none;
-  padding: clamp(14px, 3vw, 25px);
+  padding: var(--chat-gutter);
   scrollbar-color: #dfb8a0 transparent;
 }
 
@@ -158,6 +160,43 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
   color: var(--muted);
 }
 
+.coach-experience :where(button) {
+  min-height: 44px;
+  min-width: 0;
+  max-width: 100%;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.coach-experience :is(.chat-reset, .yam-primary, .yam-secondary, .role-tabs button) {
+  padding-block: 9px;
+}
+
+.coach-experience .chat-begin,
+.coach-experience .chat-page .chat-composer,
+.coach-experience .chat-suggestions {
+  padding-inline: var(--chat-gutter);
+}
+
+.coach-experience .chat-suggestions > div {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.coach-experience .chat-suggestions[aria-label="Quick starts"] > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: fit-content;
+  max-width: calc(100% + 8px);
+}
+
+.coach-experience .chat-suggestions[aria-label="Quick starts"] button { text-align: center; }
+.coach-experience .chat-suggestions button { flex: 0 1 auto; }
+.coach-experience .chat-secret { align-items: stretch; }
+.coach-experience :is(.chat-secret input, .chat-page .chat-composer textarea) { min-height: 44px; }
+.coach-experience .chat-begin p { min-width: 0; }
+
 .coach-experience .chat-begin,
 .coach-experience .chat-page .chat-composer { border-top-color: var(--edge); }
 
@@ -178,6 +217,61 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
 .coach-experience :where(button, summary, a, textarea, input, select):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
+}
+
+.coach-experience :is(.chat-workspace-header, .chat-training-header) { gap: 12px 16px; }
+.coach-experience :is(.chat-workspace-header, .chat-training-header) > :first-child { min-width: 0; }
+.coach-experience .chat-workspace-actions { gap: 10px; max-width: 100%; }
+.coach-experience .chat-workspace-actions > button { flex: 0 1 auto; }
+.coach-experience .chat-workspace-actions > :where(button, small) { min-width: 0; }
+.coach-experience .chat-inventory > .chat-workspace-actions { margin-top: 12px; }
+.coach-experience .chat-training-approval p { margin: 0; }
+.coach-experience .chat-training-approval .chat-workspace-actions { margin-top: 2px; }
+
+.coach-experience :is(.chat-thread, .coach-evidence-page) :is(
+  .training-controls input:not([type="checkbox"]), .training-controls select,
+  .chat-workspace-field select, .yam-scene-count select, .audit-plan-grid input,
+  .horizon-explorer-picker select, .trial-create-form input, .trial-create-form select
+) {
+  min-height: 44px;
+  max-width: 100%;
+}
+
+.coach-experience .chat-tool-body { container: chat-tools / inline-size; }
+.coach-experience .chat-tool-body :where(input, select, textarea) { min-width: 0; max-width: 100%; }
+.coach-experience .chat-tool-body > .page:not(.task-workspace) { display: grid; gap: 16px; }
+.coach-experience .chat-tool-body > .page > :is(.header, .card) { min-width: 0; margin-block: 0; }
+.coach-experience .chat-tool-body .header { flex-flow: row wrap; justify-content: space-between; text-align: left; }
+.coach-experience :where(.chat-tool-body, .coach-evidence-page) .trial-actions { flex-wrap: wrap; gap: 10px; }
+
+@container chat-tools (max-width: 590px) {
+  .chat-tool-body :is(.task-workspace, .runs-layout, .checks) { grid-template-columns: minmax(0, 1fr); }
+  .chat-tool-body .task-sidebar { border: 0; border-bottom: 1px solid var(--edge); padding: 0 0 12px; }
+  .chat-tool-body .trial-create-form { grid-template-columns: minmax(0, 1fr); }
+  .chat-tool-body .trial-create-submit { justify-self: start; }
+}
+
+.coach-experience .yam-chat-workflow { gap: 12px; }
+.coach-experience .yam-workflow-options,
+.coach-experience .yam-presets { gap: 8px; }
+.coach-experience .yam-chat-workflow .yam-choice { padding-block: 11px; }
+.coach-experience .yam-panel { gap: 12px; }
+.coach-experience .yam-panel,
+.coach-experience .yam-job,
+.coach-experience .yam-setup { padding: 12px; }
+
+@container yam-card (max-width: 295px) {
+  .coach-experience .yam-workflow-options,
+  .coach-experience .yam-presets { grid-template-columns: minmax(0, 1fr); }
+  .coach-experience .yam-chat-workflow .yam-choice {
+    grid-template-columns: 30px minmax(0, 1fr);
+    justify-items: start;
+    text-align: left;
+    padding-inline: 12px;
+  }
+  .coach-experience .yam-chat-workflow .yam-choice small { display: block; grid-column: 2; }
+  .coach-experience .yam-preset-mark { grid-row: span 2; }
+  .coach-experience .yam-next { justify-content: flex-start; }
 }
 
 .coach-evidence {
@@ -248,7 +342,7 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
 .coach-evidence-page :is(.audit-table th, .audit-table td, .audit-file textarea, .horizon-explorer-scene) {
   border-color: var(--edge);
 }
-.coach-evidence-page code { overflow-wrap: anywhere; }
+.coach-experience :where(.chat-tool-body, .coach-evidence-page) code { overflow-wrap: anywhere; }
 
 .coach-evidence-page button { background: #974b30; color: #fff9f1; }
 .coach-evidence-page button:enabled:hover { background: #783922; }
@@ -305,7 +399,15 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
   .coach-experience::before { background-position: 29% center; }
   .coach-experience :is(.chat-page, .coach-evidence-page) { padding-inline: 12px; }
   .coach-experience .chat-page .chat-shell { height: max(365px, calc(100dvh - 272px)); border-radius: 19px; }
-  .coach-experience .chat-panel-top { flex-basis: 49px; }
+  .coach-experience .chat-panel-top { flex-basis: 56px; }
   .coach-experience .chat-bubble { max-width: 100%; }
   .coach-mark { width: 41px; height: 41px; border-radius: 13px; font-size: 24px; }
+}
+
+@media (max-width: 480px) {
+  .coach-experience .chat-secret input { flex-basis: 100%; }
+  .coach-experience .chat-secret button { align-self: flex-start; }
+  .coach-experience .chat-inventory { padding-inline: 12px; }
+  .coach-experience .chat-suggestions button { padding-inline: 9px; }
+  .coach-experience .chat-suggestions > div { gap: 7px; }
 }

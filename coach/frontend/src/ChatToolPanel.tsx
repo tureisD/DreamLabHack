@@ -59,9 +59,11 @@ export default function ChatToolPanel({ tool, onClose, onOpen, onTaskSelected, o
   return <section className="chat-inline-workspace chat-tool-panel" aria-label={titles[tool.kind]}>
     <header className="chat-workspace-header">
       <h2>{titles[tool.kind]}</h2>
-      {tool.kind === 'runs' && <button type="button" className="secondary"
-        onClick={() => onOpen({ kind: 'baseline', taskId: tool.taskId })}>Back to trials</button>}
-      <button type="button" className="secondary" onClick={onClose}>Back to chat</button>
+      <div className="chat-workspace-actions">
+        {tool.kind === 'runs' && <button type="button" className="secondary"
+          onClick={() => onOpen({ kind: 'baseline', taskId: tool.taskId })}>Back to trials</button>}
+        <button type="button" className="secondary" onClick={onClose}>Back to chat</button>
+      </div>
     </header>
     <div className="chat-tool-body">{content}</div>
   </section>;

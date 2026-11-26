@@ -156,12 +156,14 @@ export default function StatisticalAudit({ embedded = false }: { embedded?: bool
     <section className="card">
       <h2>Matched fine-tune comparison</h2>
       <p>Analyze predeclared scene pairs. Physical pairs with reviewed outcomes can receive a conservative interval. Simulator pairs show measured task outcomes without a real-robot or deployment claim.</p>
-      <button type="button" className="secondary" disabled={pairedBusy} onClick={() => void loadAppleDemo()}>
-        Analyze varied 500-step apple demo
-      </button>
-      <button type="button" className="secondary" disabled={pairedBusy} onClick={() => void loadAppleDemo('/api/paired-evaluations/demo/second-account')}>
-        Analyze independent 500-step apple demo
-      </button>
+      <div className="chat-workspace-actions">
+        <button type="button" className="secondary" disabled={pairedBusy} onClick={() => void loadAppleDemo()}>
+          Analyze varied 500-step apple demo
+        </button>
+        <button type="button" className="secondary" disabled={pairedBusy} onClick={() => void loadAppleDemo('/api/paired-evaluations/demo/second-account')}>
+          Analyze independent 500-step apple demo
+        </button>
+      </div>
       <label className="audit-file">Or load a paired JSON snapshot
         <input type="file" accept=".json,application/json" onChange={async (event) => {
           const file = event.target.files?.[0];
