@@ -937,6 +937,8 @@ def create_app(
     @app.post("/api/trials/{trial_id}/reconcile", response_model=Trial)
     def reconcile_trial(trial_id: str) -> Trial:
         require_live_trial(trial_id)
+        if not station_movement.acquire(blocking=False):
+            raise HTTPException(status_code=409, detail="Wait for station start or scene placement to finish.")
         try:
             return runner.reconcile_start(trial_id)
         except KeyError as exc:
@@ -945,6 +947,8 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except StationUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        finally:
+            station_movement.release()
 
     @app.post("/api/trials/{trial_id}/label", response_model=Trial)
     def label_trial(trial_id: str, label: TrialLabel) -> Trial:

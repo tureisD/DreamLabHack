@@ -407,6 +407,9 @@ def test_configured_fixture_places_scene_before_evaluation_start(tmp_path):
             assert tasks.get_trial(trial.id).status == "starting"
             assert local.post(f"/api/trials/{trial.id}/prepare-scene").status_code == 409
             assert local.post(f"/api/trials/{trial.id}/start").status_code == 409
+            reconcile = local.post(f"/api/trials/{trial.id}/reconcile")
+            assert reconcile.status_code == 409
+            assert "scene placement" in reconcile.json()["detail"]
         finally:
             fixture.finish.set()
         assert result.result(timeout=5).status_code == 200
