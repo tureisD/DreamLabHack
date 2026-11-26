@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Evaluation, Report } from './Evaluation';
 import type { PairedReport } from './StatisticalAudit';
+import type { SimulatorMode } from './YamChatWorkflow';
 import './MeasuredEvidenceTeaser.css';
 
 type LiveResult = {
@@ -98,9 +99,10 @@ export function useLiveEvaluation(taskId: string, comparisonId?: string) {
   };
 }
 
-export default function LiveEvaluation({ taskId, simulatorActive, onOpen, onEvidence, evidence }: {
+export default function LiveEvaluation({ taskId, simulatorMode, allowPhysicalPlanning, onOpen, onEvidence, evidence }: {
   taskId: string;
-  simulatorActive: boolean;
+  simulatorMode?: SimulatorMode;
+  allowPhysicalPlanning: boolean;
   onOpen: (taskId?: string, evaluationId?: string) => void;
   onEvidence: () => void;
   evidence: ReturnType<typeof useLiveEvaluation>;
@@ -161,9 +163,10 @@ export default function LiveEvaluation({ taskId, simulatorActive, onOpen, onEvid
         Open evaluation
       </button>
     </div>}
-    {taskId && result === null && !sim && (simulatorActive
+    {taskId && result === null && !sim && (simulatorMode === 'apple'
       ? <p>Run a matched comparison from chat when a checkpoint is ready.</p>
-      : <button type="button" className="live-eval-link" onClick={() => onOpen(taskId)}>Plan a physical evaluation</button>)}
+      : <>{simulatorMode && <p>Automatic simulator comparisons are available for Apple pickup.</p>}
+        {allowPhysicalPlanning && <button type="button" className="live-eval-link" onClick={() => onOpen(taskId)}>Plan a physical evaluation</button>}</>)}
     {!sim && !current && <div className="measured-evidence-teaser">
       <span>Measured YAM simulator case</span>
       <strong>14/19 → 19/19</strong>

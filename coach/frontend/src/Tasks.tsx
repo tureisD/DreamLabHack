@@ -22,7 +22,12 @@ async function requestJson<T>(url: string, method = 'GET', body?: unknown): Prom
   return (await response.json()) as T;
 }
 
-export default function Tasks() {
+export default function Tasks({ initialTaskId = '', embedded = false, onTaskSelected, onReview }: {
+  initialTaskId?: string;
+  embedded?: boolean;
+  onTaskSelected?: (taskId: string) => void;
+  onReview?: (taskId: string, prompt: string) => void;
+} = {}) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
   const [tasksFailed, setTasksFailed] = useState(false);
@@ -53,7 +58,8 @@ export default function Tasks() {
       setTasksLoading(true);
       const data = await requestJson<Task[]>('/api/tasks');
       setTasks(data);
-      setSelected(prev => data.find(task => task.id === prev?.id) ?? initialTask(data) ?? null);
+      setSelected(prev => data.find(task => task.id === (prev?.id ?? initialTaskId))
+        ?? (embedded ? null : initialTask(data)) ?? null);
       setTasksFailed(false);
       setError('');
     } catch (caught) {
@@ -62,7 +68,7 @@ export default function Tasks() {
     } finally {
       setTasksLoading(false);
     }
-  }, []);
+  }, [embedded, initialTaskId]);
 
   const loadTrials = useCallback(async (taskId: string, purpose: 'baseline' | 'deployed' = mode) => {
     const token = ++trialRequest.current;
@@ -98,7 +104,9 @@ export default function Tasks() {
   }
 
   function choose(task: Task) {
-    setSelected(task); selectTask(task.id);
+    setSelected(task);
+    if (onTaskSelected) onTaskSelected(task.id);
+    else selectTask(task.id);
     setLabelTrial(null);
     setMessage(''); setCreateFormOpen(false);
   }
@@ -161,8 +169,9 @@ export default function Tasks() {
     });
   }
 
-  return <main className="page task-workspace">
-    <header className="header" style={{ gridColumn: '1 / -1', margin: 0 }}><div><p className="eyebrow">Guided baseline</p><h1>Tasks and trials</h1><p className="subtitle">Define success, then measure the current checkpoint on marked starting positions.</p></div></header>
+  const Container = embedded ? 'div' : 'main';
+  return <Container className="page task-workspace">
+    {!embedded && <header className="header" style={{ gridColumn: '1 / -1', margin: 0 }}><div><p className="eyebrow">Guided baseline</p><h1>Tasks and trials</h1><p className="subtitle">Define success, then measure the current checkpoint on marked starting positions.</p></div></header>}
     {error && <div className="task-status-message error" role="alert">{error}</div>}
     {message && <div className="task-status-message success" role="status">{message}</div>}
 
@@ -201,11 +210,13 @@ export default function Tasks() {
           <section className="task-overview">
             <div className="task-overview-header">
               <h2 className="task-overview-title">{selected.name}</h2>
-              <a href={screenHref('runs', { task: selected.id, prompt: selected.prompt })} className="task-recordings-link">
+              {onReview ? <button type="button" className="secondary task-recordings-link"
+                onClick={() => onReview(selected.id, selected.prompt)}><Film size={16} />Review recordings</button>
+              : <a href={screenHref('runs', { task: selected.id, prompt: selected.prompt })} className="task-recordings-link">
                 <Film size={16} />
                 Review recordings
                 <ChevronRight size={16} />
-              </a>
+              </a>}
             </div>
 
             <div className="task-meta-row">
@@ -508,5 +519,5 @@ export default function Tasks() {
         </section>
       )}
     </div>
-  </main>;
+  </Container>;
 }

@@ -97,7 +97,8 @@ export default function YamChatWorkflow({
 
     <div className="yam-workflow-options" role="group" aria-label="Robot-free workflow">
       {simulatorWorkflows.map(({ id, title, description, icon }) => (
-        <button type="button" className="yam-choice" key={id} aria-pressed={mode === id} onClick={() => setMode(id)}>
+        <button type="button" className="yam-choice" key={id} aria-pressed={mode === id}
+          disabled={running && mode !== id} onClick={() => setMode(id)}>
           <span className="yam-choice-icon" aria-hidden="true">{icon}</span>
           <strong>{title}</strong>
           <small>{description}</small>
@@ -118,9 +119,11 @@ export default function YamChatWorkflow({
           : job.state === 'failed' ? 'Run stopped' : job.state === 'cancelled' ? 'Run stopped by you' : 'Run complete'}</strong>
         {job.kind === 'comparison' ? <YamComparisonProgress job={job} report={comparisonReport} /> : <>
           <p>{job.message}</p>
-          {job.kind === 'collection' && (running || job.completed > 0) && <div className="yam-job-progress">
-            <progress value={job.completed} max={job.total} aria-label="Completed training scenes" />
-            <small>{job.completed}/{job.total} scenes</small>
+          {((job.kind === 'collection' && (running || job.completed > 0)) || (job.kind === 'import' && running))
+            && <div className="yam-job-progress">
+            <progress value={job.completed} max={job.total}
+              aria-label={job.kind === 'import' ? 'Checked bundled demos' : 'Completed training scenes'} />
+            <small>{job.completed}/{job.total} {job.kind === 'import' ? 'demos checked' : 'scenes'}</small>
           </div>}
         </>}
       </div>
@@ -193,7 +196,7 @@ export default function YamChatWorkflow({
       {!running && !!pipeline?.kept && !checkpoint && <div className="yam-next">
         <small>{pipeline.job
           ? `Fine-tune status: ${pipeline.job.status.replaceAll('_', ' ')}.`
-          : pipeline.validated ? 'Dataset validated.' : `${pipeline.kept} demos ready for validation.`}</small>
+          : pipeline.validated ? 'Dataset validated.' : `${pipeline.kept} ${pipeline.kept === 1 ? 'demo' : 'demos'} ready for validation.`}</small>
         <button type="button" className="yam-secondary" onClick={training}>Open fine-tuning</button>
       </div>}
       {!running && checkpoint && <div className="yam-next">

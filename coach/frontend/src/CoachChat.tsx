@@ -33,11 +33,20 @@ const hostedIntroduction = document.querySelector<HTMLMetaElement>('meta[name="d
 const simulatorHelpPattern = /simulator screen|set up the YAM simulator/i;
 const trialExplanationPattern = /diagnos|what went wrong|(?:why|explain).*(?:run|trial|comparison|pick|scene|grasp|fail|result|miss|robot)/i;
 
+function taskSimulatorMode(task: Task | undefined): SimulatorMode | undefined {
+  if (task?.name === 'Apple pickup · YAM simulator') return 'apple';
+  if (task?.name.endsWith(' · click to correct')) return 'fruit';
+  if (task?.name.endsWith(' · YAM scene')) return 'scene';
+}
+
 async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(path, { method, cache: 'no-store', headers: body === undefined ? undefined : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
   if (!response.ok) {
-    const detail = await response.json().catch(() => ({})) as { detail?: string };
-    throw new Error(detail.detail || `Request failed (${response.status})`);
+    const { detail } = await response.json().catch(() => ({})) as { detail?: unknown };
+    const validationErrors = Array.isArray(detail)
+      ? detail.flatMap((item) => typeof item?.msg === 'string' ? [item.msg] : []).join(' ')
+      : '';
+    throw new Error(typeof detail === 'string' && detail ? detail : validationErrors || `Request failed (${response.status})`);
   }
   return response.json() as Promise<T>;
 }
@@ -423,6 +432,13 @@ export default function CoachChat({
     showWork(kind === 'scene' ? { kind, preset } : { kind });
   }
 
+  function switchSimulatorMode(mode: SimulatorMode) {
+    if (mode === simulatorMode) return;
+    clearDemoApproval();
+    setComparisonReady(null);
+    chooseSimulatorMode(mode);
+  }
+
   async function saveSimulatorTask(draft: TaskDraft) {
     const version = sessionVersion.current;
     const task = await api<Task>('/api/tasks', 'POST', { ...draft, baseline_checkpoint: 'dreamlabs/dream-1-beta' });
@@ -437,6 +453,16 @@ export default function CoachChat({
 
   function openEvaluation(taskId = activeTaskId, evaluationId?: string) {
     showWork({ kind: 'tool', tool: { kind: 'evaluation', taskId, evaluationId } });
+  }
+
+  function openTool(tool: ChatTool) {
+    setError('');
+    setWorkSurface({ kind: 'tool', tool });
+  }
+
+  function selectToolTask(taskId: string) {
+    selectTask(taskId);
+    void workflowState(taskId).catch((caught: Error) => setError(caught.message));
   }
 
   async function copyAddress(address: string) {
@@ -462,7 +488,7 @@ export default function CoachChat({
   }
 
   async function finishTraining(taskId: string, jobId: string) {
-    const isApple = (task: Task) => task.name === 'Apple pickup · YAM simulator';
+    const isApple = (task: Task) => taskSimulatorMode(task) === 'apple';
     const yam = yamJob?.task_id === taskId ? true : workflowTask?.id === taskId ? isApple(workflowTask) : null;
     setWorkSurface(null);
     setComparisonReady({ taskId, jobId, yam });
@@ -571,10 +597,15 @@ export default function CoachChat({
   const canBegin = hosted || ai !== null;
   const comparedCheckpoint = evaluation.simulation?.candidate;
   const currentTask = activeTaskId && workflowTask?.id === activeTaskId ? workflowTask : undefined;
+  const currentTaskMode = currentYamJob ? 'apple' : taskSimulatorMode(currentTask);
   const currentPipeline = pipeline?.taskId === activeTaskId ? pipeline : null;
   const simulatorRequested = begun && !needsHostedConnection && (guidedMode || showSimulator || currentYamJob || simulatorMode !== 'apple'
     || reply?.setup_help === 'simulator' || simulatorHelpPattern.test(reply?.message ?? ''));
   const needsDreamKey = !hosted && begun && account && (!account.configured || dreamAccess === 'blocked' || dreamAccess === 'unavailable');
+  const suggestedScreen = reply?.suggested_screen;
+  const showSuggestedTool = begun && suggestedScreen && (!hosted || suggestedScreen !== 'tasks')
+    && !(simulatorRequested && (['demos', 'training', 'tasks'].includes(suggestedScreen)
+      || (simulatorMode === 'apple' && suggestedScreen === 'evaluation')));
   const latestMessage = messages[messages.length - 1];
   const replySuggestions = begun && ai?.configured && !busy && !simulatorRequested && !needsDreamKey
     && !workSurface && !demoApproval && !comparisonReady
@@ -591,7 +622,8 @@ export default function CoachChat({
         return <ChatTraining key={surface.taskId} taskId={surface.taskId} onClose={closeWork}
           onCheckpointReady={(jobId) => void finishTraining(surface.taskId, jobId)} />;
       case 'tool':
-        return <ChatToolPanel tool={surface.tool} onClose={closeWork} />;
+        return <ChatToolPanel tool={surface.tool} onClose={closeWork} onOpen={openTool}
+          onTaskSelected={selectToolTask} onWork={openWork} />;
       case 'checkpoints':
         return <ChatCheckpointPicker onClose={closeWork} preferredCheckpoint={surface.preferredCheckpoint}
           onCompare={async (checkpoint) => {
@@ -601,13 +633,14 @@ export default function CoachChat({
           }} />;
       case 'scene':
       case 'fruit': {
+        const simulatorTask = currentTaskMode === surface.kind ? currentTask : undefined;
         const props = {
-          taskId: currentTask?.id ?? '',
-          taskPrompt: currentTask?.prompt ?? '',
-          taskSuccessRule: currentTask?.success_rule ?? '',
+          taskId: simulatorTask?.id ?? '',
+          taskPrompt: simulatorTask?.prompt ?? '',
+          taskSuccessRule: simulatorTask?.success_rule ?? '',
           onSetupTask: saveSimulatorTask,
           onComplete: (demoId: string) => {
-            if (currentTask) openWork('demos', currentTask.id, demoId);
+            if (simulatorTask) openWork('demos', simulatorTask.id, demoId);
           },
           inline: true,
         };
@@ -680,11 +713,11 @@ export default function CoachChat({
       {simulatorNotice && <p className="notice" role="status">{simulatorNotice}</p>}
       {simulatorRequested && <YamChatWorkflow
         setup={simulator} dreamReady={dreamAccess === 'ready'} job={currentYamJob}
-        pipeline={currentYamJob || simulatorMode !== 'apple' ? currentPipeline : null}
+        pipeline={currentTaskMode === simulatorMode ? currentPipeline : null}
         comparisonReport={evaluation.simulation?.report ?? null}
         openExistingCheckpoints={() => showWork({ kind: 'checkpoints' })}
         mode={simulatorMode}
-        setMode={chooseSimulatorMode}
+        setMode={switchSimulatorMode}
         openRecorder={openRecorder}
         prepare={prepareSimulator}
         collect={(scenes) => runYamAction('/api/simulator/collect', { scenes })}
@@ -698,16 +731,28 @@ export default function CoachChat({
         }) : undefined}
       />}
       {begun && reply?.task_draft && reply.setup_help !== 'simulator' && <div className="chat-action"><strong>Ready to save this task?</strong><p>{reply.task_draft.name} · {reply.task_draft.prompt}<br />Success: {reply.task_draft.success_rule}</p><button disabled={busy} onClick={() => void saveTask(reply.task_draft!)}>Confirm and save task</button></div>}
-      {begun && reply?.suggested_screen && reply.suggested_screen !== 'tasks' && !(simulatorRequested
-        && (['demos', 'training'].includes(reply.suggested_screen) || (simulatorMode === 'apple' && reply.suggested_screen === 'evaluation')))
+      {showSuggestedTool
         && <div className="chat-action"><button className="secondary" onClick={() => {
-          const target = reply.suggested_screen;
+          const target = suggestedScreen;
           if (target === 'demos' || target === 'training') openWork(target);
           else if (target === 'evaluation') openEvaluation();
-          else if (target === 'preflight' || target === 'statistical') showWork({ kind: 'tool', tool: { kind: target } });
-        }}>{reply.suggested_screen === 'demos' ? 'Review demos' : reply.suggested_screen === 'training'
-          ? 'Open fine-tuning' : `Open ${reply.suggested_screen}`}</button></div>}
+          else if (target === 'tasks') openTool({ kind: 'baseline', taskId: activeTaskId });
+          else if (target === 'preflight' || target === 'statistical') openTool({ kind: target });
+        }}>{suggestedScreen === 'demos' ? 'Review demos' : suggestedScreen === 'training'
+          ? 'Open fine-tuning' : suggestedScreen === 'tasks' ? 'Plan supervised baseline' : `Open ${suggestedScreen}`}</button></div>}
       {begun && !needsHostedConnection && !simulatorRequested && <button type="button" className="chat-simulator-link" onClick={() => setShowSimulator(true)}>Use the YAM simulator</button>}
+      {begun && !needsHostedConnection && <details className="chat-inventory">
+        <summary>Tools</summary>
+        <div className="chat-workspace-actions">
+          {!hosted && <>
+            <button type="button" className="secondary" onClick={() => openTool({ kind: 'preflight' })}>Check arms and cameras</button>
+            <button type="button" className="secondary" onClick={() => openTool({ kind: 'baseline', taskId: activeTaskId })}>Supervised baseline trials</button>
+            {activeTaskId && !currentTaskMode && <button type="button" className="secondary"
+              onClick={() => openTool({ kind: 'repair', taskId: activeTaskId })}>Repair first</button>}
+          </>}
+          <button type="button" className="secondary" onClick={() => openTool({ kind: 'statistical' })}>Statistical audit</button>
+        </div>
+      </details>}
       {begun && !needsHostedConnection && guidedMode && <details className="chat-inventory">
         <summary>Enable optional AI chat</summary>
         <p>Use your own OpenAI API key for conversational guidance.</p>
@@ -730,7 +775,9 @@ export default function CoachChat({
         <div role="status"><strong>Fine-tune ready</strong>
           {comparisonReady.yam ? <YamComparisonPlan pairs={4} /> : <p>{comparisonReady.yam === null
             ? 'Checking evaluation options…'
-            : 'Compare your new checkpoint with the base model on held-out scenes.'}</p>}
+            : currentTaskMode
+              ? 'Automatic simulator comparison is available for Apple pickup. This checkpoint can be evaluated with supervised physical trials.'
+              : 'Compare your new checkpoint with the base model on held-out scenes.'}</p>}
         </div>
         {comparisonReady.yam !== null && (comparisonReady.yam
           ? <button type="button" disabled={yamActionPending} onClick={() => void runYamAction('/api/simulator/compare', {
@@ -738,7 +785,7 @@ export default function CoachChat({
           })}>
             {yamActionPending ? 'Starting comparison…' : 'Run simulator comparison'}
           </button>
-          : <button type="button" onClick={() => openEvaluation(comparisonReady.taskId)}>Plan evaluation</button>)}
+          : !hosted && <button type="button" onClick={() => openEvaluation(comparisonReady.taskId)}>Plan physical evaluation</button>)}
       </section>}
       </>}
       </div>
@@ -770,7 +817,8 @@ export default function CoachChat({
     {!needsHostedConnection && <details className="coach-evidence">
       <summary>Evaluation results</summary>
       <LiveEvaluation taskId={evaluationTaskId}
-        simulatorActive={!!simulatorRequested && simulatorMode === 'apple'}
+        simulatorMode={currentTaskMode}
+        allowPhysicalPlanning={!hosted}
         onOpen={openEvaluation} onEvidence={onEvidence} evidence={evaluation} />
     </details>}
     </div>

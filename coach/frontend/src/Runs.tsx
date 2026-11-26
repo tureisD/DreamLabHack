@@ -78,8 +78,8 @@ export function RolloutPreview({ episodeId }: { episodeId: string }) {
   </section>;
 }
 
-export default function Runs({ initialEpisodeId = '', initialPrompt = '', offline = false }: {
-  initialEpisodeId?: string; initialPrompt?: string; offline?: boolean;
+export default function Runs({ initialEpisodeId = '', initialPrompt = '', offline = false, embedded = false }: {
+  initialEpisodeId?: string; initialPrompt?: string; offline?: boolean; embedded?: boolean;
 }) {
   const [items, setItems] = useState<EpisodeItem[]>([]);
   const [selected, setSelected] = useState<Episode | null>(null);
@@ -178,12 +178,12 @@ export default function Runs({ initialEpisodeId = '', initialPrompt = '', offlin
     }
   }
 
+  const Container = embedded ? 'div' : 'main';
   return (
-    <main className="page">
+    <Container className="page">
       <header className="header">
         <div>
-          <p className="eyebrow">Evidence first</p>
-          <h1>Run review</h1>
+          {!embedded && <><p className="eyebrow">Evidence first</p><h1>Run review</h1></>}
           <p className="subtitle">Import saved station or simulator rollouts, inspect failures, and label the task outcome.</p>
         </div>
         {!offline && <button onClick={() => void scan()} disabled={busy}>{busy ? 'Working…' : 'Scan rollouts'}</button>}
@@ -234,6 +234,6 @@ export default function Runs({ initialEpisodeId = '', initialPrompt = '', offlin
           )}
         </section>
       </div>
-    </main>
+    </Container>
   );
 }
