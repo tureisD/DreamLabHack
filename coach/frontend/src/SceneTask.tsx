@@ -64,8 +64,9 @@ export default function SceneTask({
   const { currentStatus, recording, start } = useSimulatorRecording('scene', taskId, inline, onComplete);
   const object = form.objectLabel.trim();
   const target = form.targetLabel.trim();
+  const sceneName = Array.from(`${object} to ${target}`).slice(0, 108).join('').trimEnd();
   const draft: SimulatorTaskDraft = {
-    name: `${object} to ${target} · YAM scene`,
+    name: `${sceneName} · YAM scene`,
     prompt: form.prompt.trim(),
     success_rule: `Lift the ${object} and release it so it rests on the ${target}.`,
   };
@@ -131,11 +132,11 @@ export default function SceneTask({
           if (next !== 'custom') setForm(next === 'ball' ? ballPreset : initial);
           setPreview(null);
         }}><option value="block">Red block → blue pad</option><option value="ball">Yellow ball → green pad</option><option value="custom">Custom scene</option></select></label>
-        <label>Task instruction<input value={form.prompt} placeholder="Place the block on the pad" onChange={(event) => update('prompt', event.target.value)} /></label>
-        <label>Object name<input value={form.objectLabel} placeholder="Red block" onChange={(event) => update('objectLabel', event.target.value)} /></label>
+        <label>Task instruction<input value={form.prompt} maxLength={200} placeholder="Place the block on the pad" onChange={(event) => update('prompt', event.target.value)} /></label>
+        <label>Object name<input value={form.objectLabel} maxLength={60} placeholder="Red block" onChange={(event) => update('objectLabel', event.target.value)} /></label>
         <label>Shape<select value={form.shape} onChange={(event) => update('shape', event.target.value as Shape)}><option value="box">Box</option><option value="sphere">Ball</option><option value="cylinder">Cylinder</option></select></label>
         <label>Object color<input type="color" value={form.objectColor} onChange={(event) => update('objectColor', event.target.value)} /></label>
-        <label>Target name<input value={form.targetLabel} placeholder="Blue pad" onChange={(event) => update('targetLabel', event.target.value)} /></label>
+        <label>Target name<input value={form.targetLabel} maxLength={60} placeholder="Blue pad" onChange={(event) => update('targetLabel', event.target.value)} /></label>
         <label>Target color<input type="color" value={form.targetColor} onChange={(event) => update('targetColor', event.target.value)} /></label>
       </div>
       {inline ? <details className="sim-recorder-details"><summary>Dimensions, positions, and seed</summary>{sceneDimensions}</details> : sceneDimensions}

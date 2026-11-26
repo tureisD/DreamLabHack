@@ -1,5 +1,6 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from subprocess import CompletedProcess
 from threading import Event
 from types import SimpleNamespace
@@ -60,8 +61,11 @@ def test_reset_cancels_active_recording_and_preserves_existing_demo(
         assert cancel.wait(3)
         stopped.set()
         if mode == "scene":
+            stage = Path(args[args.index("--output") + 1])
+            demo_folder = stage / "late-demo"
+            demo_folder.mkdir()
             return CompletedProcess(args, 0, "SCENE_RESULT=" + json.dumps({
-                "session_path": str(tmp_path / "late-demo"),
+                "session_path": str(demo_folder),
             }), "")
         raise SimulatorProcessCancelled()
 
@@ -82,7 +86,8 @@ def test_reset_cancels_active_recording_and_preserves_existing_demo(
     assert stopped.is_set()
     assert recorder.status() == {"state": "idle", "result": None, "error": None}
     assert recorder.demos.list(task.id) == [demo]
-    assert folder.is_dir()
+    assert [path.name for path in folder.parent.iterdir()] == ["saved"]
+    assert not list(tmp_path.glob("yam-recording-*"))
 
 
 def test_reset_rejects_a_recording_validated_under_previous_session(monkeypatch, recorder):
@@ -113,6 +118,45 @@ def test_reset_rejects_a_recording_validated_under_previous_session(monkeypatch,
             response.result(timeout=3)
 
     assert recorder.status()["state"] == "idle"
+
+
+def test_recording_is_published_to_the_demo_directory_after_validation(tmp_path, monkeypatch, recorder):
+    task = TaskStore(tmp_path).create_task(TaskInput(
+        name="Apple pickup", prompt=_PROMPT, baseline_checkpoint="dreamlabs/dream-1-beta",
+        success_rule="Lift the apple.",
+    ))
+
+    def render(args, *, timeout, cancel):
+        output = Path(args[args.index("--output") + 1])
+        assert output.parent == tmp_path.resolve()
+        assert output != recorder.demos_root
+        folder = output / "new-demo"
+        folder.mkdir()
+        return CompletedProcess(args, 0, "CLICK_RESULT=" + json.dumps({"session_path": str(folder)}), "")
+
+    def read_demo(path, task_id):
+        assert not (recorder.demos_root / path.name).exists()
+        return Demo(
+            id="demo", task_id=task_id, source_path=str(path), task_text=_PROMPT,
+            codebase_version="v2.1", frames=1, fps=10, camera_keys=[], state_dim=None,
+            action_dim=None, findings=[],
+        )
+
+    monkeypatch.setattr(sim_correction, "run_simulator_process", render)
+    monkeypatch.setattr(sim_correction, "read_demo", read_demo)
+    recorder.start(task.id, _PROMPT, "lift", "apple", 1, (0, 0), None)
+    with recorder._lock:
+        recording = recorder._recording
+    if recording:
+        recording[0].join(timeout=3)
+
+    final = recorder.demos_root / "new-demo"
+    state = recorder.status()
+    assert state["state"] == "complete", state
+    assert state["result"] == {"session_path": str(final), "demo_id": "demo"}
+    assert final.is_dir()
+    assert recorder.demos.list(task.id)[0].source_path == str(final)
+    assert not list(tmp_path.glob("yam-recording-*"))
 
 
 def test_reset_times_out_without_allowing_overlapping_recording(monkeypatch, recorder):

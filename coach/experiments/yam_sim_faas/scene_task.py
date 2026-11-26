@@ -276,13 +276,13 @@ def collect(spec: TaskSpec, seed: int, output: Path) -> dict:
             raise ValueError(f"Dream dataset validation failed: {report}")
         from teach_task_coach.demos import read_demo
 
-        if not read_demo(session, "local-preview").valid:
-            raise ValueError("Coach rejected the new task demonstration.")
         (session / "scene_task.json").write_text(json.dumps({
             "method": "declarative_scene_task", "spec": spec.as_dict(), "spec_sha256": digest,
             "seed": seed, "physics": result, "export_replay": replay,
             "interpretation": "Simulator demonstration; held-out model evaluation is still required.",
         }, indent=2), encoding="utf-8")
+        if not read_demo(session, "local-preview").valid:
+            raise ValueError("Coach rejected the new task demonstration.")
         session.rename(output / name)
     return {"session_path": str(output / name), "prompt": spec.prompt,
             "frames": frames, "physics": result, "export_replay": replay,

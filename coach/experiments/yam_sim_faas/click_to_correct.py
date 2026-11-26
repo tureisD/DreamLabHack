@@ -300,8 +300,6 @@ def collect(output: Path, kind: str, fruit: str, seed: int,
             raise ValueError(f"Dream dataset validation failed: {report}")
         from teach_task_coach.demos import read_demo
 
-        if not read_demo(session, "local-preview").valid:
-            raise ValueError("The coach rejected the exported demonstration.")
         (session / "click_correction.json").write_text(json.dumps({
             "method": "click_to_correct_simulation", "seed": seed,
             "goal": {"kind": kind, "fruit": fruit, "target_xy_m": goal.target_xy},
@@ -309,6 +307,8 @@ def collect(output: Path, kind: str, fruit: str, seed: int,
             "physics": result, "export_replay": replay, "frames": frames, "fps": 10,
             "interpretation": "Simulator demonstration; no physical robot or model improvement claimed.",
         }, indent=2), encoding="utf-8")
+        if not read_demo(session, "local-preview").valid:
+            raise ValueError("The coach rejected the exported demonstration.")
         session.rename(output / name)
     return {"session_path": str(output / name), "task": goal.task_text,
             "frames": frames, "physics": result, "export_replay": replay}

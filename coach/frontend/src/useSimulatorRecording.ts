@@ -12,9 +12,11 @@ export type SimulatorTaskDraft = { name: string; prompt: string; success_rule: s
 
 export async function simulatorRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { cache: 'no-store', ...init });
-  const value = await response.json();
-  if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : `Request failed (${response.status})`);
-  return value as T;
+  if (response.ok) return await response.json() as T;
+  const payload: unknown = await response.json().catch(() => null);
+  const detail = payload && typeof payload === 'object' && 'detail' in payload ? payload.detail : undefined;
+  const message = Array.isArray(detail) ? detail[0]?.msg : detail;
+  throw new Error(typeof message === 'string' ? message : `Request failed (${response.status})`);
 }
 
 export function useSimulatorRecording(

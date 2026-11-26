@@ -29,7 +29,7 @@ export default function SimCorrect({ taskId, taskPrompt, taskSuccessRule, onComp
     prompt: kind === 'lift' ? `pick up the ${fruit}` : 'put the apple in the bowl',
     success_rule: kind === 'bowl'
       ? 'Lift the apple, release it into the bowl, and leave it resting inside.'
-      : `Lift the ${fruit} at least 8 cm, then lower and release it.`,
+      : `Lift the ${fruit} at least 8 cm, then release it back onto the table.`,
   };
   const ready = Boolean(taskId) && taskPrompt === draft.prompt && (!inline || taskSuccessRule === draft.success_rule);
 
@@ -87,6 +87,10 @@ export default function SimCorrect({ taskId, taskPrompt, taskSuccessRule, onComp
       {targetPixel && <span className="sim-click" style={{ left: `${targetPixel[0] / preview.width * 100}%`, top: `${targetPixel[1] / preview.height * 100}%` }}>2</span>}
     </div>}
     {preview && <p className="hint">{!objectPixel ? 'Click the selected fruit.' : kind === 'bowl' && !targetPixel ? 'Now click inside the bowl.' : 'Check the marked selection before recording.'}</p>}
+    {preview?.markers[fruit] && !objectPixel && <button type="button" className="secondary" disabled={locked}
+      onClick={() => setObjectPixel(preview.markers[fruit])}>Select the marked {fruit}</button>}
+    {preview?.markers.bowl && kind === 'bowl' && objectPixel && !targetPixel && <button type="button"
+      className="secondary" disabled={locked} onClick={() => setTargetPixel(preview.markers.bowl)}>Select the bowl center</button>}
     {!ready && <div className="sim-task-approval">
       {inline ? <p><strong>{draft.prompt}</strong><br />{draft.success_rule}</p>
         : <p className="hint">Set up the local task for <strong>{draft.prompt}</strong> before recording.</p>}

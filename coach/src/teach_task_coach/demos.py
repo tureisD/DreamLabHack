@@ -158,6 +158,13 @@ def read_demo(folder: Path, task_id: str) -> Demo:
     marker = conversion.get("origin")
     if marker in ("human", "scripted_reference", "offline_fixture"):
         origin = marker
+    scripted_simulator = any(
+        path.is_file() and _object(path).get("method") == method
+        for path, method in (
+            (folder / "click_correction.json", "click_to_correct_simulation"),
+            (folder / "scene_task.json", "declarative_scene_task"),
+        )
+    )
     sidecar = folder / "rollout.json"
     if sidecar.is_file():
         metadata = _object(sidecar)
@@ -195,7 +202,10 @@ def read_demo(folder: Path, task_id: str) -> Demo:
         # rollout sidecar is missing. A copied fixture must never become human by
         # taking the legacy-recorder fallback.
         if origin == "unknown":
-            origin = "human" if not conversion_path.is_file() else "unknown"
+            if scripted_simulator:
+                origin = "scripted_reference"
+            elif not conversion_path.is_file():
+                origin = "human"
         receipt_path = folder / "coach-demo.json"
         if receipt_path.is_file():
             receipt = _object(receipt_path)
@@ -235,8 +245,6 @@ def read_demo(folder: Path, task_id: str) -> Demo:
             if actions.ndim != 2 or actions.shape[0] != frames:
                 findings.append(DemoFinding(code="action_rows", severity="error", message="Action rows do not match metadata."))
             elif actions.shape[0] > 1:
-                scripted_simulator = ((folder / "click_correction.json").is_file()
-                                      or (folder / "scene_task.json").is_file())
                 if scripted_simulator and actions.shape[1] == 14:
                     # The YAM click teacher holds the unused arm fixed. Its wrist
                     # image can be identical for seconds without a camera fault.

@@ -52,7 +52,12 @@ def _scene_script() -> Path:
 
 
 def _run_process(script: Path, arguments: list[str], *, timeout: int, cancel: Event | None = None) -> str:
-    completed = run_simulator_process([sys.executable, str(script), *arguments], timeout=timeout, cancel=cancel)
+    try:
+        completed = run_simulator_process(
+            [sys.executable, str(script), *arguments], timeout=timeout, cancel=cancel,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("The YAM simulator timed out. Try the scene again.") from exc
     if completed.returncode:
         raise RuntimeError((completed.stderr or completed.stdout).strip()[-1200:]
                            or "The YAM simulator process failed.")
@@ -92,8 +97,7 @@ class SimCorrectionService:
         finally:
             env.close()
         arguments = ["--kind", kind, "--fruit", fruit, "--seed", str(seed),
-                     "--object-pixel", *(str(value) for value in object_pixel),
-                     "--output", str(self.demos_root)]
+                     "--object-pixel", *(str(value) for value in object_pixel)]
         if target_pixel is not None:
             arguments += ["--target-pixel", *(str(value) for value in target_pixel)]
         return self._start_recording(task_id, generation, partial(self._render_click, arguments))
@@ -107,7 +111,7 @@ class SimCorrectionService:
             return self._generation
 
     def _start_recording(self, task_id: str, generation: int,
-                         render: Callable[[Event], dict[str, Any]]) -> dict[str, Any]:
+                         render: Callable[[Path, Event], dict[str, Any]]) -> dict[str, Any]:
         with self._lock:
             if self._resetting or generation != self._generation:
                 raise ValueError("The simulator session changed. Start the recording again.")
@@ -126,16 +130,34 @@ class SimCorrectionService:
                 raise
             return dict(self._state)
 
-    def _run(self, task_id: str, render: Callable[[Event], dict[str, Any]], cancel: Event) -> None:
+    def _run(self, task_id: str, render: Callable[[Path, Event], dict[str, Any]], cancel: Event) -> None:
         state: dict[str, Any] = _IDLE.copy()
         try:
-            result = render(cancel)
-            demo = read_demo(Path(result["session_path"]), task_id)
-            with self._lock:
-                if not cancel.is_set():
-                    self.demos.upsert(demo)
+            self.demos_root.parent.mkdir(parents=True, exist_ok=True)
+            with TemporaryDirectory(prefix="yam-recording-", dir=self.demos_root.parent) as temporary:
+                staging = Path(temporary).resolve()
+                result = render(staging, cancel)
+                if cancel.is_set():
+                    return
+                session = Path(result["session_path"]).resolve()
+                if session.parent != staging:
+                    raise ValueError("The simulator demo is outside its recording directory.")
+                demo = read_demo(session, task_id)
+                with self._lock:
+                    if cancel.is_set():
+                        return
+                    self.demos_root.mkdir(parents=True, exist_ok=True)
+                    destination = self.demos_root.resolve() / session.name
+                    session.rename(destination)
+                    demo.source_path = str(destination)
+                    try:
+                        self.demos.upsert(demo)
+                    except Exception:
+                        destination.rename(session)
+                        raise
                     state = {"state": "complete", "task_id": task_id,
-                             "result": {**result, "demo_id": demo.id}, "error": None}
+                             "result": {**result, "session_path": str(destination), "demo_id": demo.id},
+                             "error": None}
         except SimulatorProcessCancelled:
             pass
         except Exception as exc:  # noqa: BLE001 - background failures must reach status polling
@@ -145,8 +167,10 @@ class SimCorrectionService:
                 self._state = _IDLE.copy() if cancel.is_set() else state
                 self._recording = None
 
-    def _render_click(self, arguments: list[str], cancel: Event) -> dict[str, Any]:
-        output = _run_process(_script(), arguments, timeout=600, cancel=cancel)
+    def _render_click(self, arguments: list[str], output_dir: Path, cancel: Event) -> dict[str, Any]:
+        output = _run_process(
+            _script(), [*arguments, "--output", str(output_dir)], timeout=600, cancel=cancel,
+        )
         return self._render_result(output, "CLICK_RESULT=", "The simulator finished without a verified demo result.")
 
     @staticmethod
@@ -191,12 +215,11 @@ class SimCorrectionService:
             spec_path = Path(temporary) / "scene.json"
             image_path = Path(temporary) / "preview.png"
             spec_path.write_text(json.dumps(spec.as_dict()), encoding="utf-8")
-            output = subprocess.run([sys.executable, str(_scene_script()), "--spec", str(spec_path),
-                                     "--seed", str(seed), "--preview", str(image_path)],
-                                    capture_output=True, text=True, timeout=60, check=False)
-            if output.returncode:
-                raise RuntimeError((output.stderr or output.stdout).strip()[-1200:])
-            result = json.loads(output.stdout)
+            output = _run_process(
+                _scene_script(), ["--spec", str(spec_path), "--seed", str(seed), "--preview", str(image_path)],
+                timeout=60,
+            )
+            result = json.loads(output)
             result["image"] = "data:image/png;base64," + base64.b64encode(
                 image_path.read_bytes()).decode("ascii")
             result["width"], result["height"] = 640, 360
@@ -224,13 +247,14 @@ class SimCorrectionService:
             raise ValueError("Scene seed must be a nonnegative 32-bit integer.")
         return self._start_recording(task_id, generation, partial(self._render_scene, spec.as_dict(), seed))
 
-    def _render_scene(self, specification: dict, seed: int, cancel: Event) -> dict[str, Any]:
+    def _render_scene(self, specification: dict, seed: int,
+                      output_dir: Path, cancel: Event) -> dict[str, Any]:
         with TemporaryDirectory() as temporary:
             spec_path = Path(temporary) / "scene.json"
             spec_path.write_text(json.dumps(specification), encoding="utf-8")
             output = _run_process(
                 _scene_script(),
-                ["--spec", str(spec_path), "--seed", str(seed), "--collect", "--output", str(self.demos_root)],
+                ["--spec", str(spec_path), "--seed", str(seed), "--collect", "--output", str(output_dir)],
                 timeout=600, cancel=cancel,
             )
         return self._render_result(

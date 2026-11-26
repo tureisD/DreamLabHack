@@ -4,6 +4,7 @@ import av
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 from fastapi.testclient import TestClient
 from test_trials import FakeStation
 
@@ -61,6 +62,22 @@ def test_conversion_marker_preserves_offline_origin_without_rollout_sidecar(tmp_
     demo = read_demo(folder, "task-id")
     assert demo.origin == "offline_fixture"
     assert demo not in DemoStore(tmp_path / "data").training_eligible("task-id")
+
+
+@pytest.mark.parametrize(
+    "filename,method",
+    [
+        ("click_correction.json", "click_to_correct_simulation"),
+        ("scene_task.json", "declarative_scene_task"),
+    ],
+)
+def test_simulator_export_keeps_scripted_provenance(tmp_path, filename, method):
+    folder = make_demo(tmp_path)
+    (folder / filename).write_text(json.dumps({"method": method}))
+    assert read_demo(folder, "task-id").origin == "scripted_reference"
+
+    (folder / "meta/conversion.json").write_text(json.dumps({"origin": "offline_fixture"}))
+    assert read_demo(folder, "task-id").origin == "offline_fixture"
 
 
 def test_demo_qc_flags_idle_start_and_missing_video(tmp_path):
@@ -138,7 +155,7 @@ def test_simulator_inactive_wrist_is_not_reported_as_broken_camera(tmp_path):
     pq.write_table(pa.table({"action": pa.array(actions)}),
                    folder / "data/chunk-000/episode_000000.parquet")
     assert "frozen_camera" in {finding.code for finding in read_demo(folder, "task").findings}
-    (folder / "click_correction.json").write_text('{}')
+    (folder / "click_correction.json").write_text(json.dumps({"method": "click_to_correct_simulation"}))
     assert "frozen_camera" not in {finding.code for finding in read_demo(folder, "task").findings}
 
 
