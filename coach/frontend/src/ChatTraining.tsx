@@ -256,9 +256,15 @@ export default function ChatTraining({ taskId, onClose, onCheckpointReady }: {
       </>}
     </>}
     {!showPreparation && job && <>
-      <p className="chat-training-status" role="status">{statusText[job.status]} {(job.status === 'training' || job.status === 'processing') && job.remote_status ? ` Status: ${job.remote_status}.` : ''}</p>
+      <p className="chat-training-status" role="status">
+        {job.status === 'training' && job.remote_status === 'succeeded'
+          ? 'Training finished. Waiting for Dream Labs to publish the checkpoint.'
+          : statusText[job.status]}
+        {(job.status === 'processing' || (job.status === 'training' && job.remote_status !== 'succeeded')) && job.remote_status
+          ? ` Status: ${job.remote_status}.` : ''}
+      </p>
+      {job.error && <p className="trial-error" role={job.status === 'failed' ? 'alert' : 'status'}>{job.error}</p>}
       {job.status === 'failed' && <>
-        {job.error && <p className="trial-error" role="alert">{job.error}</p>}
         {job.failure_phase === 'dataset_processing' && job.remote_status === 'failed' && !job.retry_used && !job.remote_job_id && dataset?.remote_id && <button className="secondary" type="button" disabled={busy} onClick={() => void write(
           () => request<Job>(`/api/finetunes/${encodeURIComponent(job.id)}/retry-processing`, { body: {} }), showJob,
         )}>Retry dataset processing</button>}

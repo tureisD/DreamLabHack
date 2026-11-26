@@ -274,7 +274,8 @@ class FaaSStore:
             self._schema(db)
             updated = db.execute(
                 """UPDATE fine_tune_jobs SET status='retry_requested', retry_used=1,
-                          failed_at=COALESCE(failed_at, ?), failure_reason=COALESCE(failure_reason, error)
+                          failed_at=COALESCE(failed_at, ?), failure_reason=COALESCE(failure_reason, error),
+                          error=NULL
                    WHERE id=? AND status='failed' AND retry_used=0
                          AND remote_job_id IS NULL AND checkpoint IS NULL
                          AND (failed_phase='processing'
@@ -657,7 +658,7 @@ class FaaSWorker:
                 error=remote.get("error") or remote["status"],
             )
         elif remote.get("status"):
-            self.store.update_finetune(job.id, remote_status=remote["status"])
+            self.store.update_finetune(job.id, remote_status=remote["status"], error=None)
 
 
 def run_worker(store: FaaSStore, tasks: TaskStore, demos: DemoStore, interval_s: float = 30) -> None:

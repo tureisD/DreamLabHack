@@ -1,6 +1,8 @@
 import datetime as dt
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 
 from fastapi.testclient import TestClient
 from test_trials import FakeStation
@@ -362,16 +364,23 @@ def test_configured_fixture_places_scene_before_evaluation_start(tmp_path):
     evaluation = client.post(
         f"/api/tasks/{task.id}/evaluations", json={"fine_tune_job_id": job.id}
     ).json()
-    trial = tasks.list_evaluation_trials(evaluation["id"])[0]
+    trial, later, *_ = tasks.list_evaluation_trials(evaluation["id"])
 
     class Fixture:
         configured = True
 
         def __init__(self):
             self.scenes = []
+            self.fail = True
+            self.placing = Event()
+            self.finish = Event()
 
         def place(self, scene):
             self.scenes.append(scene)
+            if self.fail:
+                raise ValueError("Fixture could not verify placement.")
+            self.placing.set()
+            assert self.finish.wait(timeout=5)
             return {"placed": True, "detail": "placed"}
 
     fixture = Fixture()
@@ -379,7 +388,28 @@ def test_configured_fixture_places_scene_before_evaluation_start(tmp_path):
         PreflightService(station, list), episodes, RolloutScanner(tmp_path / "rollouts"),
         tasks, evaluation_store=evaluations, scene_adapter=fixture,
     ))
-    assert local.post(f"/api/trials/{trial.id}/start").status_code == 200
+    assert local.post(f"/api/trials/{later.id}/start").status_code == 409
+    assert local.post(f"/api/trials/{later.id}/prepare-scene").status_code == 409
+    assert fixture.scenes == []
+
+    failed = local.post(f"/api/trials/{trial.id}/start")
+    assert failed.status_code == 503
+    assert "could not verify placement" in failed.json()["detail"]
+    assert tasks.get_trial(trial.id).status == "planned"
+    assert station.run_number == 0
+
+    fixture.fail = False
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        result = pool.submit(local.post, f"/api/trials/{trial.id}/start")
+        try:
+            assert fixture.placing.wait(timeout=5)
+            assert station.run_number == 0
+            assert tasks.get_trial(trial.id).status == "starting"
+            assert local.post(f"/api/trials/{trial.id}/prepare-scene").status_code == 409
+            assert local.post(f"/api/trials/{trial.id}/start").status_code == 409
+        finally:
+            fixture.finish.set()
+        assert result.result(timeout=5).status_code == 200
     assert fixture.scenes[0].scene_index == trial.scene_index
     assert local.post(f"/api/trials/{trial.id}/start").status_code == 409
-    assert len(fixture.scenes) == 1
+    assert len(fixture.scenes) == 2

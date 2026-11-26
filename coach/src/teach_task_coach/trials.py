@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Callable
 
 from teach_task_coach.episodes import EpisodeSummary, RolloutScanner
 from teach_task_coach.station import StationClient, StationRejected
@@ -47,7 +48,7 @@ class TrialRunner:
         self.station = station
         self.scanner = scanner
 
-    def start(self, trial_id: str) -> Trial:
+    def start(self, trial_id: str, before_start: Callable[[Trial], None] | None = None) -> Trial:
         trial = self.tasks.get_trial(trial_id)
         if trial is None:
             raise KeyError(trial_id)
@@ -92,6 +93,13 @@ class TrialRunner:
             "starting",
             start_requested_at=dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         )
+        if before_start is not None:
+            try:
+                before_start(trial)
+            except (OSError, ValueError) as exc:
+                # The station Start has not been sent, so the scene can be prepared again.
+                self.tasks.transition(trial_id, "starting", "planned", last_error=str(exc))
+                raise
         try:
             started = self.station.post(
                 "start", {"prompt": prompt, "checkpoint": checkpoint}

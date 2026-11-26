@@ -149,10 +149,26 @@ def test_worker_validates_uploads_and_publishes_checkpoint(tmp_path):
     worker.tick()
     assert store.get_finetune(job_id).status == "training"
     assert store.get_finetune(job_id).remote_status == "queued"
+
+    def temporarily_unavailable(_):
+        raise TimeoutError
+
+    dream.finetune_status = temporarily_unavailable
+    worker.tick()
+    assert "TimeoutError" in store.get_finetune(job_id).error
+
     dream.finetune_status = lambda _: {"status": "running", "fine_tuned_model": None}
     worker.tick()
     assert store.get_finetune(job_id).status == "training"
     assert store.get_finetune(job_id).remote_status == "running"
+    assert store.get_finetune(job_id).error is None
+
+    dream.finetune_status = lambda _: {"status": "succeeded", "fine_tuned_model": None}
+    worker.tick()
+    assert store.get_finetune(job_id).status == "training"
+    assert store.get_finetune(job_id).remote_status == "succeeded"
+    assert store.get_finetune(job_id).checkpoint is None
+
     dream.finetune_status = lambda _: {"status": "succeeded", "fine_tuned_model": "dream-1-ft:pilot-test"}
     worker.tick()
     assert store.get_finetune(job_id).checkpoint == "dream-1-ft:pilot-test"

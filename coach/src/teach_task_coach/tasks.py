@@ -469,10 +469,19 @@ class TaskStore:
                    station_started_at = COALESCE(?, station_started_at),
                    start_requested_at = COALESCE(?, start_requested_at),
                    episode_id = COALESCE(?, episode_id), last_error = ?
-                   WHERE id = ? AND status = ?""",
-                (status, station_run, station_started_at, start_requested_at, episode_id, last_error, trial_id, expected),
+                   WHERE id = ? AND status = ?
+                   AND NOT EXISTS (
+                       SELECT 1 FROM trials AS other WHERE ? = 'starting' AND other.id != ?
+                       AND other.status IN ('starting', 'running', 'awaiting_rollout')
+                   )""",
+                (
+                    status, station_run, station_started_at, start_requested_at,
+                    episode_id, last_error, trial_id, expected, status, trial_id,
+                ),
             )
             if cursor.rowcount != 1:
+                if status == "starting":
+                    raise TrialStateError("This trial is no longer ready to start. Finish or sync any active trial.")
                 raise TrialStateError(f"Trial must be {expected} for this action.")
         result = self.get_trial(trial_id)
         assert result is not None

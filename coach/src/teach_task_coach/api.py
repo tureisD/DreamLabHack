@@ -6,6 +6,7 @@ import re
 from dataclasses import asdict
 from importlib.resources import files
 from pathlib import Path
+from threading import Lock
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -272,6 +273,7 @@ def create_app(
     evaluations = evaluation_store or EvaluationStore(episodes.data_dir)
     repairs = repair_store or RepairStore(episodes.data_dir)
     scene_fixture = scene_adapter or SceneAdapter()
+    station_movement = Lock()
     account = account_service or AccountService()
     simulator = simulator_setup or SimulatorSetup()
     yam = YamWorkflow(
@@ -874,15 +876,20 @@ def create_app(
     @app.post("/api/trials/{trial_id}/start", response_model=Trial)
     def start_trial(trial_id: str) -> Trial:
         require_live_trial(trial_id)
+        if not station_movement.acquire(blocking=False):
+            raise HTTPException(status_code=409, detail="Another station start or scene placement is in progress.")
+
+        def place_evaluation_scene(trial: Trial) -> None:
+            if trial.evaluation_id is None:
+                return
+            scene = scene_for_trial(trial, tasks)
+            if scene is None:
+                raise TrialError("Scene manifest is missing.")
+            scene_fixture.place(scene)
+
         try:
-            planned = tasks.get_trial(trial_id)
-            if planned is not None and planned.status == "planned" and planned.evaluation_id and scene_fixture.configured:
-                scene = scene_for_trial(planned, tasks)
-                if scene is None:
-                    raise HTTPException(status_code=409, detail="Scene manifest is missing.")
-                if preflight.station.status()["state"] != "idle":
-                    raise HTTPException(status_code=409, detail="Wait for the robot station to be idle.")
-                scene_fixture.place(scene)
+            if scene_fixture.configured:
+                return runner.start(trial_id, before_start=place_evaluation_scene)
             return runner.start(trial_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Trial not found.") from exc
@@ -892,6 +899,8 @@ def create_app(
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        finally:
+            station_movement.release()
 
     @app.get("/api/trials/{trial_id}/warmups", response_model=list[EpisodeSummary])
     def trial_warmups(trial_id: str) -> list[EpisodeSummary]:
@@ -1281,13 +1290,19 @@ def create_app(
 
     @app.post("/api/trials/{trial_id}/prepare-scene", response_model=PlacementResult)
     def prepare_scene(trial_id: str) -> PlacementResult:
-        trial = require_live_trial(trial_id)
-        if trial.status != "planned" or not trial.evaluation_id:
-            raise HTTPException(status_code=409, detail="Only a planned evaluation scene can be placed.")
-        scene = scene_for_trial(trial, tasks)
-        if scene is None:
-            raise HTTPException(status_code=409, detail="Scene manifest is missing.")
+        if not station_movement.acquire(blocking=False):
+            raise HTTPException(status_code=409, detail="Another station start or scene placement is in progress.")
         try:
+            trial = require_live_trial(trial_id)
+            if trial.status != "planned" or not trial.evaluation_id:
+                raise HTTPException(status_code=409, detail="Only a planned evaluation scene can be placed.")
+            next_trial = tasks.next_evaluation_trial(trial.evaluation_id)
+            active = tasks.active_trial()
+            if next_trial is None or next_trial.id != trial.id or active is not None:
+                raise HTTPException(status_code=409, detail="Finish the preceding trial before placing this scene.")
+            scene = scene_for_trial(trial, tasks)
+            if scene is None:
+                raise HTTPException(status_code=409, detail="Scene manifest is missing.")
             if preflight.station.status()["state"] != "idle":
                 raise HTTPException(status_code=409, detail="Wait for the robot station to be idle.")
             return scene_fixture.place(scene)
@@ -1295,6 +1310,8 @@ def create_app(
             raise HTTPException(status_code=503, detail="Robot station is unavailable.") from exc
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        finally:
+            station_movement.release()
 
     @app.get("/api/evaluations/{evaluation_id}/report", response_model=EvaluationReport)
     def get_evaluation_report(evaluation_id: str) -> EvaluationReport:
