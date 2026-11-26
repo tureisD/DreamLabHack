@@ -397,9 +397,6 @@ button:hover { background: #383636; }
 
 /* Keep the city behind the whole conversation while only the messages scroll. */
 .chat-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, 29%); gap: 20px; align-items: start; }
-.chat-layout-onboarding { grid-template-columns: minmax(0, 1fr); }
-.chat-layout-onboarding .chat-secret { margin-block: 12px; flex-wrap: wrap; }
-.chat-layout-onboarding .chat-secret input { min-width: min(100%, 14rem); }
 .chat-page .chat-shell { position: relative; isolation: isolate; display: flex; flex-direction: column; height: clamp(440px, calc(100dvh - 180px), 900px); }
 .chat-landscape { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; border-radius: inherit; pointer-events: none; }
 .chat-landscape::after { background: linear-gradient(180deg, rgba(89, 49, 32, .17), rgba(255, 245, 228, .32) 35%, rgba(255, 245, 228, .2)); }
@@ -428,6 +425,7 @@ html:has(meta[name="dreamcoach-mode"]) {
 }
 .chat-begin p { margin: 0; color: #614d42; font-size: 13px; text-align: right; }
 .chat-begin button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
@@ -436,17 +434,26 @@ html:has(meta[name="dreamcoach-mode"]) {
   min-width: 176px;
   min-height: 64px;
   padding: 10px 11px 10px 25px;
-  border: 1px solid #fff5ce;
-  background: linear-gradient(125deg, #ffe79d, #ffbd76 60%, #ffa362);
+  border: 1px solid #ffeccc;
+  background: linear-gradient(125deg, #ffeab0, #ffc585 55%, #ffa877);
   color: #432619;
   font-size: 21px;
   font-weight: 750;
-  box-shadow: 0 0 21px #ffa85988, 0 5px 14px #9c481b38, inset 0 1px 1px #fff9;
+  box-shadow: 0 0 18px #ffb864a6, 0 5px 14px #9c481b38, inset 0 1px 1px #fff9;
   transition: transform .18s ease, box-shadow .18s ease;
 }
-.chat-begin button:enabled { animation: chat-begin-glow 3.6s ease-in-out infinite; }
+.chat-begin button:enabled::after {
+  position: absolute;
+  inset: -2px;
+  border: 2px solid #ffcc85;
+  border-radius: inherit;
+  box-shadow: 0 0 12px #ffb35c9c;
+  content: '';
+  pointer-events: none;
+  animation: chat-begin-glow 2.65s ease-out infinite;
+}
 .chat-begin button:enabled:hover {
-  animation: none;
+  background: linear-gradient(125deg, #fff1ba, #ffca8c 55%, #ffad7e);
   transform: translateY(-2px);
   box-shadow: 0 0 29px #ffa859aa, 0 9px 17px #9c481b4a, inset 0 1px 1px #fff9;
 }
@@ -462,14 +469,16 @@ html:has(meta[name="dreamcoach-mode"]) {
   line-height: 1;
 }
 @keyframes chat-begin-glow {
-  50% { box-shadow: 0 0 30px #ffa859a0, 0 5px 14px #9c481b38, inset 0 1px 1px #fff9; }
+  0% { opacity: .95; transform: scale(1); }
+  70%, 100% { opacity: 0; transform: scale(1.08, 1.24); }
 }
 @media (max-width: 500px) {
   .chat-begin { gap: 12px; padding: 8px 16px 18px; }
   .chat-begin button { min-width: 144px; min-height: 58px; gap: 14px; padding-left: 19px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chat-begin button:enabled { animation: none; transition: none; }
+  .chat-begin button:enabled { transition: none; }
+  .chat-begin button:enabled::after { animation: none; opacity: .45; }
   .chat-begin button:enabled:hover { transform: none; }
 }
 .chat-page .chat-composer { flex: 0 0 auto; margin: 0; padding: 14px 20px; background: rgba(255, 255, 255, .94); }

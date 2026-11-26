@@ -5,6 +5,7 @@ import ChatTraining from './ChatTraining';
 import ChatCheckpointPicker from './ChatCheckpointPicker';
 import ChatResumePicker from './ChatResumePicker';
 import ChatToolPanel, { type ChatTool } from './ChatToolPanel';
+import DreamKeyCard from './DreamKeyCard';
 import SceneTask, { type ScenePreset } from './SceneTask';
 import SimCorrect from './SimCorrect';
 import type { PairedReport } from './StatisticalAudit';
@@ -100,7 +101,6 @@ export default function CoachChat({
   const [text, setText] = useState('');
   const [secret, setSecret] = useState('');
   const [hostedAiKey, setHostedAiKey] = useState('');
-  const [copiedAddress, setCopiedAddress] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [simulatorNotice, setSimulatorNotice] = useState('');
@@ -486,15 +486,6 @@ export default function CoachChat({
     void workflowState(taskId).catch((caught: Error) => setError(caught.message));
   }
 
-  async function copyAddress(address: string) {
-    try {
-      await navigator.clipboard.writeText(address);
-      setCopiedAddress(address);
-    } catch {
-      setError('Copy the address shown in chat.');
-    }
-  }
-
   function finishReview(receipt: DemoKeepReceipt) {
     setWorkSurface(null);
     setReply(null);
@@ -531,7 +522,6 @@ export default function CoachChat({
     setText('');
     setSecret('');
     setHostedAiKey('');
-    setCopiedAddress('');
     setError('');
     setShowSimulator(false);
     setWorkSurface(null);
@@ -624,6 +614,8 @@ export default function CoachChat({
   const simulatorRequested = begun && !needsHostedConnection && (guidedMode || showSimulator || currentYamJob || simulatorMode !== 'apple'
     || reply?.setup_help === 'simulator' || simulatorHelpPattern.test(reply?.message ?? ''));
   const needsDreamKey = !hosted && begun && account && (!account.configured || dreamAccess === 'blocked' || dreamAccess === 'unavailable');
+  const showHostedConnect = needsHostedConnection && begun;
+  const entryLayout = !begun || showHostedConnect;
   const suggestedScreen = reply?.suggested_screen;
   const showSuggestedTool = begun && suggestedScreen && (!hosted || suggestedScreen !== 'tasks')
     && !(simulatorRequested && (['demos', 'training', 'tasks'].includes(suggestedScreen)
@@ -683,7 +675,7 @@ export default function CoachChat({
     }
   }
 
-  return <main className="page chat-page">
+  return <main className={`page chat-page${entryLayout ? ' chat-page-entry' : ''}`}>
     <header className="header">
       <div className="coach-hero">
         <div className="coach-mark" aria-hidden="true">✦</div>
@@ -691,8 +683,8 @@ export default function CoachChat({
         <p className="subtitle">Teach Dream-1 a task and see how it performs.</p>
       </div>
     </header>
-    {error && !needsHostedConnection && <div className="alert" role="alert">{error}</div>}
-    <div className={`chat-layout${needsHostedConnection ? ' chat-layout-onboarding' : ''}`}>
+    {error && !needsHostedConnection && (!needsDreamKey || workSurface) && <div className="alert" role="alert">{error}</div>}
+    <div className="chat-layout">
     <section className="card chat-shell" aria-label="Fine-tuning coach conversation">
       <div className="chat-panel-top">
         <span className="chat-landscape-title"><span className="coach-panel-mark" aria-hidden="true">✦</span>Conversation</span>
@@ -701,7 +693,7 @@ export default function CoachChat({
       <div className={`chat-thread${workSurface ? ' chat-thread-workspace' : ''}`} ref={thread}
         aria-live={workSurface ? undefined : 'polite'} tabIndex={workSurface ? -1 : undefined}>
       {workSurface ? renderWorkspace(workSurface) : <>
-        {hosted && messages.length === 0 && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>{hostedIntroduction}</p></div>}
+        {hosted && messages.length === 0 && !showHostedConnect && <div className="chat-bubble chat-assistant"><span>DreamCoach</span><p>{hostedIntroduction}</p></div>}
         {messages.map((item, index) => <div key={index} className={`chat-bubble chat-${item.role}`}>
           <span>{item.role === 'assistant' ? 'DreamCoach' : 'You'}</span>
           <p>{item.role === 'assistant' ? item.content.replace('Watch results in the sidebar', 'Open Evaluation results below') : item.content}</p>
@@ -709,30 +701,10 @@ export default function CoachChat({
         {busy && !needsHostedConnection && <div className="chat-bubble chat-assistant"><span>DreamCoach</span>
           <p>{!begun && messages.length ? 'Resetting the YAM simulator…' : 'Thinking through your next step…'}</p>
         </div>}
-      {needsHostedConnection && begun && <div className="chat-bubble chat-assistant">
-        <span>DreamCoach</span>
-        <p>Connect your Dream Labs account before starting the simulator.</p>
-        <form onSubmit={(event) => void createHostedWorkspace(event)} className="chat-secret">
-          <input aria-label="Dream Labs API key" type="password" autoComplete="off" autoFocus
-            maxLength={300} value={secret} onChange={(event) => setSecret(event.target.value)}
-            placeholder="Dream Labs API key" />
-          <button type="submit" disabled={busy || !secret.trim()}>{busy ? 'Checking…' : 'Connect Dream Labs'}</button>
-        </form>
-        <p className="hint">DreamCoach stores your key in your private workspace, separate from the conversation.</p>
-        <a href="https://platform.dreamlabs.ai/api-keys" target="_blank" rel="noreferrer">Create a Dream Labs API key</a>
-        {error && <p className="alert" role="alert">{error}</p>}
-      </div>}
-      {needsDreamKey && <div className="chat-action">
-        <p>Create a key in your Dream Labs account at <code>{account.dashboard_url}</code>. Paste it into the private field below. The key stays out of your conversation.</p>
-        <button type="button" className="secondary" onClick={() => void copyAddress(account.dashboard_url)}>
-          {copiedAddress === account.dashboard_url ? 'Address copied' : 'Copy Dream API keys address'}
-        </button>
-        <form onSubmit={(event) => void connectDream(event)} className="chat-secret">
-          <input aria-label="Dream API key" type="password" autoComplete="off" value={secret}
-            onChange={(event) => setSecret(event.target.value)} placeholder="Dream API key" />
-          <button disabled={busy || !secret.trim()}>Connect Dream</button>
-        </form>
-      </div>}
+      {(showHostedConnect || needsDreamKey) && <DreamKeyCard
+        dashboardUrl={account?.dashboard_url ?? 'https://platform.dreamlabs.ai/api-keys'}
+        hosted={showHostedConnect} value={secret} onChange={setSecret} busy={busy} error={error}
+        onSubmit={(event) => void (showHostedConnect ? createHostedWorkspace(event) : connectDream(event))} />}
       {begun && reply?.setup_help === 'robot' && <div className="chat-action chat-setup-help">
         <strong>Robot setup</strong>
         <p>Connect the arms and cameras, then check for fresh camera frames before a baseline trial.</p>
@@ -830,22 +802,24 @@ export default function CoachChat({
           </button>
         ))}</div>
       </div>}
-      {!workSurface && !begun && <div className="chat-suggestions" role="group" aria-label="Quick starts">
-        <span>Quick starts</span>
-        <div>{simulatorWorkflows.map(({ id, title }) => (
-          <button type="button" className="secondary" key={id} disabled={busy || !canBegin}
-            onClick={() => void beginConversation(id)}>{title}</button>
-        ))}</div>
-      </div>}
-      {!workSurface && !begun && <div className="chat-begin">
-        <p id="chat-begin-description">{guidedMode && !needsHostedConnection ? 'Start with the guided simulator.' : 'First, we’ll check Dream Labs access.'}</p>
-        <button type="button" aria-describedby="chat-begin-description" disabled={busy || !canBegin} onClick={() => void beginConversation()}>
-          Begin<span className="chat-begin-arrow" aria-hidden="true">→</span>
-        </button>
+      {!workSurface && !begun && <div className="chat-entry-actions">
+        <div className="chat-suggestions" role="group" aria-label="Quick starts">
+          <span>Quick starts</span>
+          <div>{simulatorWorkflows.map(({ id, title }) => (
+            <button type="button" className="secondary" key={id} disabled={busy || !canBegin}
+              onClick={() => void beginConversation(id)}>{title}</button>
+          ))}</div>
+        </div>
+        <div className="chat-begin">
+          <p id="chat-begin-description">{guidedMode && !needsHostedConnection ? 'Start with the guided simulator.' : 'First, we’ll check Dream Labs access.'}</p>
+          <button type="button" aria-describedby="chat-begin-description" disabled={busy || !canBegin} onClick={() => void beginConversation()}>
+            Begin<span className="chat-begin-arrow" aria-hidden="true">→</span>
+          </button>
+        </div>
       </div>}
       {!workSurface && begun && !guidedMode && <form onSubmit={(event) => void submit(event)} className="chat-composer"><textarea ref={composer} aria-label="Message to coach" disabled={!ai?.configured} value={text} maxLength={2000} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(event); } }} placeholder="Tell me about your robot or ask what to do next…" /><button disabled={!ai?.configured || busy || !text.trim()}>Send</button></form>}
     </section>
-    {!needsHostedConnection && <details className="coach-evidence">
+    {begun && !needsHostedConnection && <details className="coach-evidence">
       <summary>Evaluation results</summary>
       <LiveEvaluation taskId={evaluationTaskId}
         simulatorMode={currentTaskMode}

@@ -135,13 +135,10 @@ class ChatReply(BaseModel):
 
 
 CHAT_WELCOME = (
-    "Hi, I’m DreamCoach. I help you fine-tune Dream-1 and use the results to decide what to teach it next.\n\n"
-    "• Simulate and collect. Use YAM without a physical robot. Start with the bundled apple pickup demos, "
-    "click to correct a fruit task, or build a pick-and-place scene.\n"
-    "• Review and fine-tune. Keep the useful demos, then I’ll guide you through dataset validation and Dream FaaS. "
-    "You approve paid training.\n"
-    "• Evaluate and improve. Compare checkpoints on matched held-out scenes for apple pickup or apple into bowl. "
-    "Resume interrupted comparisons from their saved results, and use the misses to choose your next demos.\n\n"
+    "Hi, I’m DreamCoach. I’ll help you teach Dream-1 a task and measure how much it improves.\n\n"
+    "• Collect YAM demos without a physical robot. Try apple pickup, fruit correction, or a custom scene.\n"
+    "• Review demos and approve fine-tuning with Dream FaaS.\n"
+    "• Evaluate and improve. Compare models on held-out scenes, resume interrupted runs, and use the misses to choose your next demos.\n\n"
     "Press Begin and I’ll guide you one step at a time."
 )
 

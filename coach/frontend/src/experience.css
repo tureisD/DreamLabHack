@@ -49,6 +49,18 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
   margin: 0 0 clamp(20px, 3.8vh, 40px);
 }
 
+.coach-experience .chat-page { max-width: 1200px; }
+
+.coach-experience .chat-page-entry {
+  padding-block: clamp(12px, 3dvh, 32px) 20px;
+}
+
+.coach-experience .chat-page-entry .header { margin-bottom: clamp(14px, 2.6dvh, 24px); }
+.coach-experience .chat-page-entry .coach-hero { gap: 7px; }
+.coach-experience .chat-page-entry .coach-hero h1 {
+  font-size: clamp(37px, min(9vw, 9dvh), 74px);
+}
+
 .coach-hero {
   display: grid;
   justify-items: center;
@@ -92,7 +104,7 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
 }
 
 .coach-experience .chat-page .chat-shell {
-  height: clamp(335px, calc(100dvh - 305px), 650px);
+  height: clamp(425px, calc(100dvh - 220px), 850px);
   border: 1px solid #fff7ec;
   border-radius: 25px;
   background: var(--paper);
@@ -136,6 +148,25 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
   backdrop-filter: none;
   padding: var(--chat-gutter);
   scrollbar-color: #dfb8a0 transparent;
+}
+
+.coach-experience .chat-page-entry .chat-shell {
+  height: auto;
+  min-height: clamp(400px, calc(100dvh - 212px), 570px);
+}
+
+.coach-experience .chat-page-entry .chat-thread {
+  flex: 1 0 auto;
+  overflow: visible;
+  justify-content: center;
+}
+
+.coach-experience .chat-page-entry .chat-assistant {
+  align-self: center;
+  width: 100%;
+  max-width: 960px;
+  padding: clamp(14px, 2.5vw, 27px);
+  font-size: clamp(14px, 1.7vw, 17px);
 }
 
 .coach-experience .chat-bubble {
@@ -200,7 +231,22 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
 .coach-experience .chat-begin,
 .coach-experience .chat-page .chat-composer { border-top-color: var(--edge); }
 
-.coach-experience .chat-begin button,
+.chat-entry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  padding: 17px var(--chat-gutter) 21px;
+  border-top: 1px solid var(--edge);
+  background: var(--paper);
+}
+
+.coach-experience .chat-entry-actions :is(.chat-suggestions, .chat-begin) { padding: 0; background: transparent; }
+.coach-experience .chat-entry-actions .chat-suggestions { min-width: 0; }
+.coach-experience .chat-entry-actions .chat-begin { margin-left: auto; }
+.coach-experience .chat-suggestions[aria-label="Quick starts"] > div { overflow: visible; }
+
 .coach-experience .chat-composer button {
   border-color: #b35e3e;
   background: #974b30;
@@ -208,16 +254,144 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
   box-shadow: 0 4px 12px #8c40272c;
 }
 
-.coach-experience .chat-begin button:enabled { animation: none; }
-.coach-experience .chat-begin button:enabled:hover { transform: none; }
-.coach-experience .chat-begin button:enabled:hover,
 .coach-experience .chat-composer button:enabled:hover { background: #783922; }
-.coach-experience .chat-begin-arrow { background: #ffffff24; }
 
 .coach-experience :where(button, summary, a, textarea, input, select):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+
+.dream-key-card {
+  align-self: center;
+  display: grid;
+  gap: clamp(14px, 2.4vw, 24px);
+  width: min(100%, 960px);
+  padding: clamp(14px, 2.8vw, 30px);
+  border: 1px solid #edcfbc;
+  border-radius: 20px;
+  background: linear-gradient(145deg, #fffcf8 33%, #fff1e2);
+  box-shadow: 0 8px 25px #964c2910;
+}
+
+.dream-key-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.dream-key-header h2 {
+  font-size: clamp(18px, 2.7vw, 25px);
+  line-height: 1.19;
+  letter-spacing: -.025em;
+}
+
+.dream-key-header h2:focus { outline: none; }
+.dream-key-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 45px;
+  width: 45px;
+  height: 45px;
+  border: 1px solid #f0c5a1;
+  border-radius: 13px;
+  color: #8c4027;
+  background: linear-gradient(140deg, #fff6cb, #ffd2b2);
+}
+
+.dream-key-card :is(h2, h3, p) { margin: 0; }
+.chat-shell .dream-key-card p { color: var(--muted); }
+.dream-key-header p { margin-top: 4px; font-size: 14px; }
+
+.dream-key-steps {
+  display: grid;
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.dream-key-steps > * {
+  display: grid;
+  justify-items: start;
+  align-content: start;
+  gap: 10px;
+  padding: clamp(12px, 2vw, 18px);
+  border: 1px solid #eed6c6;
+  border-radius: 14px;
+  background: #ffffffab;
+}
+
+.dream-key-card :is(h3, label) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 725;
+}
+
+.dream-key-card :is(h3, label) span {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #ffead8;
+  color: #884125;
+  font-size: 12px;
+}
+
+.dream-key-create p { font-size: 14px; }
+.dream-key-create a, .dream-key-form button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 9px 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.dream-key-create a {
+  border-color: #efc6a8;
+  background: #fff1e3;
+  color: #76391f;
+  text-decoration: none;
+}
+
+.dream-key-create a:hover { background: #ffe5cb; }
+.dream-key-card :where(a, button) svg { flex: 0 0 auto; }
+.dream-key-form input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px solid #ddbeac;
+  border-radius: 10px;
+  background: #fffcf8;
+  color: var(--ink);
+  font: inherit;
+}
+
+.dream-key-form input::placeholder { color: #786055; }
+.dream-key-form button { background: #914729; color: #fffbf5; }
+.dream-key-form button:enabled:hover { background: #74371f; }
+.dream-key-form button:disabled {
+  opacity: 1;
+  background: #f1ddd0;
+  color: #755f54;
+}
+
+.dream-key-privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.dream-key-privacy svg { flex: 0 0 auto; margin-top: 2px; color: var(--accent); }
 
 .coach-experience :is(.chat-workspace-header, .chat-training-header) { gap: 12px 16px; }
 .coach-experience :is(.chat-workspace-header, .chat-training-header) > :first-child { min-width: 0; }
@@ -398,10 +572,23 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
 @media (max-width: 580px) {
   .coach-experience::before { background-position: 29% center; }
   .coach-experience :is(.chat-page, .coach-evidence-page) { padding-inline: 12px; }
-  .coach-experience .chat-page .chat-shell { height: max(365px, calc(100dvh - 272px)); border-radius: 19px; }
+  .coach-experience .chat-page .chat-shell { height: max(390px, calc(100dvh - 170px)); border-radius: 19px; }
+  .coach-experience .chat-page-entry .chat-shell { height: auto; }
   .coach-experience .chat-panel-top { flex-basis: 56px; }
   .coach-experience .chat-bubble { max-width: 100%; }
   .coach-mark { width: 41px; height: 41px; border-radius: 13px; font-size: 24px; }
+}
+
+@media (max-width: 650px) {
+  .dream-key-steps { grid-template-columns: minmax(0, 1fr); }
+  .chat-entry-actions { padding-block: 12px 17px; }
+  .coach-experience .chat-entry-actions .chat-suggestions { flex-basis: 100%; }
+  .coach-experience .chat-suggestions[aria-label="Quick starts"] > div {
+    width: 100%;
+    max-width: 100%;
+    margin-inline: 0;
+    padding-inline: 0;
+  }
 }
 
 @media (max-width: 480px) {
@@ -410,4 +597,26 @@ html:has(meta[name="dreamcoach-mode"]) .coach-experience::before {
   .coach-experience .chat-inventory { padding-inline: 12px; }
   .coach-experience .chat-suggestions button { padding-inline: 9px; }
   .coach-experience .chat-suggestions > div { gap: 7px; }
+  .coach-experience .chat-entry-actions .chat-begin { width: 100%; }
+  .dream-key-header { gap: 10px; }
+  .dream-key-icon { flex-basis: 37px; width: 37px; height: 37px; }
+}
+
+@media (max-width: 360px), (max-height: 580px) {
+  .coach-experience .chat-page-entry { padding-block: 12px; }
+  .coach-experience .chat-page-entry .header { margin-bottom: 12px; }
+  .coach-experience .chat-page-entry .coach-hero {
+    grid-template-columns: auto auto;
+    align-items: center;
+    justify-content: center;
+  }
+  .coach-experience .chat-page-entry .coach-hero .subtitle { grid-column: 1 / -1; margin: 0; }
+  .coach-experience .chat-page-entry .coach-mark { width: 33px; height: 33px; border-radius: 10px; font-size: 20px; }
+  .coach-experience .chat-page-entry .chat-shell { min-height: 0; }
+  .coach-experience .chat-page-entry .chat-panel-top { flex-basis: 48px; padding-block: 4px; }
+  .coach-experience .chat-page-entry .chat-thread { padding: 9px var(--chat-gutter); }
+  .coach-experience .chat-page-entry .chat-assistant { padding: 14px; font-size: 14px; }
+  .coach-experience .chat-page-entry .chat-assistant p { line-height: 1.4; }
+  .chat-entry-actions { gap: 6px 18px; padding-block: 8px 14px; }
+  .chat-begin button { min-height: 53px; }
 }
