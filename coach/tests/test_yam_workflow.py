@@ -204,7 +204,8 @@ def test_bundled_data_is_available_without_dream_access(tmp_path):
     response = client.post("/api/simulator/collect", json={"source": "bundled"})
     assert response.status_code == 202
     task_id = response.json()["task_id"]
-    assert wait_for_job(client, timeout=15)["demos"] == 24
+    job = wait_for_job(client, timeout=120)
+    assert (job["completed"], job["total"], job["demos"]) == (24, 24, 24)
     rows = client.get(f"/api/tasks/{task_id}/demos").json()
     assert len(rows) == 24
     assert all(row["decision"] == "unreviewed" for row in rows)
@@ -230,6 +231,7 @@ def test_session_reset_stops_live_rollout_and_retains_completed_pairs(tmp_path, 
         if Path(args[1]).name == "score_workflow_rollout.py":
             return SimpleNamespace(returncode=0, stdout="WORKFLOW_RESULT=" + json.dumps(scores[args[2]]))
         assert Path(args[1]).name == "record_dream_model_rollout.py"
+        assert "--comparison-trial" in args
         if len(scores) == 2:
             third_recording.set()
             assert cancel.wait(10)
@@ -274,7 +276,7 @@ def test_session_reset_stops_live_rollout_and_retains_completed_pairs(tmp_path, 
     assert client.get("/api/simulator/workflow").json() is None
     assert client.get(url).json() == before
     assert client.post("/api/simulator/collect", json={"source": "bundled"}).status_code == 202
-    assert wait_for_job(client)["demos"] == 24
+    assert wait_for_job(client, timeout=120)["demos"] == 24
 
 
 def test_existing_checkpoint_choices_join_accessible_models_and_verified_training(tmp_path, monkeypatch):
@@ -360,3 +362,82 @@ def test_chat_reports_the_saved_session_replacement_reason(tmp_path, monkeypatch
         "Dream reported that the model server stopped. "
         "The partial recording saved 288 of 576 model actions."
     )
+    [failure] = job["training_trial_diagnostics"]
+    assert failure["scene"] == 1
+    assert failure["diagnosis"]["code"] == "dream_session_replaced"
+    assert job["message"] in failure["diagnosis"]["evidence"]
+
+
+@pytest.mark.parametrize(("error", "metadata", "code"), [
+    ("ValueError", {"action_chunk_rejected": True}, "action_chunk_rejected"),
+    ("TimeoutError", {"warming_timeout": True}, "dream_warming_timeout"),
+])
+def test_invalid_comparison_explains_the_recorded_execution_failure(
+    tmp_path, monkeypatch, error, metadata, code,
+):
+    ready = SimpleNamespace(status=lambda: SimulatorStatus(state="ready", message="Offline fixture"))
+    preflight = PreflightService(model_loader=lambda: [
+        SimpleNamespace(id=id_, owner="test", embodiment="yam", servable=True, cameras=None)
+        for id_ in (BASE, VERIFIED_CANDIDATE)
+    ])
+    client = TestClient(create_app(
+        preflight, EpisodeStore(tmp_path), simulator_setup=ready,
+        dream_gateway=SimpleNamespace(finetunes=list),
+    ))
+
+    def fail_recording(script, output_flag, output, *_args, **_kwargs):
+        assert (script, output_flag) == ("record_dream_model_rollout.py", "--output")
+        sidecar = Path(output) / "fixture" / "rollout.json"
+        sidecar.parent.mkdir(parents=True)
+        sidecar.write_text(json.dumps({"error": error, "simulation": metadata}), encoding="utf-8")
+        raise yam_workflow.SimulatorRunError("Untrusted recorder text")
+
+    monkeypatch.setattr(yam_workflow, "command", fail_recording)
+    response = client.post("/api/simulator/compare-existing", json={"checkpoint": VERIFIED_CANDIDATE})
+    assert response.status_code == 202
+    task_id = response.json()["task_id"]
+    assert wait_for_job(client)["state"] == "failed"
+    endpoint = f"/api/simulator/comparisons/{task_id}"
+    report = client.get(endpoint).json()["report"]
+    assert report["decision"] == "not_evaluable"
+    [pair] = report["pairs"]
+    assert pair["baseline"]["outcome"] == "invalid"
+    assert pair["candidate"] is None
+    diagnoses = client.get(endpoint + "/diagnostics").json()["trials"]
+    assert diagnoses[pair["baseline"]["trial_id"]]["code"] == code
+    assert "Untrusted recorder text" not in str(diagnoses)
+
+
+@pytest.mark.parametrize(("use_eef", "split", "reason"), [
+    (True, {"training": [], "heldout": [901, 902]}, "joint space"),
+    (False, {"training": [], "heldout": [901]}, "distinct held-out scenes"),
+    (False, {"training": [], "heldout": [901, 901]}, "distinct held-out scenes"),
+    (False, {"training": [901], "heldout": [901, 902]}, "distinct held-out scenes"),
+    (False, {"heldout": [901, 902]}, "distinct held-out scenes"),
+])
+def test_incompatible_comparison_is_rejected_before_dream_preflight(
+    tmp_path, use_eef, split, reason,
+):
+    ready = SimpleNamespace(status=lambda: SimulatorStatus(state="ready", message="Offline fixture"))
+
+    def check_dream():
+        pytest.fail("Local comparison validation should happen before Dream preflight")
+
+    preflight = PreflightService(model_loader=check_dream)
+    client = TestClient(create_app(preflight, EpisodeStore(tmp_path), simulator_setup=ready))
+    task_id = client.post("/api/tasks", json={
+        "name": "Apple pickup · YAM simulator", "prompt": PROMPT,
+        "baseline_checkpoint": BASE, "success_rule": SUCCESS_RULE,
+    }).json()["id"]
+    folder = tmp_path / "yam-workflow" / task_id
+    folder.mkdir()
+    (folder / "scenes.json").write_text(json.dumps(split), encoding="utf-8")
+    faas = FaaSStore(tmp_path)
+    dataset = faas.create_dataset(task_id, "fixture/yam", [])
+    job = faas.create_finetune(dataset.id, FineTuneRequest(use_eef=use_eef))
+    faas.update_finetune(job.id, status="succeeded", checkpoint=CANDIDATE)
+
+    response = client.post("/api/simulator/compare", json={"task_id": task_id, "job_id": job.id, "pairs": 2})
+    assert response.status_code == 409
+    assert reason in response.json()["detail"]
+    assert client.get("/api/simulator/workflow").json() is None

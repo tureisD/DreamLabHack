@@ -14,7 +14,7 @@ The **Robot-free workflow** menu also offers **Click to correct a fruit task** a
 
 ## Run from the terminal
 
-From `coach/`, install `uv sync --locked --extra sim`. Select **fresh training candidate seeds** outside 41–48, 101–116, 201–224 and reserved evaluation seeds 901–912. Use new seeds such as 1201–1208. Record the base or current fine-tune on each scene with the existing model recorder. Model inference uses the local Dream credential and may consume account credits; the collector itself does not call Dream or launch FaaS.
+From `coach/`, install `uv sync --locked --extra sim`. Select **fresh training candidate seeds** outside 41–48, 101–116, 201–224 and reserved evaluation seeds 901–940. Use new seeds such as 1201–1208. Record the base or current fine-tune on each scene with the existing model recorder. Model inference uses the local Dream credential and may consume account credits; the collector itself does not call Dream or launch FaaS.
 
 ```powershell
 $raw = Join-Path $env:LOCALAPPDATA 'TeachTaskCoach/fresh-model-failures'
@@ -28,7 +28,7 @@ Set `DREAM_API_KEY` or the Dream SDK credentials locally before the first comman
 
 The collector rejects duplicate eligible scene seeds, mixed checkpoints, test seeds, and seeds used in our existing training batches. It scores model failure from the saved action trace and replayed or directly recorded apple height. It prioritizes distinct failure timing and spatially separated apple positions. It then checks the corrective controller's own task result, contact geometry and state replay, the downsampled action replay, and Dream dataset structure. Only fully checked episodes are moved into the coach demo folder. The JSON manifest records source and exported-demo SHA-256 hashes, selected failure kind, seed, recipe, frame count, and replay outcome. Source model runs remain separate from expert training episodes.
 
-Open **Demos** in the coach, scan, inspect each camera, and choose **Keep** or **Redo**. The training worker still requires a separately registered YAM embodiment and an explicit paid job submission. Freeze a fresh evaluation split before a new FaaS job; do not use the failure scenes for the before/after verdict. The existing 901–912 evaluation scenes remain excluded from this collector.
+Open **Demos** in the coach, scan, inspect each camera, and choose **Keep** or **Redo**. The training worker requires a registered YAM embodiment and explicit approval for a paid job. Freeze a fresh evaluation split before submitting the job. DreamCoach marks new comparisons as held out so the collector excludes them, including when you copy the resulting rollouts to a different directory.
 
 ## What this can establish
 

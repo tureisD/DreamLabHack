@@ -12,6 +12,7 @@ from record_yam_demos import TASK, YamEnv
 from rollout_diagnosis import GraspReplay, diagnose_rollout
 
 RESERVED = HOLDOUT | CONFIRMATION | SECOND_CONFIRMATION
+PUBLISHED_EVALUATION_SEEDS = RESERVED | set(range(913, 941))
 PREVIOUS_TRAINING = set().union(*SEEDS.values())
 
 
@@ -27,8 +28,12 @@ def score(
         or scene["source"] != "model"
         or not isinstance(scene.get("seed"), int)
         or scene["seed"] < 0
-        or (scene["seed"] in RESERVED if training_candidate else scene["seed"] not in holdout)
-        or (training_candidate and scene["seed"] in PREVIOUS_TRAINING)
+        or (not training_candidate and scene["seed"] not in holdout)
+        or (training_candidate and (
+            scene.get("split") == "heldout"
+            or scene["seed"] in PUBLISHED_EVALUATION_SEEDS
+            or scene["seed"] in PREVIOUS_TRAINING
+        ))
         or scene["start_pose"] != "wrist-visible"
         or info["task"] != TASK
     ):

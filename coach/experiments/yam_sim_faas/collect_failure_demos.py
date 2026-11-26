@@ -178,7 +178,7 @@ def collect(root: Path, output: Path, *, max_demos: int) -> dict:
             "task": TASK, "model_checkpoint": selected[0]["checkpoint"],
             "eligible_failed_rollouts": len(failures), "selected_demos": len(rows),
             "frames": report.frames, "fps": report.fps,
-            "reserved_evaluation_seeds": "901-912 excluded",
+            "reserved_evaluation_seeds": "901-940 and rollouts marked held out excluded",
             "previous_training_seeds": "41-48, 101-116, 201-224 excluded",
             "sessions": rows,
             "interpretation": "Validated simulator trajectories; not real-robot demonstrations or proof of model improvement.",

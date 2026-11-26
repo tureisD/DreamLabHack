@@ -23,6 +23,7 @@ def main(argv=None) -> None:
     parser.add_argument("--seed", type=recorder.scene_seed, help="Repeat a recorded apple placement")
     parser.add_argument("--start-pose", choices=("home", "wrist-visible"))
     parser.add_argument("--held-out-scene", type=Path, help="Replay a frozen apple evaluation scene for exactly 20 simulated seconds")
+    parser.add_argument("--comparison-trial", action="store_true", help="Mark a rollout as held out from demo collection")
     parser.add_argument("--max-requests", type=int, default=1, help="Limit get_action calls per run")
     parser.add_argument("--dry-run", action="store_true", help="Record the observation warm-up offline")
     parser.add_argument("--score-only", action="store_true", help="Save action/state replay without review videos")
@@ -53,6 +54,8 @@ def main(argv=None) -> None:
     with recorder.recording(args.output, args.task, args.model, seed, source,
                             start_pose=pose, videos=not args.score_only) as (env, details):
         details["policy_origin"] = "observation_only" if args.dry_run else "dream_model"
+        if args.comparison_trial:
+            details["split"] = "heldout"
         options = ["--headless", "--quiet", "--seconds", str(args.seconds), "--task", args.task,
                    "--model", args.model, "--max-requests", str(args.max_requests)]
         if args.dry_run:

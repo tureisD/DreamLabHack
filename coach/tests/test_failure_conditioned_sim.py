@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 from dream import DreamClient
 from fastapi.testclient import TestClient
 from test_faas import FakeDream
@@ -21,6 +22,7 @@ SIM = Path(__file__).parents[1] / "experiments/yam_sim_faas"
 sys.path.insert(0, str(SIM))
 from collect_failure_demos import collect, eligible_failures, select_diverse
 from record_yam_demos import CONFIG, TASK, recording
+from score_rollouts import score
 
 
 def test_failure_conditioned_collection_exports_reviewable_dream_dataset(tmp_path):
@@ -95,3 +97,16 @@ def test_selection_covers_distinct_failure_modes_first():
         {"seed": 3, "failure_kind": "never_closed", "held_lift_m": 0.0, "apple_xy_m": [0, 0]},
     ]
     assert {row["failure_kind"] for row in select_diverse(rows, 2)} == {"early_close", "never_closed"}
+
+
+@pytest.mark.parametrize(
+    ("seed", "split"), [(913, None), (940, None), (2**31 + 9, "heldout")],
+)
+def test_collector_rejects_published_and_tagged_evaluation_rollouts(tmp_path, seed, split):
+    (tmp_path / "rollout.json").write_text(json.dumps({
+        "status": "complete", "task": TASK, "simulation": {
+            "source": "model", "seed": seed, "start_pose": "wrist-visible", "split": split,
+        },
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="not an eligible complete model rollout"):
+        score(tmp_path, training_candidate=True)

@@ -117,26 +117,37 @@ class SavedDiagnosis(BaseModel):
 
 
 class SimulatorRunError(RuntimeError):
-    def __init__(self, message: str, code: str = "unverified_rollout") -> None:
+    def __init__(self, message: str, code: str = "unverified_rollout", *, evidence: str | None = None) -> None:
         super().__init__(message)
         self.code = code
+        self.evidence = evidence
 
 
-def unverified_rollout(code: str) -> TrialDiagnosis:
+def unverified_rollout(code: str, detail: str | None = None) -> TrialDiagnosis:
     causes = {
         "simulator_timeout": ("Simulation timed out", "The recorder or replay did not finish within its time limit."),
         "recording_failed": ("Recording failed", "The simulator could not finish recording the model's actions."),
         "replay_failed": ("Replay could not be verified", "The local scorer could not verify this recorded trajectory."),
         "short_recording": ("Rollout stopped before scoring", "The recording ended before the planned action budget was used."),
         "missing_height": ("Apple height was missing", "The recording did not supply the height needed to score the hold."),
+        "dream_session_replaced": ("Dream replaced the inference session", "The inference session ended before the rollout could finish."),
+        "action_chunk_rejected": ("YAM rejected a model action", "The simulator rejected an action response before executing that chunk."),
+        "dream_warming_timeout": ("Model was still warming", "Dream had not made the model ready before the trial clock expired."),
     }
     title, summary = causes.get(code, (
         "Trial could not be scored", "There is no verified result for this recording."
     ))
+    next_step = {
+        "dream_session_replaced": "Check whether the selected checkpoint is available, then start a fresh comparison.",
+        "action_chunk_rejected": "Check that the checkpoint uses the YAM joint-space action format and inspect the local rejected-action log.",
+        "dream_warming_timeout": "Wait for the checkpoint to become ready before running another comparison.",
+    }.get(code, "Check the simulator run status, then repeat the trial to get a scored result.")
+    evidence = ["This attempt cannot establish whether the grasp succeeded or failed."]
+    if detail:
+        evidence.insert(0, detail)
     return TrialDiagnosis(
         code=code, title=title, summary=summary,
-        evidence=["This attempt cannot establish whether the grasp succeeded or failed."],
-        next_step="Check the simulator run status, then repeat the trial to get a scored result.",
+        evidence=evidence, next_step=next_step,
     )
 
 
@@ -172,7 +183,7 @@ def saved_metrics_diagnosis(attempt: PairAttempt, threshold_m: float) -> TrialDi
     )
 
 
-def session_failure_message(folder: Path) -> str | None:
+def recording_failure(folder: Path) -> SimulatorRunError | None:
     sidecar = next(folder.glob("*/rollout.json"), None)
     if sidecar is None:
         return None
@@ -180,16 +191,29 @@ def session_failure_message(folder: Path) -> str | None:
         rollout = json.loads(sidecar.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(rollout, dict) or rollout.get("error") != "DreamSessionExpired":
+    if not isinstance(rollout, dict):
         return None
-    simulation = rollout.get("simulation")
+    simulation = rollout.get("simulation", {})
     if not isinstance(simulation, dict):
-        return "The rollout ended when Dream replaced its inference session."
+        simulation = {}
+    if simulation.get("action_chunk_rejected") is True:
+        return SimulatorRunError(
+            "The YAM control loop rejected a model action before executing that chunk.",
+            "action_chunk_rejected",
+        )
+    if simulation.get("warming_timeout") is True:
+        return SimulatorRunError(
+            "Dream was still warming this checkpoint when the trial reached its time limit.",
+            "dream_warming_timeout",
+        )
+    if rollout.get("error") != "DreamSessionExpired":
+        return None
+    replacement_reason = simulation.get("last_session_replacement_reason")
     reason = {
         "expired": "the previous session expired",
         "unknown": "Dream no longer recognized the previous session",
         "serve_died": "the model server stopped",
-    }.get(simulation.get("last_session_replacement_reason"))
+    }.get(replacement_reason) if isinstance(replacement_reason, str) else None
     rows = simulation.get("model_action_rows", 0)
     replacements = simulation.get("session_replacements")
     if not isinstance(replacements, int):
@@ -202,7 +226,7 @@ def session_failure_message(folder: Path) -> str | None:
         outcome += " Dream’s specific reason is unavailable."
     if isinstance(rows, int):
         outcome += f" The partial recording saved {rows} of {MIN_ACTION_ROWS} model actions."
-    return outcome
+    return SimulatorRunError(outcome, "dream_session_replaced", evidence=outcome)
 
 
 def write_json(path: Path, data: str) -> None:
@@ -360,7 +384,7 @@ class YamWorkflow:
             if value.source == "bundled":
                 self._check_start()
                 folder, _, _ = self._new_task(0)
-                job = YamJob(id=uuid4().hex, kind="import", task_id=folder.name, total=1,
+                job = YamJob(id=uuid4().hex, kind="import", task_id=folder.name, total=24,
                              message="Opening the bundled apple pickup demos.")
                 return self._launch(job, self._import_bundled, job, folder)
             self._check_start(BASE)
@@ -379,14 +403,23 @@ class YamWorkflow:
         output = folder / "demos"
         with ZipFile(archive) as zipped:
             zipped.extractall(output)
+        paths = sorted(output.glob("*/meta/info.json"))
+        if len(paths) != job.total:
+            raise SimulatorRunError("The bundled archive did not contain 24 valid apple pickup demos.")
+        demos = []
+        for index, path in enumerate(paths, 1):
+            if self._stopped():
+                return
+            demo = read_demo(path.parent.parent, job.task_id)
+            if not demo.valid or demo.task_text != PROMPT:
+                raise SimulatorRunError("The bundled archive did not contain 24 valid apple pickup demos.")
+            demos.append(demo)
+            self._update(completed=index, message=f"Checked {index} of {job.total} bundled demos.")
         if self._stopped():
             return
-        demos = [read_demo(path.parent.parent, job.task_id) for path in output.glob("*/meta/info.json")]
-        if len(demos) != 24 or any(not demo.valid or demo.task_text != PROMPT for demo in demos):
-            raise SimulatorRunError("The bundled archive did not contain 24 valid apple pickup demos.")
         for demo in demos:
             self.demos.upsert(demo)
-        self._update(state="completed", completed=1, demos=len(demos),
+        self._update(state="completed", completed=job.total, demos=len(demos),
                      message="The bundled apple pickup demos are ready to review.")
 
     def existing_checkpoints(self) -> list[str]:
@@ -475,8 +508,22 @@ class YamWorkflow:
                 raise ValueError("Choose a completed fine-tune from this guided YAM task.")
             if job.status != "succeeded" or not job.checkpoint or job.checkpoint == BASE:
                 raise ValueError("Wait until Dream publishes the fine-tuned checkpoint.")
+            if job.use_eef:
+                raise ValueError("Choose a checkpoint trained in YAM joint space. This comparison cannot use end-effector actions.")
+            split_problem = "The saved task does not have enough distinct held-out scenes outside training. Create a fresh YAM comparison."
+            try:
+                manifest = json.loads(split.read_text(encoding="utf-8"))
+                training, heldout = manifest["training"], manifest["heldout"]
+            except (OSError, KeyError, TypeError, ValueError) as exc:
+                raise ValueError(split_problem) from exc
+            if not all(isinstance(group, list) and all(
+                type(seed) is int and 0 <= seed < 2**32 for seed in group
+            ) for group in (training, heldout)):
+                raise ValueError(split_problem)
+            seeds = heldout[:value.pairs]
+            if len(set(seeds)) != value.pairs or set(seeds).intersection(training):
+                raise ValueError(split_problem)
             self._check_start(BASE, job.checkpoint)
-            seeds = json.loads(split.read_text(encoding="utf-8"))["heldout"][:value.pairs]
             current = YamJob(id=uuid4().hex, kind="comparison", task_id=task.id, total=len(seeds),
                              message="Starting matched base and fine-tune simulator trials.")
             return self._launch(current, self._compare, current, folder, seeds, job.checkpoint)
@@ -499,23 +546,27 @@ class YamWorkflow:
         return True
 
     def _record(self, folder: Path, checkpoint: str, seed: int, *, heldout: bool = False) -> dict:
+        split_args = ("--comparison-trial",) if heldout else ()
         try:
             command(
                 "record_dream_model_rollout.py", "--output", str(folder), "--model", checkpoint,
                 "--seed", str(seed), "--start-pose", "wrist-visible", "--max-requests",
-                str(REQUESTS_PER_TRIAL), "--score-only", timeout=660, cancel=self._reset_requested,
+                str(REQUESTS_PER_TRIAL), "--score-only", *split_args, timeout=660, cancel=self._reset_requested,
             )
         except SimulatorRunError as exc:
-            message = session_failure_message(folder)
-            if message:
-                raise SimulatorRunError(message, exc.code) from exc
+            failure = recording_failure(folder)
+            if failure is not None:
+                raise failure from exc
             raise
         args = ("--held-out-seed", str(seed)) if heldout else ()
         score = workflow_result(str(folder), *args, "--diagnose", cancel=self._reset_requested)
         if score["seed"] != seed or score["checkpoint"] != checkpoint:
             raise SimulatorRunError("The saved rollout did not match the selected scene and checkpoint.")
         if score["model_action_rows"] < MIN_ACTION_ROWS:
-            raise SimulatorRunError("The rollout ended before the full action budget.", "short_recording")
+            raise SimulatorRunError(
+                "The rollout ended before the full action budget.", "short_recording",
+                evidence=f"The saved recording has {score['model_action_rows']} of {MIN_ACTION_ROWS} model actions.",
+            )
         if score["height_source"] != "recorded":
             raise SimulatorRunError("The rollout lacked recorded apple height.", "missing_height")
         try:
@@ -550,7 +601,9 @@ class YamWorkflow:
             try:
                 score = self._record(folder / f"training-{index}", BASE, seed)
             except SimulatorRunError as exc:
-                diagnosed.append(TrainingTrialDiagnosis(scene=index, seed=seed, diagnosis=unverified_rollout(exc.code)))
+                diagnosed.append(TrainingTrialDiagnosis(
+                    scene=index, seed=seed, diagnosis=unverified_rollout(exc.code, exc.evidence),
+                ))
                 self._update(training_trial_diagnostics=diagnosed.copy())
                 raise
             if score.get("diagnosis") is not None:
@@ -737,7 +790,9 @@ class YamWorkflow:
                 except SimulatorRunError as exc:
                     if self._reset_requested.is_set():
                         return
-                    self._save_diagnosis(folder / trial, checkpoint, seed, "invalid", unverified_rollout(exc.code))
+                    self._save_diagnosis(
+                        folder / trial, checkpoint, seed, "invalid", unverified_rollout(exc.code, exc.evidence),
+                    )
                     attempts[role] = PairAttempt(
                         trial_id=trial, episode_id=trial, checkpoint_id=checkpoint,
                         source_uri=f"local-rollout://{trial}", session_id=trial,

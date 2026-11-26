@@ -521,6 +521,8 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
                                 cameras.update()
                             time.sleep(min(0.2, max(0.0, retry_at - time.monotonic())))
                         if not active():
+                            if progress is not None and time.monotonic() >= deadline:
+                                progress["warming_timeout"] = True
                             raise TimeoutError(
                                 "Dream model was still warming when the pilot time limit ended."
                             ) from error
@@ -559,6 +561,8 @@ def main(argv=None, shared_env=None, shared_viewer=None, stop_event=None, collis
                 except ValueError:
                     from credentials import config_dir
 
+                    if progress is not None:
+                        progress["action_chunk_rejected"] = True
                     diagnostic = config_dir() / "last_rejected_actions.json"
                     diagnostic.write_text(
                         json.dumps(
