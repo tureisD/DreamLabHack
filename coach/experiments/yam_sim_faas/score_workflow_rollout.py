@@ -18,7 +18,7 @@ def score_trial(rollout: Path, held_out: int | None, *, diagnose: bool) -> dict:
         evaluation_seeds=None if held_out is None else {held_out},
         diagnostics=diagnose,
     )
-    return {**result, "started_at": metadata["started_at_utc"]}
+    return {**result, "started_at": metadata["started_at_utc"], "task": metadata["task"]}
 
 
 def diagnose_batch(raw: str) -> dict:

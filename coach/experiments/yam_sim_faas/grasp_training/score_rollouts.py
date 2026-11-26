@@ -8,8 +8,10 @@ import numpy as np
 import pyarrow.parquet as pq
 from batch import CONFIRMATION, HOLDOUT, SECOND_CONFIRMATION, SEEDS
 from build_batch import initialize_replay
+from bowl_evidence import PLACEMENT_COLUMN, evaluate_placement
 from record_yam_demos import TASK, YamEnv
 from rollout_diagnosis import GraspReplay, diagnose_rollout
+from teach_task_coach.yam_goals import BOWL_PROMPT
 
 RESERVED = HOLDOUT | CONFIRMATION | SECOND_CONFIRMATION
 PUBLISHED_EVALUATION_SEEDS = RESERVED | set(range(913, 941))
@@ -22,6 +24,7 @@ def score(
 ) -> dict:
     info = json.loads((folder / "rollout.json").read_text(encoding="utf-8"))
     scene = info["simulation"]
+    bowl_task = info["task"] == BOWL_PROMPT
     holdout = RESERVED if evaluation_seeds is None else evaluation_seeds
     if (
         info["status"] != "complete"
@@ -34,8 +37,8 @@ def score(
             or scene["seed"] in PUBLISHED_EVALUATION_SEEDS
             or scene["seed"] in PREVIOUS_TRAINING
         ))
-        or scene["start_pose"] != "wrist-visible"
-        or info["task"] != TASK
+        or scene["start_pose"] != ("home" if bowl_task else "wrist-visible")
+        or (info["task"] != TASK and (not bowl_task or training_candidate))
     ):
         raise ValueError(f"{folder}: not an eligible complete model rollout for this split")
     table = pq.read_table(folder / "data/chunk-000/episode_000000.parquet")
@@ -47,7 +50,7 @@ def score(
         raise ValueError(f"{folder}: no complete model action chunk")
 
     env = YamEnv()
-    replay_diagnosis = GraspReplay(env) if diagnostics else None
+    replay_diagnosis = GraspReplay(env) if diagnostics and not bowl_task else None
     heights = []
     max_state_error = 0.0
     try:
@@ -72,6 +75,9 @@ def score(
 
     if has_recorded_height:
         heights = np.asarray(table["observation.apple_height_m"].to_pylist(), dtype=float)
+    if bowl_task and (PLACEMENT_COLUMN not in table.column_names or not has_recorded_height
+                      or not np.isfinite(heights).all() or info["fps"] != 20):
+        raise ValueError(f"{folder}: bowl scoring requires recorded 20 Hz position and contact evidence")
     rise = np.asarray(heights) - heights[29]
     # The recorder warms the scene for 33 simulation steps before applying the
     # first model action. Report grasp timing so a late close is visible even
@@ -99,6 +105,8 @@ def score(
     }
     if replay_diagnosis is not None:
         result["diagnosis"] = diagnose_rollout(actions, rise, replay_diagnosis, result["height_source"])
+    if bowl_task:
+        result.update(evaluate_placement(table[PLACEMENT_COLUMN].to_pylist(), result["peak_lift_m"], info["fps"]))
     return result
 
 

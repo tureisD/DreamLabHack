@@ -6,6 +6,7 @@ import datetime as dt
 import hashlib
 import json
 import random
+import re
 import subprocess
 import sys
 from collections import OrderedDict
@@ -22,8 +23,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
 from teach_task_coach.demos import DemoStore, read_demo
-from teach_task_coach.faas import FaaSStore
+from teach_task_coach.faas import FaaSStore, FineTuneRecord
 from teach_task_coach.paired_audit import (
+    InterruptedAttempt,
     MatchedPair,
     PairAttempt,
     PairedReport,
@@ -35,6 +37,7 @@ from teach_task_coach.preflight import ModelSummary, PreflightService
 from teach_task_coach.simulator_process import SimulatorProcessCancelled, run_simulator_process
 from teach_task_coach.simulator_setup import SimulatorSetup
 from teach_task_coach.tasks import TaskInput, TaskStore
+from teach_task_coach.yam_goals import BOWL_EVALUATION_RULE, BOWL_PROMPT, BOWL_TASK_RULE
 
 BASE = "dreamlabs/dream-1-beta"
 PROMPT = "pick up the apple"
@@ -48,6 +51,7 @@ BUNDLED_EVIDENCE = (
     ("second_account_paired_confirmation.json", "mary.m.koryakina/apple-grasp-independent-779f088ac959"),
 )
 RESET_TIMEOUT = 10
+YamGoal = Literal["pickup", "bowl"]
 
 
 class CollectionRequest(BaseModel):
@@ -63,6 +67,7 @@ class ComparisonRequest(BaseModel):
 
 class ExistingComparisonRequest(BaseModel):
     checkpoint: str = Field(min_length=1, max_length=200)
+    goal: YamGoal = "pickup"
 
 
 class ExistingCheckpoint(BaseModel):
@@ -94,6 +99,7 @@ class YamJob(BaseModel):
     demos: int = 0
     state: Literal["running", "stopping", "completed", "cancelled", "failed"] = "running"
     message: str
+    goal: YamGoal = "pickup"
     training_trial_diagnostics: list[TrainingTrialDiagnosis] = Field(default_factory=list)
 
 
@@ -102,11 +108,29 @@ class YamComparison(BaseModel):
     baseline: str
     candidate: str
     report: PairedReport
+    goal: YamGoal = "pickup"
 
 
 class YamComparisonDiagnostics(BaseModel):
     evaluation_id: str
     trials: dict[str, TrialDiagnosis]
+
+
+class SavedComparison(BaseModel):
+    seeds: tuple[int, ...]
+    evidence: PairedRequest
+    pending: InterruptedAttempt | None = None
+
+
+class ResumableComparison(BaseModel):
+    id: str
+    task_id: str
+    task: str
+    candidate: str
+    completed: int
+    total: int
+    created_at: dt.datetime
+    goal: YamGoal = "pickup"
 
 
 class SavedDiagnosis(BaseModel):
@@ -138,11 +162,11 @@ def unverified_rollout(code: str, detail: str | None = None) -> TrialDiagnosis:
         "Trial could not be scored", "There is no verified result for this recording."
     ))
     next_step = {
-        "dream_session_replaced": "Check whether the selected checkpoint is available, then start a fresh comparison.",
+        "dream_session_replaced": "Check whether the selected checkpoint is available, then resume the comparison.",
         "action_chunk_rejected": "Check that the checkpoint uses the YAM joint-space action format and inspect the local rejected-action log.",
         "dream_warming_timeout": "Wait for the checkpoint to become ready before running another comparison.",
     }.get(code, "Check the simulator run status, then repeat the trial to get a scored result.")
-    evidence = ["This attempt cannot establish whether the grasp succeeded or failed."]
+    evidence = ["This attempt cannot establish whether the task succeeded or failed."]
     if detail:
         evidence.insert(0, detail)
     return TrialDiagnosis(
@@ -154,6 +178,15 @@ def unverified_rollout(code: str, detail: str | None = None) -> TrialDiagnosis:
 def saved_metrics_diagnosis(attempt: PairAttempt, threshold_m: float) -> TrialDiagnosis:
     if attempt.outcome in ("invalid", "unknown"):
         return unverified_rollout("unverified_rollout")
+    if attempt.bowl_placement is not None:
+        placement = attempt.bowl_placement
+        return TrialDiagnosis(
+            code="bowl_placed" if attempt.outcome == "success" else "bowl_miss",
+            title="Bowl placement passed" if attempt.outcome == "success" else "Bowl placement missed",
+            summary=f"The apple was settled in the bowl for the final {placement.settled_s:.2f} seconds.",
+            evidence=[f"Final distance from bowl center: {100 * placement.final_distance_m:.1f} cm."],
+            next_step=None if attempt.outcome == "success" else "Review the grasp, transfer, and release.",
+        )
     evidence = []
     if attempt.held_lift_m is not None:
         evidence.append(f"Best two-second lift: {max(0, attempt.held_lift_m) * 100:.2f} cm.")
@@ -289,9 +322,17 @@ class YamWorkflow:
         if saved.is_file():
             self.job = YamJob.model_validate_json(saved.read_text(encoding="utf-8"))
             if self.job.state in ("running", "stopping"):
-                self._save(self.job.model_copy(update={
+                recovered = {
                     "state": "failed", "message": "The server restarted during the simulator run. Saved evidence is retained."
-                }))
+                }
+                if self.job.kind == "comparison":
+                    snapshot = self._comparison_snapshot(self.job.task_id, self.job.id)
+                    if snapshot is not None:
+                        usable = evaluate_paired(snapshot).usable_pairs
+                        recovered["completed"] = usable
+                        if usable == self.job.total:
+                            recovered.update(state="completed", message="Matched simulator comparison finished.")
+                self._save(self.job.model_copy(update=recovered))
 
     def _save(self, job: YamJob) -> None:
         write_json(self.root / "job.json", job.model_dump_json())
@@ -365,10 +406,11 @@ class YamWorkflow:
         except Exception:  # noqa: BLE001 - deliver an error state even on unexpected worker failures
             self._update(state="failed", message="The simulator could not finish. Check local simulator setup and try again.")
 
-    def _new_task(self, scenes: int) -> tuple[Path, list[int], list[int]]:
+    def _new_task(self, scenes: int, *, goal: YamGoal = "pickup") -> tuple[Path, list[int], list[int]]:
         task = self.tasks.create_task(TaskInput(
-            name="Apple pickup · YAM simulator", prompt=PROMPT,
-            baseline_checkpoint=BASE, success_rule=SUCCESS_RULE,
+            name="Apple placement · click to correct" if goal == "bowl" else "Apple pickup · YAM simulator",
+            prompt=BOWL_PROMPT if goal == "bowl" else PROMPT,
+            baseline_checkpoint=BASE, success_rule=BOWL_TASK_RULE if goal == "bowl" else SUCCESS_RULE,
         ))
         folder = self.root / task.id
         folder.mkdir()
@@ -433,15 +475,16 @@ class YamWorkflow:
             choices.append(ExistingCheckpoint(checkpoint=example.plan.candidate_checkpoint, dataset=dataset, steps=500))
         return choices
 
-    def list_existing_checkpoints(self) -> list[ExistingCheckpoint]:
+    def list_existing_checkpoints(self, goal: YamGoal = "pickup") -> list[ExistingCheckpoint]:
         check, models = self.preflight.check_dream()
-        return self._eligible_choices(models) if check.state == "ready" else []
+        return self._eligible_choices(models, goal) if check.state == "ready" else []
 
-    def _eligible_choices(self, models: list[ModelSummary]) -> list[ExistingCheckpoint]:
+    def _eligible_choices(self, models: list[ModelSummary], goal: YamGoal = "pickup") -> list[ExistingCheckpoint]:
         ready = {model.id for model in models if model.servable}
         if BASE not in ready:
             return []
-        choices = {item.checkpoint: item for item in self._bundled_choices() if item.checkpoint in ready}
+        choices = ({item.checkpoint: item for item in self._bundled_choices() if item.checkpoint in ready}
+                   if goal == "pickup" else {})
         if self.list_finetunes is None:
             return list(choices.values())
         try:
@@ -477,25 +520,82 @@ class YamWorkflow:
             if isinstance(parameters, dict) and parameters.get("use_eef") is True:
                 continue
             task = self.tasks.get_task(dataset.task_id)
-            if (
-                task is None or task.offline_mode or task.prompt != PROMPT
-                or task.success_rule != SUCCESS_RULE or task.baseline_checkpoint != BASE
-            ):
+            if task is None or task.offline_mode or self._task_goal(task) != goal:
                 continue
-            if not (self.root / task.id / "scenes.json").is_file():
+            if goal == "pickup" and not (self.root / task.id / "scenes.json").is_file():
                 continue
+            if goal == "bowl":
+                try:
+                    self._bowl_training_seeds(job)
+                except ValueError:
+                    continue
             choices[checkpoint] = ExistingCheckpoint(checkpoint=checkpoint, dataset=dataset.remote_name, steps=job.steps)
         return list(choices.values())
 
     def start_existing_comparison(self, value: ExistingComparisonRequest) -> YamJob:
         with self.lock:
             models = self._check_start(BASE, value.checkpoint)
-            if not any(item.checkpoint == value.checkpoint for item in self._eligible_choices(models)):
-                raise ValueError("Choose an available checkpoint verified for the joint-space YAM apple task.")
-            folder, _, heldout = self._new_task(0)
+            if not any(item.checkpoint == value.checkpoint for item in self._eligible_choices(models, value.goal)):
+                raise ValueError("Choose an available joint-space YAM checkpoint verified for this task.")
+            folder, _, heldout = self._new_task(0, goal=value.goal)
+            if value.goal == "bowl":
+                source = next(job for job in self.faas.list_finetunes() if job.checkpoint == value.checkpoint)
+                heldout = self._bowl_seeds(self._bowl_training_seeds(source), 4)
             job = YamJob(id=uuid4().hex, kind="comparison", task_id=folder.name, total=4,
-                         message="Starting fresh held-out trials with the existing checkpoint.")
-            return self._launch(job, self._compare, job, folder, heldout[:4], value.checkpoint)
+                         goal=value.goal, message="Starting fresh held-out trials with the existing checkpoint.")
+            return self._start_new_comparison(job, folder, heldout[:4], value.checkpoint)
+
+    @staticmethod
+    def _task_goal(task) -> YamGoal | None:
+        if task.baseline_checkpoint != BASE:
+            return None
+        if task.prompt == BOWL_PROMPT and task.success_rule == BOWL_TASK_RULE:
+            return "bowl"
+        if task.prompt == PROMPT and task.success_rule == SUCCESS_RULE:
+            return "pickup"
+        return None
+
+    @staticmethod
+    def _bowl_seeds(excluded: set[int], pairs: int) -> list[int]:
+        rng = random.SystemRandom()
+        seeds = rng.sample(range(2**31, 2**32), pairs)
+        while excluded.intersection(seeds):
+            seeds = rng.sample(range(2**31, 2**32), pairs)
+        return seeds
+
+    def _bowl_training_seeds(self, job: FineTuneRecord) -> set[int]:
+        error = "Bowl evaluation needs the original YAM Fruit correction demos with recorded training seeds."
+        seeds: set[int] = set()
+        parents = {item.checkpoint: item for item in self.faas.list_finetunes() if item.checkpoint}
+        seen = set()
+        current: FineTuneRecord | None = job
+        while current is not None:
+            if current.id in seen or current.use_eef or current.status != "succeeded":
+                raise ValueError(error)
+            seen.add(current.id)
+            dataset = self.faas.get_dataset(current.dataset_version_id)
+            if dataset is None or dataset.status != "validated" or not dataset.demo_ids:
+                raise ValueError(error)
+            for demo_id in dataset.demo_ids:
+                demo = self.demos.get(demo_id)
+                if demo is None or demo.task_text != BOWL_PROMPT or demo.origin != "scripted_reference":
+                    raise ValueError(error)
+                try:
+                    receipt = json.loads((Path(demo.source_path) / "click_correction.json").read_text(encoding="utf-8"))
+                    if (receipt["method"] != "click_to_correct_simulation" or receipt["goal"]["kind"] != "bowl"
+                        or receipt["goal"]["fruit"] != "apple" or receipt["physics"]["passed"] is not True
+                        or receipt["export_replay"]["passed"] is not True
+                        or type(receipt["seed"]) is not int or not 0 <= receipt["seed"] < 2**32):
+                        raise ValueError(error)
+                    seeds.add(receipt["seed"])
+                except (OSError, ValueError, TypeError, KeyError) as exc:
+                    raise ValueError(error) from exc
+            if current.resume_from is None:
+                return seeds
+            current = parents.get(current.resume_from)
+            if current is None:
+                raise ValueError(error)
+        return seeds
 
     def start_comparison(self, value: ComparisonRequest) -> YamJob:
         with self.lock:
@@ -504,12 +604,21 @@ class YamWorkflow:
             task = self.tasks.get_task(value.task_id)
             job = self.faas.get_finetune(value.job_id)
             dataset = self.faas.get_dataset(job.dataset_version_id) if job else None
-            if not task or task.offline_mode or not split.is_file() or not job or not dataset or dataset.task_id != task.id:
+            goal = self._task_goal(task) if task and not task.offline_mode else None
+            if (goal is None or not job or not dataset or dataset.task_id != task.id
+                or (goal == "pickup" and not split.is_file())):
                 raise ValueError("Choose a completed fine-tune from this guided YAM task.")
             if job.status != "succeeded" or not job.checkpoint or job.checkpoint == BASE:
                 raise ValueError("Wait until Dream publishes the fine-tuned checkpoint.")
             if job.use_eef:
                 raise ValueError("Choose a checkpoint trained in YAM joint space. This comparison cannot use end-effector actions.")
+            if goal == "bowl":
+                seeds = self._bowl_seeds(self._bowl_training_seeds(job), value.pairs)
+                self._check_start(BASE, job.checkpoint)
+                folder.mkdir(exist_ok=True)
+                current = YamJob(id=uuid4().hex, kind="comparison", task_id=task.id, total=len(seeds),
+                                 goal=goal, message="Starting matched apple-into-bowl trials.")
+                return self._start_new_comparison(current, folder, seeds, job.checkpoint)
             split_problem = "The saved task does not have enough distinct held-out scenes outside training. Create a fresh YAM comparison."
             try:
                 manifest = json.loads(split.read_text(encoding="utf-8"))
@@ -526,7 +635,63 @@ class YamWorkflow:
             self._check_start(BASE, job.checkpoint)
             current = YamJob(id=uuid4().hex, kind="comparison", task_id=task.id, total=len(seeds),
                              message="Starting matched base and fine-tune simulator trials.")
-            return self._launch(current, self._compare, current, folder, seeds, job.checkpoint)
+            return self._start_new_comparison(current, folder, seeds, job.checkpoint)
+
+    def _start_new_comparison(self, job: YamJob, folder: Path, seeds: list[int], candidate: str) -> YamJob:
+        bowl = job.goal == "bowl"
+        plan = PairPlan(
+            evaluation_id=job.id, task=BOWL_PROMPT if bowl else PROMPT,
+            success_rule=BOWL_EVALUATION_RULE if bowl else SUCCESS_RULE,
+            reset_protocol="Reset YAM and the apple to the same seed for each model.",
+            assignment_protocol="Alternate whether the fine-tune or base runs first.",
+            protocol_ref="apple-into-bowl-v1" if bowl else "scenes.json",
+            baseline_checkpoint=BASE, candidate_checkpoint=candidate,
+            collection_mode="simulation", planned_pairs=len(seeds), created_at=dt.datetime.now(dt.UTC),
+            required_model_rows=MIN_ACTION_ROWS, simulator_hold_threshold_m=None if bowl else 0.08,
+            simulator_goal="apple_into_bowl_v1" if bowl else None,
+        )
+        self._write_run(folder, SavedComparison(seeds=tuple(seeds), evidence=PairedRequest(plan=plan, pairs=())))
+        return self._launch(job, self._compare, job, folder, seeds, candidate)
+
+    def resumable_comparisons(self) -> list[ResumableComparison]:
+        with self.lock:
+            results = []
+            for folder in self.root.iterdir():
+                if not re.fullmatch(r"[0-9a-f]{32}", folder.name) or not folder.is_dir():
+                    continue
+                comparison_ids = {path.stem for path in (folder / "comparisons").glob("*.json")}
+                try:
+                    legacy = self._legacy_snapshot(folder)
+                    if legacy is not None:
+                        comparison_ids.add(legacy.plan.evaluation_id)
+                except (OSError, ValidationError):
+                    pass
+                for comparison_id in comparison_ids:
+                    if self.job and self.job.id == comparison_id and self.job.state in ("running", "stopping"):
+                        continue
+                    try:
+                        run = self._resumable_run(folder, comparison_id)
+                    except ValueError:
+                        continue
+                    plan = run.evidence.plan
+                    results.append(ResumableComparison(
+                        id=plan.evaluation_id, task_id=folder.name, task=plan.task, candidate=plan.candidate_checkpoint,
+                        completed=self._completed_pairs(run), total=plan.planned_pairs, created_at=plan.created_at,
+                        goal="bowl" if plan.simulator_goal else "pickup",
+                    ))
+            return sorted(results, key=lambda option: option.created_at, reverse=True)
+
+    def resume_comparison(self, task_id: str, comparison_id: str) -> YamJob:
+        with self.lock:
+            folder = self.root / task_id
+            run = self._resumable_run(folder, comparison_id)
+            plan = run.evidence.plan
+            self._check_start(plan.baseline_checkpoint, plan.candidate_checkpoint)
+            job = YamJob(id=comparison_id, kind="comparison", task_id=task_id, total=plan.planned_pairs,
+                         goal="bowl" if plan.simulator_goal else "pickup",
+                         completed=self._completed_pairs(run), message="Resuming the same held-out comparison.")
+            self._write_run(folder, run)
+            return self._launch(job, self._compare, job, folder, list(run.seeds), plan.candidate_checkpoint)
 
     def stop(self) -> YamJob | None:
         with self.lock:
@@ -545,19 +710,28 @@ class YamWorkflow:
         self._update(state="cancelled", message="Stopped. Completed trials remain available.")
         return True
 
-    def _record(self, folder: Path, checkpoint: str, seed: int, *, heldout: bool = False) -> dict:
+    def _record(self, folder: Path, checkpoint: str, seed: int, *, heldout: bool = False,
+                goal: YamGoal = "pickup") -> dict:
         split_args = ("--comparison-trial",) if heldout else ()
+        task_args = ("--task", BOWL_PROMPT) if goal == "bowl" else ()
+        pose = "home" if goal == "bowl" else "wrist-visible"
         try:
             command(
                 "record_dream_model_rollout.py", "--output", str(folder), "--model", checkpoint,
-                "--seed", str(seed), "--start-pose", "wrist-visible", "--max-requests",
-                str(REQUESTS_PER_TRIAL), "--score-only", *split_args, timeout=660, cancel=self._reset_requested,
+                "--seed", str(seed), "--start-pose", pose, "--max-requests",
+                str(REQUESTS_PER_TRIAL), "--score-only", *split_args, *task_args,
+                timeout=660, cancel=self._reset_requested,
             )
         except SimulatorRunError as exc:
             failure = recording_failure(folder)
             if failure is not None:
                 raise failure from exc
             raise
+        goal_args = {"goal": goal} if goal == "bowl" else {}
+        return self._score_recording(folder, checkpoint, seed, heldout=heldout, **goal_args)
+
+    def _score_recording(self, folder: Path, checkpoint: str, seed: int, *, heldout: bool,
+                         goal: YamGoal = "pickup") -> dict:
         args = ("--held-out-seed", str(seed)) if heldout else ()
         score = workflow_result(str(folder), *args, "--diagnose", cancel=self._reset_requested)
         if score["seed"] != seed or score["checkpoint"] != checkpoint:
@@ -569,6 +743,10 @@ class YamWorkflow:
             )
         if score["height_source"] != "recorded":
             raise SimulatorRunError("The rollout lacked recorded apple height.", "missing_height")
+        if goal == "bowl" and (score.get("task") != BOWL_PROMPT or score.get("bowl_placement") is None):
+            raise SimulatorRunError("The rollout lacked recorded apple-into-bowl evidence.", "replay_failed")
+        if goal == "pickup" and score.get("bowl_placement") is not None:
+            raise SimulatorRunError("This recording belongs to a different simulator task.", "replay_failed")
         try:
             diagnosis = TrialDiagnosis.model_validate(score.get("diagnosis"))
         except ValidationError:
@@ -634,49 +812,125 @@ class YamWorkflow:
         self._update(state="completed", demos=len(sessions),
                      message="Validated simulator demos are ready for camera review.")
 
-    def _save_comparison(self, folder: Path, plan: PairPlan, pairs: list[MatchedPair]) -> None:
-        snapshot = PairedRequest(plan=plan, pairs=tuple(pairs))
-        with self.lock:
-            write_json(folder / "comparison-evidence.json", snapshot.model_dump_json(indent=2))
+    @staticmethod
+    def _legacy_snapshot(folder: Path) -> PairedRequest | None:
+        path = folder / "comparison-evidence.json"
+        return PairedRequest.model_validate_json(path.read_text(encoding="utf-8")) if path.is_file() else None
 
-    def _comparison_snapshot(self, task_id: str) -> PairedRequest | None:
-        path = self.root / task_id / "comparison-evidence.json"
-        with self.lock:
-            if not path.is_file():
-                return None
-            return PairedRequest.model_validate_json(path.read_text(encoding="utf-8"))
+    @staticmethod
+    def _write_run(folder: Path, run: SavedComparison) -> None:
+        directory = folder / "comparisons"
+        directory.mkdir(exist_ok=True)
+        write_json(directory / f"{run.evidence.plan.evaluation_id}.json", run.model_dump_json(indent=2))
 
-    def comparison(self, task_id: str) -> YamComparison | None:
-        snapshot = self._comparison_snapshot(task_id)
+    @staticmethod
+    def _completed_pairs(run: SavedComparison) -> int:
+        return sum(pair.baseline is not None and pair.candidate is not None
+                   and pair.baseline.outcome in ("success", "failure")
+                   and pair.candidate.outcome in ("success", "failure") for pair in run.evidence.pairs)
+
+    def _resumable_run(self, folder: Path, comparison_id: str) -> SavedComparison:
+        error = "This comparison has no unfinished trials with a verifiable saved plan."
+        if not re.fullmatch(r"[0-9a-f]{32}", comparison_id):
+            raise ValueError(error)
+        task = self.tasks.get_task(folder.name)
+        if task is None or task.offline_mode:
+            raise ValueError(error)
+        path = folder / "comparisons" / f"{comparison_id}.json"
+        try:
+            if path.is_file():
+                run = SavedComparison.model_validate_json(path.read_text(encoding="utf-8"))
+            else:
+                legacy = self._legacy_snapshot(folder)
+                if legacy is None:
+                    raise ValueError(error)
+                split = json.loads((folder / "scenes.json").read_text(encoding="utf-8"))
+                seeds = tuple(split["heldout"][:legacy.plan.planned_pairs])
+                if set(seeds).intersection(split["training"]):
+                    raise ValueError(error)
+                run = SavedComparison(seeds=seeds, evidence=legacy)
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            raise ValueError(error) from exc
+        plan = run.evidence.plan
+        goal = self._task_goal(task)
+        expected_rule = BOWL_EVALUATION_RULE if goal == "bowl" else SUCCESS_RULE
+        expected_protocol = "apple-into-bowl-v1" if goal == "bowl" else "scenes.json"
+        scene_ids = [str(seed) for seed in run.seeds]
+        if (
+            goal is None or (goal == "bowl") != (plan.simulator_goal is not None)
+            or plan.task != task.prompt or plan.success_rule != expected_rule or plan.protocol_ref != expected_protocol
+            or plan.simulator_hold_threshold_m != (None if goal == "bowl" else 0.08)
+            or plan.evaluation_id != comparison_id or plan.collection_mode != "simulation"
+            or plan.baseline_checkpoint != BASE or plan.required_model_rows != MIN_ACTION_ROWS
+            or len(set(run.seeds)) != plan.planned_pairs or len(run.seeds) != plan.planned_pairs
+            or any(not 0 <= seed < 2**32 for seed in run.seeds)
+            or any(pair.pair_id != pair.scenario_id or pair.scenario_id not in scene_ids
+                   for pair in run.evidence.pairs)
+            or [pair.scenario_id for pair in run.evidence.pairs] != scene_ids[:len(run.evidence.pairs)]
+            or any(item.scenario_id not in scene_ids for item in run.evidence.interruptions)
+            or (run.pending and not self._valid_pending(run.pending, plan, scene_ids))
+            or self._completed_pairs(run) == plan.planned_pairs
+        ):
+            raise ValueError(error)
+        return run
+
+    @staticmethod
+    def _valid_pending(item: InterruptedAttempt, plan: PairPlan, scene_ids: list[str]) -> bool:
+        checkpoint = plan.baseline_checkpoint if item.role == "baseline" else plan.candidate_checkpoint
+        return (
+            item.scenario_id in scene_ids and item.attempt.checkpoint_id == checkpoint
+            and item.attempt.training_exposure == "held_out"
+            and item.attempt.outcome == "invalid"
+            and YamWorkflow._matches_trial(item.attempt, plan.evaluation_id, item.scenario_id, item.role)
+        )
+
+    def _comparison_snapshot(self, task_id: str, evaluation_id: str | None = None) -> PairedRequest | None:
+        folder = self.root / task_id
+        with self.lock:
+            if evaluation_id is None and self.job and self.job.task_id == task_id and self.job.kind == "comparison":
+                evaluation_id = self.job.id
+            archive = folder / "comparisons"
+            if evaluation_id is None:
+                path = max(archive.glob("*.json"), key=lambda value: value.stat().st_mtime_ns, default=None)
+            else:
+                path = archive / f"{evaluation_id}.json"
+            if path is not None and path.is_file():
+                return SavedComparison.model_validate_json(path.read_text(encoding="utf-8")).evidence
+            legacy = self._legacy_snapshot(folder)
+            return legacy if legacy is not None and evaluation_id in (None, legacy.plan.evaluation_id) else None
+
+    def comparison(self, task_id: str, evaluation_id: str | None = None) -> YamComparison | None:
+        snapshot = self._comparison_snapshot(task_id, evaluation_id)
         if snapshot is None:
             return None
         return YamComparison(task_id=task_id, baseline=snapshot.plan.baseline_checkpoint,
-                             candidate=snapshot.plan.candidate_checkpoint, report=evaluate_paired(snapshot))
+                             candidate=snapshot.plan.candidate_checkpoint, report=evaluate_paired(snapshot),
+                             goal="bowl" if snapshot.plan.simulator_goal else "pickup")
 
-    def comparison_diagnostics(self, task_id: str) -> YamComparisonDiagnostics | None:
-        snapshot = self._comparison_snapshot(task_id)
+    @staticmethod
+    def _matches_trial(attempt: PairAttempt, evaluation_id: str, scene_id: str, role: str) -> bool:
+        prefix = f"{evaluation_id}-{scene_id}-{role}"
+        return bool(re.fullmatch(re.escape(prefix) + r"(?:-retry-[0-9a-f]{8})?", attempt.trial_id)
+                    and attempt.source_uri == f"local-rollout://{attempt.trial_id}")
+
+    def comparison_diagnostics(self, task_id: str, evaluation_id: str | None = None) -> YamComparisonDiagnostics | None:
+        snapshot = self._comparison_snapshot(task_id, evaluation_id)
         if snapshot is None:
             return None
         plan = snapshot.plan
         threshold = plan.simulator_hold_threshold_m or 0.08
         trials = {}
         local_trials = []
-        for pair in snapshot.pairs:
-            for role, attempt in (("baseline", pair.baseline), ("candidate", pair.candidate)):
-                if attempt is None:
-                    continue
-                trials[attempt.trial_id] = saved_metrics_diagnosis(attempt, threshold)
-                if (
-                    pair.scenario_id.isascii() and pair.scenario_id.isdecimal()
-                    and len(pair.scenario_id) <= 10 and len(plan.evaluation_id) == 32
-                    and all(char in "0123456789abcdef" for char in plan.evaluation_id)
-                ):
-                    seed = int(pair.scenario_id)
-                    expected = f"{plan.evaluation_id}-{seed}-{role}"
-                    if seed < 2**32 and attempt.trial_id == expected and attempt.source_uri == f"local-rollout://{expected}":
-                        trial = self._local_trial_folder(task_id, expected)
-                        if trial is not None:
-                            local_trials.append((trial, seed, attempt))
+        attempts = [(pair.scenario_id, role, attempt) for pair in snapshot.pairs
+                    for role, attempt in (("baseline", pair.baseline), ("candidate", pair.candidate)) if attempt]
+        attempts.extend((entry.scenario_id, entry.role, entry.attempt) for entry in snapshot.interruptions)
+        for scene_id, role, attempt in attempts:
+            trials[attempt.trial_id] = saved_metrics_diagnosis(attempt, threshold)
+            if (re.fullmatch(r"[0-9]{1,10}", scene_id) and re.fullmatch(r"[0-9a-f]{32}", plan.evaluation_id)
+                and int(scene_id) < 2**32 and self._matches_trial(attempt, plan.evaluation_id, scene_id, role)):
+                trial = self._local_trial_folder(task_id, attempt.trial_id)
+                if trial is not None:
+                    local_trials.append((trial, int(scene_id), attempt))
         trials.update(self._diagnose_local_trials(local_trials, threshold))
         return YamComparisonDiagnostics(evaluation_id=plan.evaluation_id, trials=trials)
 
@@ -758,64 +1012,134 @@ class YamWorkflow:
                 or score["model_action_rows"] != attempt.model_action_rows
                 or score["success"] != (attempt.outcome == "success")
                 or score["height_source"] != attempt.height_source
-                or attempt.held_lift_m is None or abs(score["held_lift_m"] - attempt.held_lift_m) > 0.0001
             ):
+                return None
+            if attempt.bowl_placement is not None:
+                if (score.get("task") != BOWL_PROMPT
+                    or score.get("bowl_placement") != attempt.bowl_placement.model_dump()):
+                    return None
+            elif attempt.held_lift_m is None or abs(score["held_lift_m"] - attempt.held_lift_m) > 0.0001:
                 return None
             return TrialDiagnosis.model_validate(score.get("diagnosis"))
         except (ValueError, KeyError, TypeError):
             return None
 
+    @staticmethod
+    def _scored_attempt(attempt: PairAttempt, score: dict) -> PairAttempt:
+        return PairAttempt.model_validate(attempt.model_dump() | {
+            "recorded_at": score["started_at"],
+            "outcome": "success" if score["success"] else "failure",
+            "model_action_rows": score["model_action_rows"], "held_lift_m": score["held_lift_m"],
+            "peak_lift_m": score["peak_lift_m"], "duration_s": score["duration_s"],
+            "first_close_after_warmup_s": score["first_close_after_warmup_s"],
+            "replay_max_state_error_m": score["replay_max_state_error"], "height_source": "recorded",
+            "bowl_placement": score.get("bowl_placement"),
+        })
+
+    def _recover_score(self, trial: Path, pending: InterruptedAttempt, goal: YamGoal) -> dict | None:
+        if not any(trial.glob("*/rollout.json")):
+            return None
+        try:
+            goal_args = {"goal": goal} if goal == "bowl" else {}
+            return self._score_recording(
+                trial, pending.attempt.checkpoint_id, int(pending.scenario_id), heldout=True, **goal_args,
+            )
+        except (SimulatorRunError, ValueError, KeyError, TypeError):
+            return None
+
+    def _store_outcome(
+        self, folder: Path, run: SavedComparison, pair: MatchedPair | None,
+        scene_id: str, role: str, attempt: PairAttempt,
+    ) -> SavedComparison:
+        attempts = {"baseline": pair.baseline, "candidate": pair.candidate} if pair else {}
+        attempts[role] = attempt
+        result = MatchedPair(pair_id=scene_id, scenario_id=scene_id, **attempts)
+        pairs = tuple(result if saved.scenario_id == scene_id else saved for saved in run.evidence.pairs)
+        if pair is None:
+            pairs += (result,)
+        updated = run.model_copy(update={"pending": None, "evidence": run.evidence.model_copy(update={"pairs": pairs})})
+        with self.lock:
+            self._write_run(folder, updated)
+        return updated
+
     def _compare(self, job: YamJob, folder: Path, seeds: list[int], candidate: str) -> None:
-        plan = PairPlan(
-            evaluation_id=job.id, task=PROMPT, success_rule=SUCCESS_RULE,
-            reset_protocol="Reset YAM and the apple to the same seed for each model.",
-            assignment_protocol="Alternate whether the fine-tune or base runs first.",
-            protocol_ref="scenes.json", baseline_checkpoint=BASE, candidate_checkpoint=candidate,
-            collection_mode="simulation", planned_pairs=len(seeds), created_at=dt.datetime.now(dt.UTC),
-            required_model_rows=MIN_ACTION_ROWS, simulator_hold_threshold_m=0.08,
-        )
-        pairs: list[MatchedPair] = []
-        self._save_comparison(folder, plan, pairs)
+        path = folder / "comparisons" / f"{job.id}.json"
+        run = SavedComparison.model_validate_json(path.read_text(encoding="utf-8"))
+        plan = run.evidence.plan
         for index, seed in enumerate(seeds, 1):
-            roles = (("baseline", BASE), ("candidate", candidate))
-            attempts: dict[str, PairAttempt] = {}
+            scene_id = str(seed)
+            roles = (("baseline", plan.baseline_checkpoint), ("candidate", candidate))
             for role, checkpoint in roles if index % 2 else reversed(roles):
                 if self._stopped():
                     return
+                pair = next((item for item in run.evidence.pairs if item.scenario_id == scene_id), None)
+                previous = getattr(pair, role) if pair else None
+                if previous is not None and previous.outcome in ("success", "failure"):
+                    continue
                 label = "base" if role == "baseline" else "fine-tune"
                 self._update(message=f"Running {label} on held-out scene {index} of {job.total}.")
+                pending = run.pending
+                if pending and (pending.scenario_id, pending.role) != (scene_id, role):
+                    raise SimulatorRunError("The saved in-flight trial does not match the frozen scene order.")
+                if pending is not None:
+                    trial_dir = folder / pending.attempt.trial_id
+                    score = self._recover_score(trial_dir, pending, job.goal)
+                    if score is not None:
+                        run = self._store_outcome(folder, run, pair, scene_id, role,
+                                                  self._scored_attempt(pending.attempt, score))
+                        continue
+                    self._save_diagnosis(trial_dir, checkpoint, seed, "invalid", unverified_rollout(
+                        "interrupted", "The previous run stopped before a complete score could be recovered.",
+                    ))
+                elif previous is not None:
+                    pending = InterruptedAttempt(scenario_id=scene_id, role=role, attempt=previous)
+
+                interruptions = run.evidence.interruptions
+                if pending:
+                    interruptions += (pending,)
                 trial = f"{job.id}-{seed}-{role}"
+                if (folder / trial).exists() or any(
+                    (item.scenario_id, item.role) == (scene_id, role) for item in interruptions
+                ):
+                    trial += f"-retry-{uuid4().hex[:8]}"
+                attempt = PairAttempt(
+                    trial_id=trial, episode_id=trial, checkpoint_id=checkpoint,
+                    source_uri=f"local-rollout://{trial}", session_id=trial,
+                    outcome="invalid", training_exposure="held_out",
+                )
+                # The invalid prior slot and its replacement marker are written together.
+                # A restart can recover the replacement from a completed local recording.
+                pairs = run.evidence.pairs
+                if previous is not None:
+                    other_role = "candidate" if role == "baseline" else "baseline"
+                    other = getattr(pair, other_role)
+                    pairs = tuple(
+                        item for item in pairs if item.scenario_id != scene_id or other is not None
+                    )
+                    if other is not None:
+                        pair = pair.model_copy(update={role: None})
+                        pairs = tuple(pair if item.scenario_id == scene_id else item for item in pairs)
+                    else:
+                        pair = None
+                run = run.model_copy(update={
+                    "evidence": run.evidence.model_copy(update={"pairs": pairs, "interruptions": interruptions}),
+                    "pending": InterruptedAttempt(scenario_id=scene_id, role=role, attempt=attempt),
+                })
+                with self.lock:
+                    self._write_run(folder, run)
                 try:
-                    score = self._record(folder / trial, checkpoint, seed, heldout=True)
+                    goal_args = {"goal": job.goal} if job.goal == "bowl" else {}
+                    score = self._record(folder / trial, checkpoint, seed, heldout=True, **goal_args)
                 except SimulatorRunError as exc:
                     if self._reset_requested.is_set():
                         return
-                    self._save_diagnosis(
-                        folder / trial, checkpoint, seed, "invalid", unverified_rollout(exc.code, exc.evidence),
-                    )
-                    attempts[role] = PairAttempt(
-                        trial_id=trial, episode_id=trial, checkpoint_id=checkpoint,
-                        source_uri=f"local-rollout://{trial}", session_id=trial,
-                        outcome="invalid", training_exposure="held_out",
-                    )
-                    self._save_comparison(folder, plan, [*pairs, MatchedPair(
-                        pair_id=str(seed), scenario_id=str(seed), **attempts,
-                    )])
+                    self._save_diagnosis(folder / trial, checkpoint, seed, "invalid",
+                                         unverified_rollout(exc.code, exc.evidence))
+                    self._store_outcome(folder, run, pair, scene_id, role, attempt)
                     raise
-                attempts[role] = PairAttempt(
-                    trial_id=trial, episode_id=trial, checkpoint_id=checkpoint,
-                    source_uri=f"local-rollout://{trial}", session_id=trial, recorded_at=score["started_at"],
-                    outcome="success" if score["success"] else "failure", training_exposure="held_out",
-                    model_action_rows=score["model_action_rows"], held_lift_m=score["held_lift_m"],
-                    peak_lift_m=score["peak_lift_m"], duration_s=score["duration_s"],
-                    first_close_after_warmup_s=score["first_close_after_warmup_s"],
-                    replay_max_state_error_m=score["replay_max_state_error"], height_source="recorded",
-                )
-                self._save_comparison(folder, plan, [*pairs, MatchedPair(
-                    pair_id=str(seed), scenario_id=str(seed), **attempts,
-                )])
-            pairs.append(MatchedPair(pair_id=str(seed), scenario_id=str(seed), **attempts))
-            self._update(completed=index)
+                run = self._store_outcome(folder, run, pair, scene_id, role, self._scored_attempt(attempt, score))
+            if index > job.completed:
+                self._update(completed=index)
         self._update(state="completed", message="Matched simulator comparison finished.")
 
 
@@ -845,8 +1169,8 @@ def yam_router(workflow: YamWorkflow) -> APIRouter:
         return workflow.existing_checkpoints()
 
     @router.get("/existing-checkpoints", response_model=list[ExistingCheckpoint])
-    def existing_checkpoints() -> list[ExistingCheckpoint]:
-        return workflow.list_existing_checkpoints()
+    def existing_checkpoints(goal: YamGoal = "pickup") -> list[ExistingCheckpoint]:
+        return workflow.list_existing_checkpoints(goal)
 
     @router.post("/compare-existing", response_model=YamJob, status_code=202)
     def compare_existing(value: ExistingComparisonRequest) -> YamJob:
@@ -866,20 +1190,33 @@ def yam_router(workflow: YamWorkflow) -> APIRouter:
         except TimeoutError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    @router.get("/resumable-comparisons", response_model=list[ResumableComparison])
+    def resumable_comparisons() -> list[ResumableComparison]:
+        return workflow.resumable_comparisons()
+
+    @router.post("/comparisons/{task_id}/{comparison_id}/resume", response_model=YamJob, status_code=202)
+    def resume_comparison(task_id: str, comparison_id: str) -> YamJob:
+        try:
+            return workflow.resume_comparison(UUID(hex=task_id).hex, UUID(hex=comparison_id).hex)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @router.get("/comparisons/{task_id}", response_model=YamComparison | None)
-    def comparison(task_id: str) -> YamComparison | None:
+    def comparison(task_id: str, evaluation_id: str | None = None) -> YamComparison | None:
         try:
             normalized = UUID(hex=task_id).hex
+            selected = UUID(hex=evaluation_id).hex if evaluation_id else None
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Simulator task not found.") from exc
-        return workflow.comparison(normalized)
+        return workflow.comparison(normalized, selected)
 
     @router.get("/comparisons/{task_id}/diagnostics", response_model=YamComparisonDiagnostics | None)
-    def comparison_diagnostics(task_id: str) -> YamComparisonDiagnostics | None:
+    def comparison_diagnostics(task_id: str, evaluation_id: str | None = None) -> YamComparisonDiagnostics | None:
         try:
             normalized = UUID(hex=task_id).hex
+            selected = UUID(hex=evaluation_id).hex if evaluation_id else None
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Simulator task not found.") from exc
-        return workflow.comparison_diagnostics(normalized)
+        return workflow.comparison_diagnostics(normalized, selected)
 
     return router

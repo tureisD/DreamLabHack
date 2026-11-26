@@ -273,6 +273,8 @@ def collect(output: Path, kind: str, fruit: str, seed: int,
             object_pixel: tuple[float, float],
             target_pixel: tuple[float, float] | None = None) -> dict:
     """Record, verify, resample, and atomically publish one reviewed simulator demo."""
+    if kind == "bowl" and seed >= 2**31:
+        raise ValueError("Choose an apple-to-bowl training seed below 2147483648. Higher seeds are reserved for evaluation.")
     output = output.expanduser().resolve()
     with_seed = seeded_env(fruit, seed)
     try:

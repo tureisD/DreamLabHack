@@ -9,6 +9,13 @@ from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
+from teach_task_coach.yam_goals import (
+    BOWL_HEIGHT_M,
+    BOWL_LIFT_M,
+    BOWL_RADIUS_M,
+    BOWL_SETTLE_SECONDS,
+)
+
 
 class FrozenModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -30,6 +37,7 @@ class PairPlan(FrozenModel):
     created_at: AwareDatetime
     required_model_rows: int = Field(default=0, ge=0)
     simulator_hold_threshold_m: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    simulator_goal: Literal["apple_into_bowl_v1"] | None = None
     heldout_attested: bool = False
     resets_attested: bool = False
 
@@ -37,11 +45,19 @@ class PairPlan(FrozenModel):
     def distinct_checkpoints(self) -> PairPlan:
         if self.baseline_checkpoint == self.candidate_checkpoint:
             raise ValueError("Base and candidate checkpoints must differ.")
-        if self.collection_mode == "simulation" and self.simulator_hold_threshold_m is None:
+        if self.simulator_goal is not None and self.collection_mode != "simulation":
+            raise ValueError("Simulator scoring rules cannot be used for physical trials.")
+        if self.collection_mode == "simulation" and self.simulator_goal is None and self.simulator_hold_threshold_m is None:
             raise ValueError("Simulator plans need a held-lift threshold.")
         if self.collection_mode == "simulation" and self.required_model_rows == 0:
             raise ValueError("Simulator plans need a complete model-action row budget.")
         return self
+
+
+class BowlPlacement(FrozenModel):
+    settled_s: float = Field(ge=0, allow_inf_nan=False)
+    final_distance_m: float = Field(ge=0, allow_inf_nan=False)
+    final_height_m: float = Field(allow_inf_nan=False)
 
 
 class PairAttempt(FrozenModel):
@@ -66,6 +82,7 @@ class PairAttempt(FrozenModel):
     first_close_after_warmup_s: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     replay_max_state_error_m: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     height_source: Literal["recorded", "replayed"] | None = None
+    bowl_placement: BowlPlacement | None = None
 
 
 class MatchedPair(FrozenModel):
@@ -81,15 +98,29 @@ class MatchedPair(FrozenModel):
         return self
 
 
+class InterruptedAttempt(FrozenModel):
+    scenario_id: str
+    role: Literal["baseline", "candidate"]
+    attempt: PairAttempt
+
+
 class PairedRequest(FrozenModel):
     plan: PairPlan
     pairs: tuple[MatchedPair, ...]
+    interruptions: tuple[InterruptedAttempt, ...] = ()
 
     @model_validator(mode="after")
     def unique_records(self) -> PairedRequest:
         pair_ids = [pair.pair_id for pair in self.pairs]
         trials = [attempt for pair in self.pairs for attempt in (pair.baseline, pair.candidate)
                   if attempt is not None]
+        for item in self.interruptions:
+            checkpoint = (self.plan.baseline_checkpoint if item.role == "baseline"
+                          else self.plan.candidate_checkpoint)
+            if (self.plan.collection_mode != "simulation" or item.attempt.outcome != "invalid"
+                or item.attempt.checkpoint_id != checkpoint or item.attempt.training_exposure != "held_out"):
+                raise ValueError("Only invalid simulator attempts may be retained as interruptions.")
+            trials.append(item.attempt)
         for name, values in (
             ("pair", pair_ids),
             ("trial", [trial.trial_id for trial in trials]),
@@ -132,6 +163,7 @@ class PairedReport(FrozenModel):
     problems: tuple[str, ...]
     warnings: tuple[str, ...]
     pairs: tuple[MatchedPair, ...]
+    interruptions: tuple[InterruptedAttempt, ...] = ()
 
 
 def evaluate_paired(request: PairedRequest) -> PairedReport:
@@ -164,14 +196,28 @@ def evaluate_paired(request: PairedRequest) -> PairedReport:
             problems.add("Physical attempts need a digest of their recorded rollout metadata.")
     else:
         for trial in attempts:
-            if (trial.height_source != "recorded" or trial.held_lift_m is None or
+            if (trial.height_source != "recorded" or
                 trial.replay_max_state_error_m is None or trial.replay_max_state_error_m >= 0.005 or
                 trial.model_action_rows is None or trial.model_action_rows < plan.required_model_rows):
                 problems.add("A simulator attempt lacks the required recorded-height or replay evidence.")
                 continue
-            expected = trial.held_lift_m >= plan.simulator_hold_threshold_m
+            if plan.simulator_goal == "apple_into_bowl_v1":
+                placement = trial.bowl_placement
+                if placement is None or trial.peak_lift_m is None:
+                    problems.add("A simulator attempt has no recorded bowl-placement evidence.")
+                    continue
+                expected = (trial.peak_lift_m >= BOWL_LIFT_M and placement.settled_s >= BOWL_SETTLE_SECONDS
+                            and placement.final_distance_m <= BOWL_RADIUS_M
+                            and BOWL_HEIGHT_M[0] < placement.final_height_m < BOWL_HEIGHT_M[1])
+                rule = "bowl-placement"
+            else:
+                if trial.held_lift_m is None:
+                    problems.add("A simulator attempt lacks the required recorded-height or replay evidence.")
+                    continue
+                expected = trial.held_lift_m >= plan.simulator_hold_threshold_m
+                rule = "held-lift"
             if trial.outcome in {"success", "failure"} and (trial.outcome == "success") != expected:
-                problems.add("A simulator outcome disagrees with the frozen held-lift rule.")
+                problems.add(f"A simulator outcome disagrees with the frozen {rule} rule.")
     usable = [pair for pair in request.pairs if pair.baseline is not None and pair.candidate is not None
               and pair.baseline.outcome in {"success", "failure"}
               and pair.candidate.outcome in {"success", "failure"}]
@@ -207,14 +253,25 @@ def evaluate_paired(request: PairedRequest) -> PairedReport:
             decision = "regressed"
         else:
             decision = "inconclusive"
-    payload = json.dumps(request.model_dump(mode="json"), sort_keys=True, separators=(",", ":"),
-                         allow_nan=False).encode("utf-8")
+    evidence = request.model_dump(mode="json")
+    if not request.interruptions:
+        evidence.pop("interruptions")  # Preserve digests of existing reports.
+    if plan.simulator_goal is None:
+        evidence["plan"].pop("simulator_goal")
+    audit_trials = [pair[role] for pair in evidence["pairs"] for role in ("baseline", "candidate") if pair[role]]
+    audit_trials.extend(item["attempt"] for item in evidence.get("interruptions", ()))
+    for trial in audit_trials:
+        if trial["bowl_placement"] is None:
+            trial.pop("bowl_placement")
+    payload = json.dumps(evidence, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     warnings = (
         "Scene assignment, reset compliance, reviewer accuracy, and pair independence need external audit.",
         "A task-success result alone does not establish physical safety or permission to deploy.",
     )
     if plan.collection_mode == "simulation":
         warnings += ("Simulator results are descriptive and cannot establish real-robot performance.",)
+    if request.interruptions:
+        warnings += ("Earlier invalid simulator attempts are retained. Scores use the first valid attempt for each model and scene.",)
     def mean_metric(role: str, field: str) -> float | None:
         values = [value for pair in request.pairs
                   if (trial := getattr(pair, role)) is not None
@@ -242,5 +299,5 @@ def evaluate_paired(request: PairedRequest) -> PairedReport:
         candidate_mean_first_response_s=mean_metric("candidate", "first_response_s"),
         observed_difference=difference, difference_interval=interval, interval_method=method,
         input_sha256=hashlib.sha256(payload).hexdigest(), problems=tuple(sorted(problems)),
-        warnings=warnings, pairs=request.pairs,
+        warnings=warnings, pairs=request.pairs, interruptions=request.interruptions,
     )

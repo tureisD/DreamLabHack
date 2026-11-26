@@ -14,15 +14,99 @@ from fastapi.testclient import TestClient
 
 from teach_task_coach import yam_workflow
 from teach_task_coach.api import create_app
+from teach_task_coach.demos import Demo, DemoStore
 from teach_task_coach.faas import FaaSStore, FineTuneRequest
 from teach_task_coach.preflight import PreflightService
 from teach_task_coach.simulator_process import SimulatorProcessCancelled
 from teach_task_coach.simulator_setup import SimulatorStatus
 from teach_task_coach.storage import EpisodeStore
+from teach_task_coach.yam_goals import BOWL_EVALUATION_RULE, BOWL_PROMPT, BOWL_TASK_RULE
 from teach_task_coach.yam_workflow import BASE, MIN_ACTION_ROWS, PROMPT, SUCCESS_RULE, YamWorkflow
 
 CANDIDATE = "test/apple-checkpoint"
 VERIFIED_CANDIDATE = "dream-1-ft:7820aef9-apple-varied24-500"
+
+
+@pytest.mark.parametrize("interruption", ["technical_error", "restart_after_recording"])
+def test_resume_reuses_frozen_plan_and_preserves_attempts(tmp_path, monkeypatch, interruption):
+    ready = SimpleNamespace(status=lambda: SimulatorStatus(state="ready", message="Fixture"))
+    preflight = PreflightService(model_loader=lambda: [
+        SimpleNamespace(id=id_, owner="test", embodiment="yam", servable=True, cameras=None)
+        for id_ in (BASE, VERIFIED_CANDIDATE)
+    ])
+    attempted = []
+    recorded = Event()
+
+    def score(checkpoint):
+        success = checkpoint == VERIFIED_CANDIDATE
+        return {
+            "started_at": dt.datetime.now(dt.UTC), "success": success,
+            "held_lift_m": 0.11 if success else 0, "peak_lift_m": 0.12 if success else 0,
+            "duration_s": 32, "model_action_rows": MIN_ACTION_ROWS,
+            "replay_max_state_error": 0.001, "first_close_after_warmup_s": 2,
+        }
+
+    def record(self, folder, checkpoint, seed, *, heldout=False):
+        assert heldout
+        attempted.append((seed, checkpoint))
+        if len(attempted) == 2:
+            if interruption == "technical_error":
+                raise yam_workflow.SimulatorRunError("The session expired.", "dream_session_replaced")
+            source = folder / "finished"
+            source.mkdir(parents=True)
+            (source / "rollout.json").write_text("{}", encoding="utf-8")
+            recorded.set()
+            raise SimulatorProcessCancelled()
+        return score(checkpoint)
+
+    def recover(self, folder, checkpoint, seed, *, heldout):
+        assert heldout and (seed, checkpoint) == attempted[1]
+        return score(checkpoint)
+
+    monkeypatch.setattr(YamWorkflow, "_record", record)
+    monkeypatch.setattr(YamWorkflow, "_score_recording", recover)
+    client = TestClient(create_app(preflight, EpisodeStore(tmp_path), simulator_setup=ready))
+    started = client.post("/api/simulator/compare-existing", json={"checkpoint": VERIFIED_CANDIDATE})
+    assert started.status_code == 202
+    job = started.json()
+    task, comparison = job["task_id"], job["id"]
+    root = tmp_path / "yam-workflow" / task
+    archive = root / "comparisons" / f"{comparison}.json"
+    url = f"/api/simulator/comparisons/{task}"
+    if interruption == "technical_error":
+        assert wait_for_job(client)["state"] == "failed"
+    else:
+        assert recorded.wait(10)
+    first = client.get(url).json()["report"]
+    assert client.post("/api/simulator/session/reset").status_code == 200
+    frozen = json.loads(archive.read_text(encoding="utf-8"))
+    # A later change to a task's scene manifest must not affect the comparison.
+    (root / "scenes.json").write_text('{"training":[],"heldout":[]}', encoding="utf-8")
+    reopened = TestClient(create_app(preflight, EpisodeStore(tmp_path), simulator_setup=ready))
+    [resume_option] = reopened.get("/api/simulator/resumable-comparisons").json()
+    assert resume_option["id"] == comparison
+    resumed = reopened.post(f"{url}/{comparison}/resume")
+    assert resumed.status_code == 202 and resumed.json()["id"] == comparison
+    assert wait_for_job(reopened)["state"] == "completed"
+    report = reopened.get(url, params={"evaluation_id": comparison}).json()["report"]
+    assert report["usable_pairs"] == 4 and report["decision"] == "descriptive"
+    assert (report["baseline_successes"], report["candidate_successes"]) == (0, 4)
+    assert report["pairs"][0]["baseline"] == first["pairs"][0]["baseline"]
+    assert [int(pair["scenario_id"]) for pair in report["pairs"]] == frozen["seeds"]
+    after = json.loads(archive.read_text(encoding="utf-8"))
+    assert after["evidence"]["plan"] == frozen["evidence"]["plan"]
+    if interruption == "technical_error":
+        [failure] = report["interruptions"]
+        assert failure["attempt"] == first["pairs"][0]["candidate"]
+        diagnoses = reopened.get(f"{url}/diagnostics", params={"evaluation_id": comparison}).json()["trials"]
+        assert diagnoses[failure["attempt"]["trial_id"]]["code"] == "dream_session_replaced"
+        assert attempted.count(attempted[1]) == 2
+    else:
+        assert report["interruptions"] == []
+        assert attempted.count(attempted[1]) == 1
+    assert attempted.count(attempted[0]) == 1
+    assert reopened.get("/api/simulator/resumable-comparisons").json() == []
+    assert reopened.post(f"{url}/{comparison}/resume").status_code == 409
 
 
 def wait_for_job(client: TestClient, timeout: int = 15) -> dict:
@@ -328,6 +412,91 @@ def test_existing_checkpoint_choices_join_accessible_models_and_verified_trainin
     assert client.post("/api/simulator/compare-existing", json={"checkpoint": eligible}).status_code == 202
     assert wait_for_job(client)["state"] == "completed"
     assert compared == [eligible]
+
+
+def test_bowl_comparison_uses_verified_demos_and_frozen_placement_rule(tmp_path, monkeypatch):
+    candidate = "dream-1-ft:abcd1234-apple-bowl"
+    ready = SimpleNamespace(status=lambda: SimulatorStatus(state="ready", message="Fixture"))
+    preflight = PreflightService(model_loader=lambda: [
+        SimpleNamespace(id=id_, owner="test", embodiment="yam", servable=True, cameras=None)
+        for id_ in (BASE, VERIFIED_CANDIDATE, candidate)
+    ])
+    remote = [
+        {"id": "remote-bowl", "status": "succeeded", "fine_tuned_model": candidate,
+         "dataset": "fixture/apple-bowl", "base_model": BASE, "hyperparameters": {"use_eef": False}},
+    ]
+    client = TestClient(create_app(
+        preflight, EpisodeStore(tmp_path), simulator_setup=ready,
+        dream_gateway=SimpleNamespace(finetunes=lambda: remote),
+    ))
+    response = client.post("/api/tasks", json={
+        "name": "Apple placement · click to correct", "prompt": BOWL_PROMPT,
+        "baseline_checkpoint": BASE, "success_rule": BOWL_TASK_RULE,
+    })
+    assert response.status_code == 201
+    task_id = response.json()["id"]
+    training_seed = 2**31 + 42  # Older bowl demos could use the upper range.
+    demo_folder = tmp_path / "bowl-demo"
+    demo_folder.mkdir()
+    receipt = demo_folder / "click_correction.json"
+    DemoStore(tmp_path).upsert(Demo(
+        id="verified-demo", task_id=task_id, source_path=str(demo_folder), origin="scripted_reference",
+        task_text=BOWL_PROMPT, codebase_version="v2.1", frames=160, fps=10,
+        camera_keys=[], state_dim=14, action_dim=14, findings=[], decision="keep",
+    ))
+    faas = FaaSStore(tmp_path)
+    dataset = faas.create_dataset(task_id, "fixture/yam", ["verified-demo"])
+    faas.update_dataset(dataset.id, status="validated", remote_name="fixture/apple-bowl")
+    job = faas.create_finetune(dataset.id, FineTuneRequest(steps=500))
+    faas.update_finetune(job.id, status="succeeded", checkpoint=candidate, remote_job_id="remote-bowl")
+
+    assert client.get("/api/simulator/existing-checkpoints", params={"goal": "bowl"}).json() == []
+    request = {"task_id": task_id, "job_id": job.id, "pairs": 2}
+    assert client.post("/api/simulator/compare", json=request).status_code == 409
+    receipt.write_text(json.dumps({
+        "method": "click_to_correct_simulation", "goal": {"kind": "bowl", "fruit": "apple"},
+        "physics": {"passed": True}, "export_replay": {"passed": True}, "seed": training_seed,
+    }), encoding="utf-8")
+    assert client.get("/api/simulator/existing-checkpoints", params={"goal": "bowl"}).json() == [
+        {"checkpoint": candidate, "dataset": "fixture/apple-bowl", "steps": 500},
+    ]
+    assert client.post("/api/simulator/compare-existing", json={
+        "checkpoint": VERIFIED_CANDIDATE, "goal": "bowl",
+    }).status_code == 409
+
+    seen = []
+
+    def record(self, folder, checkpoint, seed, *, heldout, goal):
+        assert heldout and goal == "bowl" and 2**31 <= seed < 2**32 and seed != training_seed
+        seen.append((seed, checkpoint))
+        placed = checkpoint == candidate
+        return {
+            "started_at": dt.datetime.now(dt.UTC), "success": placed,
+            "held_lift_m": 0.1, "peak_lift_m": 0.13,
+            "model_action_rows": MIN_ACTION_ROWS, "replay_max_state_error": 0.001,
+            "bowl_placement": {
+                "settled_s": 1.5 if placed else 0, "final_distance_m": 0.024 if placed else 0.21,
+                "final_height_m": 0.04,
+            },
+        }
+
+    monkeypatch.setattr(YamWorkflow, "_record", record)
+    started = client.post("/api/simulator/compare", json=request)
+    assert started.status_code == 202 and started.json()["goal"] == "bowl"
+    assert wait_for_job(client)["state"] == "completed"
+    comparison_id = started.json()["id"]
+    snapshot = json.loads((tmp_path / "yam-workflow" / task_id / "comparisons" / f"{comparison_id}.json")
+                          .read_text(encoding="utf-8"))
+    assert snapshot["evidence"]["plan"]["success_rule"] == BOWL_EVALUATION_RULE
+    first, second = snapshot["seeds"]
+    assert seen == [(first, BASE), (first, candidate), (second, candidate), (second, BASE)]
+    result = client.get(f"/api/simulator/comparisons/{task_id}", params={"evaluation_id": comparison_id}).json()
+    assert result["goal"] == "bowl" and result["report"]["decision"] == "descriptive"
+    assert (result["report"]["baseline_successes"], result["report"]["candidate_successes"]) == (0, 2)
+    snapshot["evidence"]["pairs"][0]["baseline"]["outcome"] = "success"
+    assert "A simulator outcome disagrees with the frozen bowl-placement rule." in yam_workflow.evaluate_paired(
+        yam_workflow.PairedRequest.model_validate(snapshot["evidence"]),
+    ).problems
 
 
 def test_chat_reports_the_saved_session_replacement_reason(tmp_path, monkeypatch):

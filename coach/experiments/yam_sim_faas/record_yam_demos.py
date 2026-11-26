@@ -25,6 +25,8 @@ import mock_pickups
 from yam_env import YamEnv
 
 from teach_task_coach.pickup_evidence import COLUMNS, TRACE
+from teach_task_coach.yam_goals import BOWL_PROMPT
+from bowl_evidence import PLACEMENT_COLUMN, observe_placement
 
 ROOT = Path.cwd() / "yam_sim_dataset_20hz"
 TASK = "pick up the apple"
@@ -71,6 +73,7 @@ class RecordingYamEnv(YamEnv):
         self.apple_body = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "apple")
         has_apple = self.apple_body >= 0 and object_name == "apple"
         self.apple_heights = [] if not videos and has_apple else None
+        self.bowl_states = [] if self.apple_heights is not None and task == BOWL_PROMPT else None
         self.video_poses = [] if defer_video and videos else None
         self.apple_trace = [] if has_apple and self.task.strip().casefold() == TASK else None
         self.tip_bodies = {}
@@ -123,6 +126,8 @@ class RecordingYamEnv(YamEnv):
         result = super().step(left, right)
         if self.apple_heights is not None:
             self.apple_heights.append(float(self.data.body("apple").xpos[2]))
+        if self.bowl_states is not None:
+            self.bowl_states.append(observe_placement(self))
         return result
 
     def _write_video_frame(self):
@@ -169,6 +174,8 @@ class RecordingYamEnv(YamEnv):
         }
         if self.apple_heights is not None:
             columns["observation.apple_height_m"] = pa.array(self.apple_heights, type=pa.float32())
+        if self.bowl_states is not None:
+            columns[PLACEMENT_COLUMN] = pa.array(self.bowl_states, type=pa.list_(pa.float32(), 5))
         table = pa.table(columns)
         data = self.folder / "data/chunk-000/episode_000000.parquet"
         data.parent.mkdir(parents=True, exist_ok=True)
@@ -183,6 +190,8 @@ class RecordingYamEnv(YamEnv):
         features.update({f"observation.images.{role}": video_feature for role in self.outputs})
         if self.apple_heights is not None:
             features["observation.apple_height_m"] = {"dtype": "float32", "shape": [1]}
+        if self.bowl_states is not None:
+            features[PLACEMENT_COLUMN] = {"dtype": "float32", "shape": [5]}
         info = {
             "codebase_version": "v2.1",
             "total_episodes": 1,
