@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Evaluation, Report } from './Evaluation';
 import type { PairedReport } from './StatisticalAudit';
-import type { SimulatorMode } from './YamChatWorkflow';
+import type { SimulatorMode, YamGoal } from './YamChatWorkflow';
 import './MeasuredEvidenceTeaser.css';
 
 type LiveResult = {
@@ -12,6 +12,7 @@ type LiveResult = {
 
 type SimulatorResult = {
   task_id: string;
+  goal?: YamGoal;
   baseline: string;
   candidate: string;
   report: PairedReport;
@@ -67,7 +68,8 @@ export function useLiveEvaluation(taskId: string, comparisonId?: string) {
 
     async function poll() {
       try {
-        const saved = await readJson<SimulatorResult | null>(`/api/simulator/comparisons/${encodeURIComponent(taskId)}`, signal);
+        const query = comparisonId ? `?evaluation_id=${encodeURIComponent(comparisonId)}` : '';
+        const saved = await readJson<SimulatorResult | null>(`/api/simulator/comparisons/${encodeURIComponent(taskId)}${query}`, signal);
         const sim = saved && (!comparisonId || saved.report.evaluation_id === comparisonId) ? saved : null;
         const next = sim ? null : comparisonId ? undefined : await readJson<LiveResult | null>(
           `/api/evaluations/latest?task_id=${encodeURIComponent(taskId)}`, signal,
@@ -99,9 +101,10 @@ export function useLiveEvaluation(taskId: string, comparisonId?: string) {
   };
 }
 
-export default function LiveEvaluation({ taskId, simulatorMode, allowPhysicalPlanning, onOpen, onEvidence, evidence }: {
+export default function LiveEvaluation({ taskId, simulatorMode, comparisonGoal, allowPhysicalPlanning, onOpen, onEvidence, evidence }: {
   taskId: string;
   simulatorMode?: SimulatorMode;
+  comparisonGoal?: YamGoal;
   allowPhysicalPlanning: boolean;
   onOpen: (taskId?: string, evaluationId?: string) => void;
   onEvidence: () => void;
@@ -121,7 +124,7 @@ export default function LiveEvaluation({ taskId, simulatorMode, allowPhysicalPla
     {taskId && result === undefined && !sim && !failed && <p>Loading evaluations…</p>}
     {taskId && result === null && !sim && <p>No evaluation for this task yet.</p>}
     {sim && <div className="live-eval-body">
-      <h3>Apple pickup · live simulator trials</h3>
+      <h3>{sim.goal === 'bowl' ? 'Apple into bowl' : 'Apple pickup'} · live simulator trials</h3>
       <SuccessCounts
         baseline={sim.report.baseline_successes}
         candidate={sim.report.candidate_successes}
@@ -163,9 +166,9 @@ export default function LiveEvaluation({ taskId, simulatorMode, allowPhysicalPla
         Open evaluation
       </button>
     </div>}
-    {taskId && result === null && !sim && (simulatorMode === 'apple'
+    {taskId && result === null && !sim && (comparisonGoal
       ? <p>Run a matched comparison from chat when a checkpoint is ready.</p>
-      : <>{simulatorMode && <p>Automatic simulator comparisons are available for Apple pickup.</p>}
+      : <>{simulatorMode && <p>Automatic simulator comparisons support apple pickup and apple into bowl.</p>}
         {allowPhysicalPlanning && <button type="button" className="live-eval-link" onClick={() => onOpen(taskId)}>Plan a physical evaluation</button>}</>)}
     {!sim && !current && <div className="measured-evidence-teaser">
       <span>Measured YAM simulator case</span>

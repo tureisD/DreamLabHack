@@ -6,7 +6,7 @@ type Preview = {
   markers: Record<string, [number, number]>;
   supported: Record<string, string[]>;
 };
-const newSeed = () => Math.floor(Math.random() * 2 ** 32);
+const newSeed = () => Math.floor(Math.random() * 2 ** 31);
 
 export default function SimCorrect({ taskId, taskPrompt, taskSuccessRule, onComplete, onSetupTask, inline = false }: {
   taskId: string; taskPrompt: string; taskSuccessRule?: string;
@@ -75,9 +75,17 @@ export default function SimCorrect({ taskId, taskPrompt, taskSuccessRule, onComp
     <h2>Click to correct in YAM simulation</h2>
     <p>Load a scene and click the fruit. For placement, click inside the bowl too.</p>
     <fieldset className="sim-recorder-fields training-controls" aria-label="Fruit scene configuration" disabled={locked}>
-      <label>Goal<select value={kind} onChange={(event) => { const next = event.target.value as 'lift' | 'bowl'; setKind(next); if (next === 'bowl') setFruit('apple'); setPreview(null); setObjectPixel(null); setTargetPixel(null); }}><option value="lift">Lift fruit</option><option value="bowl">Put fruit in bowl</option></select></label>
+      <label>Goal<select value={kind} onChange={(event) => {
+        const next = event.target.value as 'lift' | 'bowl';
+        setKind(next);
+        if (next === 'bowl') {
+          setFruit('apple');
+          if (seed >= 2 ** 31) setSeed(newSeed());
+        }
+        setPreview(null); setObjectPixel(null); setTargetPixel(null);
+      }}><option value="lift">Lift fruit</option><option value="bowl">Put apple in bowl</option></select></label>
       <label>Object<select value={fruit} onChange={(event) => { const next = event.target.value as 'apple' | 'banana'; setFruit(next); setPreview(null); setObjectPixel(null); setTargetPixel(null); }}><option value="apple">Apple</option>{kind === 'lift' && <option value="banana">Banana</option>}</select></label>
-      <label>Scene seed<input type="number" min="0" max="4294967295" value={seed} onChange={(event) => { setSeed(Number(event.target.value)); setPreview(null); }} /></label>
+      <label>Scene seed<input type="number" min={0} max={kind === 'bowl' ? 2 ** 31 - 1 : 2 ** 32 - 1} value={seed} onChange={(event) => { setSeed(Number(event.target.value)); setPreview(null); }} /></label>
       <button type="button" className="secondary" onClick={() => { const next = newSeed(); setSeed(next); void loadScene(next); }}>New scene</button>
       <button type="button" className="secondary" onClick={() => void loadScene()}>Load scene</button>
     </fieldset>

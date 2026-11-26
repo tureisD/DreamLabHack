@@ -29,6 +29,7 @@ export type PairedReport = {
   baseline_successes: number; candidate_successes: number; observed_difference: number | null;
   difference_interval: [number, number] | null; interval_method: string | null;
   input_sha256: string; problems: string[]; warnings: string[]; pairs: Pair[];
+  interruptions?: { pair_id: string; role: 'baseline' | 'candidate'; attempt: PairAttempt }[];
   baseline_interventions?: number; candidate_interventions?: number;
   baseline_mean_duration_s?: number | null; candidate_mean_duration_s?: number | null;
   baseline_mean_first_response_s?: number | null; candidate_mean_first_response_s?: number | null;

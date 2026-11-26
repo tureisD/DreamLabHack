@@ -1,10 +1,16 @@
 import type { PairedReport } from './StatisticalAudit';
-import type { YamJob } from './YamChatWorkflow';
+import type { YamGoal, YamJob } from './YamChatWorkflow';
 
-export function YamComparisonPlan({ pairs }: { pairs: number }) {
+export function yamSuccessRule(goal?: YamGoal) {
+  return goal === 'bowl'
+    ? 'Lift the apple at least 8 cm, then release it so it rests inside the bowl without gripper contact for the final second.'
+    : 'Lift the apple at least 8 cm above its starting height and hold it there for two continuous seconds.';
+}
+
+export function YamComparisonPlan({ pairs, goal }: { pairs: number; goal?: YamGoal }) {
   return <div className="yam-comparison-explanation">
-    <p>I’ll have base Dream-1 and your fine-tune try the same {pairs} apple-pickup scenes held out from training. I’ll reset each scene to the same starting state for both models, for {pairs * 2} trials total.</p>
-    <p>A trial succeeds when the apple stays at least 8 cm above its starting height for two continuous seconds. These trials use Dream inference credits.</p>
+    <p>I’ll have base Dream-1 and your fine-tune try the same {pairs} {goal === 'bowl' ? 'apple-into-bowl' : 'apple-pickup'} scenes held out from training. I’ll reset each scene to the same starting state for both models, for {pairs * 2} trials total.</p>
+    <p>{yamSuccessRule(goal)} These trials use Dream inference credits.</p>
   </div>;
 }
 
@@ -24,7 +30,7 @@ export function YamComparisonProgress({ job, report }: { job: YamJob; report: Pa
       && baseFinished === job.total && fineTuneFinished === job.total) {
       summary = <>
         <p>Base Dream-1 succeeded on {report.baseline_successes} of {job.total} scenes. Your fine-tune succeeded on {report.candidate_successes} of {job.total}.</p>
-        <p>These scores describe the apple pickups on these {job.total} simulator scenes.</p>
+        <p>These scores describe the {job.goal === 'bowl' ? 'apple placements' : 'apple pickups'} on these {job.total} simulator scenes.</p>
       </>;
     } else {
       summary = <p>I have {report.usable_pairs} of {job.total} usable pairs. The evidence is incomplete, so I can’t give a final comparison.</p>;
@@ -49,5 +55,6 @@ export function YamComparisonProgress({ job, report }: { job: YamJob; report: Pa
       <p>A pair is complete once both models finish the same scene.</p>
     </>}
     {summary}
+    {!!report?.interruptions?.length && <p>Earlier interrupted attempts are saved in the comparison explanation.</p>}
   </div>;
 }

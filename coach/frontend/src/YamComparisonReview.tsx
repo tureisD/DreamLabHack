@@ -21,16 +21,16 @@ function outcomeLabel(outcome: string | undefined) {
   }
 }
 
-function nextStep(report: PairedReport, complete: boolean) {
-  if (!complete) return 'Check for missing or invalid trials in the scene results. A fresh comparison can collect a complete set.';
+function nextStep(report: PairedReport, complete: boolean, bowl: boolean) {
+  if (!complete) return 'Check for missing or invalid trials in the scene results, then resume the comparison to finish it.';
   if (report.candidate_successes > report.baseline_successes) {
     return 'Keep this checkpoint and test it on more fresh scenes with varied apple positions before relying on it.';
   }
   if (report.candidate_successes === report.planned_pairs) {
-    return 'Both models picked up the apple in every scene. Try more challenging starting positions to see where their performance differs.';
+    return `Both models ${bowl ? 'placed the apple in the bowl' : 'picked up the apple'} in every scene. Try more challenging starting positions to see where their performance differs.`;
   }
   if (report.candidate_successes === report.baseline_successes) {
-    return 'Review the misses below. Record corrections on new training scenes that reproduce the missed approach or grasp, then test on fresh held-out scenes.';
+    return 'Review the misses below. Record corrections on new training scenes that reproduce the missed stage, then test on fresh held-out scenes.';
   }
   return 'Review where the fine-tune missed, especially scenes the base passed. Record corrections on similar training scenes before testing another checkpoint.';
 }
@@ -76,6 +76,8 @@ export default function YamComparisonReview({ job, report, onConfirmFresh }: {
   const [retry, setRetry] = useState(0);
   const expanded = expandedJobId === job.id;
   const evidence = report?.evaluation_id === job.id ? report : null;
+  const interruptions = evidence?.interruptions ?? [];
+  const bowl = job.goal === 'bowl';
   const running = job.state === 'running' || job.state === 'stopping';
   const complete = job.state === 'completed' && evidence?.decision === 'descriptive'
     && evidence.planned_pairs === job.total && evidence.usable_pairs === job.total;
@@ -83,8 +85,10 @@ export default function YamComparisonReview({ job, report, onConfirmFresh }: {
     && (evidence.baseline_attempted < job.total || evidence.candidate_attempted < job.total);
   const improved = evidence?.pairs.filter((pair) => pair.baseline?.outcome === 'failure' && pair.candidate?.outcome === 'success').length ?? 0;
   const regressed = evidence?.pairs.filter((pair) => pair.baseline?.outcome === 'success' && pair.candidate?.outcome === 'failure').length ?? 0;
-  const attemptsKey = evidence?.pairs.flatMap((pair) => [pair.baseline, pair.candidate]
-    .filter((attempt) => attempt !== null).map((attempt) => `${attempt.trial_id}:${attempt.outcome}`)).join('|') ?? '';
+  const attemptsKey = evidence ? [
+    ...evidence.pairs.flatMap((pair) => [pair.baseline, pair.candidate].filter((attempt) => attempt !== null)),
+    ...interruptions.map(({ attempt }) => attempt),
+  ].map(({ trial_id, outcome }) => `${trial_id}:${outcome}`).join('|') : '';
   const saved = diagnostics?.jobId === job.id ? diagnostics : null;
   const pending = Boolean(attemptsKey) && (saved?.attemptsKey !== attemptsKey || saved.retry !== retry);
 
@@ -100,7 +104,7 @@ export default function YamComparisonReview({ job, report, onConfirmFresh }: {
 
     async function loadDiagnostics() {
       try {
-        const response = await fetch(`/api/simulator/comparisons/${encodeURIComponent(job.task_id)}/diagnostics`, { signal, cache: 'no-store' });
+        const response = await fetch(`/api/simulator/comparisons/${encodeURIComponent(job.task_id)}/diagnostics?evaluation_id=${encodeURIComponent(job.id)}`, { signal, cache: 'no-store' });
         if (!response.ok) throw new Error('Trace analysis was unavailable.');
         const result = await response.json() as YamComparisonDiagnostics | null;
         if (result && result.evaluation_id !== job.id) throw new Error('Trace analysis belongs to a different run.');
@@ -117,7 +121,7 @@ export default function YamComparisonReview({ job, report, onConfirmFresh }: {
   }, [expanded, attemptsKey, job.id, job.task_id, retry]);
 
   return <section className="yam-comparison-review" aria-label="Comparison review">
-    {evidence && !running && !awaitingFinalReport && <p><strong>Next step</strong> {nextStep(evidence, complete)}</p>}
+    {evidence && !running && !awaitingFinalReport && <p><strong>Next step</strong> {nextStep(evidence, complete, bowl)}</p>}
     <button type="button" className="yam-secondary" aria-expanded={expanded} aria-controls={detailsId}
       onClick={() => setExpandedJobId(expanded ? null : job.id)}>
       {expanded ? 'Hide comparison explanation' : 'Explain comparison results'}
@@ -130,7 +134,7 @@ export default function YamComparisonReview({ job, report, onConfirmFresh }: {
               {improved > 0 && ` The fine-tune passed ${improved} ${improved === 1 ? 'scene' : 'scenes'} the base missed.`}
               {regressed > 0 && ` It missed ${regressed} ${regressed === 1 ? 'scene' : 'scenes'} the base passed.`}
             </p>
-            <p>These results cover {job.total} scenes in simulation. More varied trials are needed to estimate how reliably the model picks up apples.</p>
+            <p>These results cover {job.total} scenes in simulation. More varied trials are needed to estimate how reliably the model {bowl ? 'places the apple in the bowl' : 'picks up apples'}.</p>
           </> : <p>{evidence.usable_pairs} of {job.total} scene pairs have valid results for both models. You can still review the saved outcomes below.</p>}
           {evidence.pairs.length > 0 && <table className="audit-table">
             <caption>Saved scene outcomes</caption>
@@ -159,6 +163,15 @@ export default function YamComparisonReview({ job, report, onConfirmFresh }: {
               </div>
             </article>)}
           </section>}
+          {interruptions.length > 0 && <details className="yam-diagnostic-list">
+            <summary>Earlier interrupted attempts ({interruptions.length})</summary>
+            {interruptions.map(({ pair_id, role, attempt }) => {
+              const index = evidence.pairs.findIndex((pair) => pair.pair_id === pair_id);
+              return <TrialDiagnosis key={attempt.trial_id}
+                name={`${index >= 0 ? `Scene ${index + 1} · ` : ''}${role === 'baseline' ? 'Base Dream-1' : 'Fine-tune'}`}
+                attempt={attempt} pending={pending} diagnosis={saved?.trials[attempt.trial_id]} />;
+            })}
+          </details>}
         </> : <p>The saved results for this run are unavailable right now. I’ll show an explanation when they load.</p>}
         {evidence && !running && !awaitingFinalReport && onConfirmFresh && <div className="yam-next">
           <button type="button" className="yam-secondary" onClick={onConfirmFresh}>Plan a fresh comparison</button>

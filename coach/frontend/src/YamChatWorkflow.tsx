@@ -13,6 +13,7 @@ export type YamTrialDiagnosis = {
 };
 
 export type YamComparisonDiagnostics = { evaluation_id: string; trials: Record<string, YamTrialDiagnosis> };
+export type YamGoal = 'pickup' | 'bowl';
 
 export type YamJob = {
   id: string;
@@ -23,6 +24,7 @@ export type YamJob = {
   demos: number;
   state: 'running' | 'stopping' | 'completed' | 'cancelled' | 'failed';
   message: string;
+  goal?: YamGoal;
   training_trial_diagnostics?: { scene: number; seed: number; diagnosis: YamTrialDiagnosis }[];
 };
 
@@ -50,6 +52,7 @@ const sceneChoices: { id: ScenePreset; title: string; target: string }[] = [
 export default function YamChatWorkflow({
   setup, dreamReady, job, pipeline, comparisonReport, mode, setMode, openRecorder, openExistingCheckpoints,
   prepare, collect, reuseDemos, compare, stop, review, training, planFreshComparison,
+  comparisonGoal, findResumable, resume,
 }: {
   setup: { state: string; message: string } | null;
   dreamReady: boolean;
@@ -59,7 +62,7 @@ export default function YamChatWorkflow({
   mode: SimulatorMode;
   setMode: (mode: SimulatorMode) => void;
   openRecorder: (mode: 'fruit' | 'scene', preset?: ScenePreset) => void;
-  openExistingCheckpoints: () => void;
+  openExistingCheckpoints: (goal: YamGoal) => void;
   prepare: () => Promise<unknown>;
   collect: (scenes: number) => Promise<unknown>;
   reuseDemos: () => Promise<unknown>;
@@ -68,6 +71,9 @@ export default function YamChatWorkflow({
   review: () => void;
   training: () => void;
   planFreshComparison?: () => void;
+  comparisonGoal?: YamGoal;
+  findResumable: () => void;
+  resume?: () => Promise<unknown>;
 }) {
   const [scenes, setScenes] = useState(4);
   const [busy, setBusy] = useState(false);
@@ -78,6 +84,7 @@ export default function YamChatWorkflow({
   const preparing = setup?.state === 'preparing';
   const checkpoint = pipeline?.job?.status === 'succeeded' ? pipeline.job : null;
   const canStart = !running && (pipeline ? !pipeline.kept && !pipeline.unreviewed && !checkpoint : !job?.demos);
+  const interrupted = job?.kind === 'comparison' && (job.state === 'failed' || job.state === 'cancelled');
 
   useEffect(() => {
     panel.current?.scrollIntoView({ block: 'nearest' });
@@ -113,7 +120,7 @@ export default function YamChatWorkflow({
       </button>
     </div>}
 
-    {job && (running || mode === 'apple') && <div className="yam-job" data-state={job.state}>
+    {job && (running || mode === (job.goal === 'bowl' ? 'fruit' : 'apple')) && <div className="yam-job" data-state={job.state}>
       <div role="status">
         <strong>{running ? (job.kind === 'comparison' ? 'Comparing checkpoints' : job.kind === 'import' ? 'Importing demos' : 'Collecting demos')
           : job.state === 'failed' ? 'Run stopped' : job.state === 'cancelled' ? 'Run stopped by you' : 'Run complete'}</strong>
@@ -128,9 +135,15 @@ export default function YamChatWorkflow({
         </>}
       </div>
       {running && <button type="button" className="yam-secondary" disabled={busy} onClick={() => void act(stop)}>Quit run</button>}
+      {interrupted && resume && <div className="yam-next">
+        <button type="button" className="yam-primary" disabled={busy || !ready || !dreamReady} onClick={() => void act(resume)}>
+          Resume comparison
+        </button>
+        <small>Continue on the same scenes. Dream inference credits apply to any remaining trials.</small>
+      </div>}
       {job.kind === 'comparison' && (job.state === 'completed' || Boolean(comparisonReport?.pairs.length)) && <YamComparisonReview
         key={job.id} job={job} report={comparisonReport}
-        onConfirmFresh={!running && ready && dreamReady ? planFreshComparison : undefined} />}
+        onConfirmFresh={job.state === 'completed' && ready && dreamReady ? planFreshComparison : undefined} />}
       {job.kind === 'collection' && Boolean(job.training_trial_diagnostics?.length) && <details className="yam-comparison-review">
         <summary>Training scene diagnoses</summary>
         <ol className="yam-diagnostic-list">
@@ -141,6 +154,8 @@ export default function YamChatWorkflow({
         </ol>
       </details>}
     </div>}
+
+    {!running && <button type="button" className="yam-secondary" onClick={findResumable}>Resume a saved comparison</button>}
 
     {mode === 'scene' && <div className="yam-panel">
       <div className="yam-panel-heading"><h3>Choose a scene</h3><p>You can adjust the object and target before recording.</p></div>
@@ -165,6 +180,16 @@ export default function YamChatWorkflow({
         <small>Load a scene and click the fruit. For placement, click the bowl too.</small>
         <button type="button" className="yam-primary" disabled={!ready} onClick={() => openRecorder('fruit')}>Open fruit setup <span aria-hidden="true">→</span></button>
       </div>
+      {!running && checkpoint && comparisonGoal === 'bowl' && !interrupted && <div className="yam-next">
+        <YamComparisonPlan pairs={4} goal="bowl" />
+        <button type="button" className="yam-primary" disabled={busy || !dreamReady || !ready} onClick={() => void act(() => compare(checkpoint.id))}>
+          {job?.kind === 'comparison' && job.state === 'completed' ? 'Run fresh bowl comparison' : 'Run bowl comparison'}
+        </button>
+      </div>}
+      {!running && ready && dreamReady && <div className="yam-next">
+        <button type="button" className="yam-secondary" onClick={() => openExistingCheckpoints('bowl')}>Evaluate existing bowl checkpoint</button>
+        <small>Compare a fine-tune trained on verified apple-to-bowl demos.</small>
+      </div>}
     </div>}
 
     {mode !== 'apple' && (Boolean(pipeline?.unreviewed) || Boolean(pipeline?.kept)) && <div className="yam-buttons">
@@ -175,7 +200,7 @@ export default function YamChatWorkflow({
     {mode === 'apple' && <div className="yam-panel">
       <div className="yam-panel-heading"><h3>Teach apple pickup</h3><p>Lift the apple at least 8 cm and hold it for two seconds.</p></div>
       {!running && ready && dreamReady && <div className="yam-next">
-        <button type="button" className="yam-secondary" disabled={busy} onClick={openExistingCheckpoints}>
+        <button type="button" className="yam-secondary" disabled={busy} onClick={() => openExistingCheckpoints('pickup')}>
           Evaluate existing checkpoint
         </button>
         <small>Choose a completed fine-tune by its training dataset.</small>
@@ -199,7 +224,7 @@ export default function YamChatWorkflow({
           : pipeline.validated ? 'Dataset validated.' : `${pipeline.kept} ${pipeline.kept === 1 ? 'demo' : 'demos'} ready for validation.`}</small>
         <button type="button" className="yam-secondary" onClick={training}>Open fine-tuning</button>
       </div>}
-      {!running && checkpoint && <div className="yam-next">
+      {!running && checkpoint && !interrupted && <div className="yam-next">
         <YamComparisonPlan pairs={4} />
         <button type="button" className="yam-primary" disabled={busy || !dreamReady || !ready} onClick={() => void act(() => compare(checkpoint.id))}>
           {job?.kind === 'comparison' && job.state === 'completed' ? 'Run comparison again' : 'Run simulator comparison'}

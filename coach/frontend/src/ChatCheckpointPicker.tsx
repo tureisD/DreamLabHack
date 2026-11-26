@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { YamComparisonPlan } from './YamComparisonExplanation';
+import type { YamGoal } from './YamChatWorkflow';
 
 type CheckpointOption = {
   checkpoint: string;
@@ -7,7 +8,8 @@ type CheckpointOption = {
   steps: number | null;
 };
 
-export default function ChatCheckpointPicker({ onClose, onCompare, preferredCheckpoint }: {
+export default function ChatCheckpointPicker({ goal, onClose, onCompare, preferredCheckpoint }: {
+  goal: YamGoal;
   onClose: () => void;
   onCompare: (checkpoint: string) => Promise<boolean>;
   preferredCheckpoint?: string;
@@ -23,7 +25,7 @@ export default function ChatCheckpointPicker({ onClose, onCompare, preferredChec
     const controller = new AbortController();
     async function load() {
       try {
-        const response = await fetch('/api/simulator/existing-checkpoints', {
+        const response = await fetch(`/api/simulator/existing-checkpoints?goal=${goal}`, {
           cache: 'no-store',
           signal: controller.signal,
         });
@@ -39,7 +41,7 @@ export default function ChatCheckpointPicker({ onClose, onCompare, preferredChec
     }
     void load();
     return () => controller.abort();
-  }, [attempt]);
+  }, [attempt, goal]);
 
   async function runComparison() {
     if (!selection || starting) return;
@@ -58,14 +60,16 @@ export default function ChatCheckpointPicker({ onClose, onCompare, preferredChec
 
   return <section className="chat-inline-workspace chat-tool-panel" aria-labelledby="chat-checkpoint-title">
     <header className="chat-workspace-header">
-      <h2 id="chat-checkpoint-title">Choose an existing fine-tune</h2>
+      <h2 id="chat-checkpoint-title">{goal === 'bowl' ? 'Choose an apple-to-bowl fine-tune' : 'Choose an existing fine-tune'}</h2>
       <button type="button" className="secondary" onClick={onClose} disabled={starting}>Back to chat</button>
     </header>
     {error && <p className="alert" role="alert">{error}</p>}
     {options === null && (error
       ? <button type="button" className="secondary" onClick={() => { setError(''); setAttempt(attempt + 1); }}>Retry</button>
       : <p role="status">Looking up completed fine-tunes in your Dream account…</p>)}
-    {options?.length === 0 && <p>No completed fine-tunes in the connected Dream account are ready for this YAM apple pickup comparison.</p>}
+    {options?.length === 0 && <p>{goal === 'bowl'
+      ? 'No eligible bowl fine-tunes. Record verified apple-to-bowl demos in Fruit correction, keep them in chat, and fine-tune on that dataset.'
+      : 'No completed fine-tunes in the connected Dream account are ready for this YAM apple pickup comparison.'}</p>}
     {!!options?.length && <>
       <label className="chat-workspace-field chat-tool-body">Training dataset and checkpoint
         <select value={selection?.checkpoint ?? ''} disabled={starting} onChange={(event) => { setCheckpoint(event.target.value); setError(''); }}>
@@ -76,7 +80,7 @@ export default function ChatCheckpointPicker({ onClose, onCompare, preferredChec
         </select>
       </label>
       {selection && <div className="chat-training-next"><code>{selection.checkpoint}</code></div>}
-      <YamComparisonPlan pairs={4} />
+      <YamComparisonPlan pairs={4} goal={goal} />
       <button type="button" disabled={!selection || starting} onClick={() => void runComparison()}>
         {starting ? 'Starting comparison…' : 'Run simulator comparison'}
       </button>
