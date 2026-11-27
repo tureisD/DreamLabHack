@@ -2,10 +2,12 @@
 
 An open-source workflow for diagnosing Dream-1 runs, collecting task demonstrations, and verifying fine-tuned checkpoints.
 
-[![Open the live DreamCoach app](https://img.shields.io/badge/Live%20demo-Open-147B72?style=for-the-badge)](https://dreamcoach-161-35-77-34.sslip.io/)
-[![DreamCoach version 0.1.0](https://img.shields.io/badge/DreamCoach-v0.1.0-6557C5?style=for-the-badge)](coach/pyproject.toml)
-[![YAM simulator on MuJoCo](https://img.shields.io/badge/Simulator-YAM%20%2B%20MuJoCo-B36531?style=for-the-badge)](coach/experiments/yam_sim_faas/README.md)
-[![Apache 2.0 license](https://img.shields.io/badge/License-Apache%202.0-48627C?style=for-the-badge)](LICENSE)
+<p>
+  <a href="https://dreamcoach-161-35-77-34.sslip.io/"><img src="docs/media/badges/live-demo.png" height="29" alt="Open the live DreamCoach app"></a>
+  <a href="coach/pyproject.toml"><img src="docs/media/badges/version.png" height="29" alt="DreamCoach version 0.1.0"></a>
+  <a href="coach/experiments/yam_sim_faas/README.md"><img src="docs/media/badges/simulator.png" height="29" alt="YAM simulator on MuJoCo"></a>
+  <a href="LICENSE"><img src="docs/media/badges/license.png" height="29" alt="Apache 2.0 license"></a>
+</p>
 
 [Workflow](#what-dreamcoach-adds) · [Architecture](#system-design) · [Research results](#research-results) · [Technical setup](#technical-setup)
 
