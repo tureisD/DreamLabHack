@@ -1,70 +1,192 @@
 # DreamCoach
 
-**Find out why Dream-1 failed, what to demonstrate next, and whether a fine-tune helped.**
+An open-source workflow for diagnosing Dream-1 runs, collecting task demonstrations, and verifying fine-tuned checkpoints.
 
-A failed pickup can mean the gripper closed too early, the camera feed stalled, or the evaluation stopped while the robot was still lifting. Each calls for a different next step. DreamCoach adds a closed loop around Dream Labs' fine-tuning service (FaaS) so you can diagnose the baseline, fix setup issues or collect targeted demos, and compare checkpoints on reserved scenes before paying to train again.
+[![Open the live DreamCoach app](https://img.shields.io/badge/Live%20demo-Open-147B72?style=for-the-badge)](https://dreamcoach-161-35-77-34.sslip.io/)
+[![DreamCoach version 0.1.0](https://img.shields.io/badge/DreamCoach-v0.1.0-6557C5?style=for-the-badge)](coach/pyproject.toml)
+[![YAM simulator on MuJoCo](https://img.shields.io/badge/Simulator-YAM%20%2B%20MuJoCo-B36531?style=for-the-badge)](coach/experiments/yam_sim_faas/README.md)
+[![Apache 2.0 license](https://img.shields.io/badge/License-Apache%202.0-48627C?style=for-the-badge)](LICENSE)
 
-## Try it
+[Workflow](#what-dreamcoach-adds) · [Architecture](#system-design) · [Research results](#research-results) · [Technical setup](#technical-setup)
 
-| I want to… | Start here |
+## The customer pain point
+
+**When a robot fails a task, its operator needs to know what to fix before paying to train again.** A missed grasp, stale camera feed, and evaluation that stops mid-lift can all produce a failed run. Without usable evidence, operators have to guess whether to repair the setup, demonstrate a specific motion, or give an existing checkpoint a fairer test. Guessing can mean recording more data or spending FaaS credits on the wrong problem.
+
+DreamCoach gives a robotics builder one workflow to inspect the failure, choose the next demonstration or repair, and compare the resulting checkpoint against Dream-1 on scenes reserved for evaluation.
+
+<p align="center">
+  <img src="docs/media/dreamcoach-welcome.png" width="640" alt="DreamCoach welcomes users and introduces simulator demonstrations, fine-tuning, and held-out evaluation">
+</p>
+
+## What Dream Labs provides
+
+Dream Labs builds **Dream-1**, a World Action Model that uses camera observations, robot state, and a task instruction to produce robot actions. Dream Labs hosts inference through the Dream API. Its **Fine-tuning as a Service (FaaS)** adapts a checkpoint using a demonstration dataset and makes the resulting model available through the same API. [Dream-1 research and FaaS](https://dreamlabs.ai/research/dream-1/) · [Dream API documentation](https://platform.dreamlabs.ai/api-documentation)
+
+The upstream open-source library provides the Python SDK, dataset validation, robot station and driver interfaces, and a YAM MuJoCo example. DreamCoach uses those interfaces for inference, demonstration validation, training, and simulator execution. [Upstream library](dream_library/README.md) · [Python SDK and fine-tuning](dream_library/dream_client/README.md) · [Robot station](dream_library/robots/README.md)
+
+## What DreamCoach adds
+
+| Stage | What the extension does |
 | --- | --- |
-| Try DreamCoach online | [Open the live app](https://dreamcoach-161-35-77-34.sslip.io/), click **Begin**, and connect with your own Dream Labs API key. |
-| See a real simulator comparison | [Watch the matched apple pickup and inspect its traces](coach/experiments/yam_sim_faas/grasp_training/full-901/README.md). |
-| Review runs without keys or hardware | [Try the isolated offline walkthrough](coach/README.md#offline-apple-pickup-walkthrough) with scripted fixtures. |
-| Run DreamCoach on my computer | [Follow the local setup](#run-dreamcoach-locally) and choose a simulator Quick start. |
-| Test a checkpoint I already trained | Choose **Apple pickup → Evaluate existing checkpoint**, pick the checkpoint by its training dataset, and start a matched comparison. Dream may charge for inference. |
-| Audit independent physical trials | Use the [standalone statistical evaluator](#standalone-statistical-evaluator). |
+| **Connect and define the task** | A chat coach checks Dream API access, reads available models, datasets, and jobs, and drafts an instruction and observable success rule for the operator to approve. |
+| **Diagnose the baseline** | Station preflight checks camera freshness, arm readiness, and recorded faults. **Repair first** compares a prompt or setup change on matched diagnostic scenes with the same checkpoint. Simulator trace review explains approach, gripper timing, contact, lift, and trial interruptions. |
+| **Collect and review demonstrations** | Import LeRobot episodes, record with a supervised local SO-101 setup, or generate scripted YAM corrections without hardware. Review camera clips and quality findings in chat, keep or redo each demo, and prioritize start positions with failures and sparse coverage. |
+| **Fine-tune with approval** | Freeze the kept demos into a versioned dataset, run Dream’s validator, and submit to FaaS after approval. Track dataset processing, training, and checkpoint readiness. Retry eligible processing failures on the same upload or explicitly continue a compatible constant-schedule job. |
+| **Evaluate and iterate** | Reuse a compatible checkpoint or test a new one. Both models get the same held-out scenes and success rule. Follow live paired counts, inspect per-run diagnoses, and decide whether to fix the setup, adjust the evaluation protocol, or record targeted corrections on fresh training scenes. |
 
-## How the closed loop works
+**Resume a saved comparison** reopens the frozen scene list, checkpoint IDs, run order, and valid scores after a stop or restart. It recovers complete local recordings where possible and runs only missing or invalid trials. Earlier interruptions stay visible. New model trials can consume Dream inference credits. [Coach guide](coach/README.md) · [Repair-first workflow](coach/REPAIR_FIRST.md)
 
-1. **Define success and run a baseline.** The coach proposes a task instruction and an observable success rule for you to approve. Station preflight checks camera freshness, arm readiness, and logged faults. **Repair first** compares one prompt or setup change on matched diagnostic scenes with the same checkpoint. [Repair-first workflow](coach/REPAIR_FIRST.md)
-2. **Record and review demos where the model struggles.** Use baseline failures and accepted-demo coverage to decide what to record. Review camera clips and quality findings, then keep or redo each demo. Simulated demos, imported LeRobot sessions, and supervised local SO-101 recordings feed the same review process. [Demo intake and physical recording](coach/README.md#run-locally)
-3. **Validate and train.** DreamCoach builds a dataset from kept demos, runs Dream's validator, asks you to approve the paid submission, and tracks processing, training, and checkpoint readiness. Retry failed processing on the same upload or explicitly continue an eligible constant-schedule job. [Training and continuation rules](coach/README.md#run-locally)
-4. **Compare base and fine-tune on held-out scenes.** Both checkpoints get the same starting conditions and success rule. Follow the paired counts in **Evaluation results** and click **Explain comparison results** to see what happened in each scene. Physical promotion requires reviewed outcomes, an evidence audit, and operator approval. [Paired evaluation and promotion](coach/PAIRED_EVIDENCE.md)
-5. **Decide what to change.** Repair an invalid run, retest with a fair trial length, or collect examples that target a repeatable failure. Keep the new evaluation scenes out of training.
+### Work without a physical robot
 
-Simulator setup, scene approval, camera preview, and FaaS approval can stay in the conversation. **Begin** opens a fresh session. **Quit run** stops the current simulator rollout and keeps completed trial evidence.
+<p align="center">
+  <img src="docs/media/dreamcoach-yam-workflows.png" width="680" alt="DreamCoach’s YAM simulator offers apple pickup, fruit correction, scene setup, and resumable checkpoint comparisons">
+</p>
 
-## Why did the robot fail?
-
-For YAM apple pickup, DreamCoach replays saved actions and checks them against recorded joint states. It uses gripper commands, fingertip contact, distance from the apple, and apple height over time to explain each base and fine-tuned run. The report shows the evidence and suggests what to try next. It can analyze saved traces locally without another Dream inference call.
-
-| What the evidence shows | What to check next |
+| YAM workflow | Starting point |
 | --- | --- |
-| The gripper never closed, closed too far from the apple, or failed to establish a secure grasp | Check approach and close timing. If it repeats, demonstrate a centered grasp at that start position. |
-| The gripper made contact but the apple stayed low or fell | Inspect the lift and hold separately from the grasp. Demonstrate the missing phase if it recurs. |
-| The trial ended while the apple was rising or before the hold completed | Retest both checkpoints with the same suitable time budget before deciding to retrain. |
-| The service restarted, a safety check stopped the run, or replay could not verify the trace | Inspect the execution issue separately from a completed task failure. |
+| **Apple pickup** | Use 24 bundled demos or run the base checkpoint on fresh training scenes. The failure-conditioned collector selects recorded misses and produces checked, scripted corrective trajectories. [Collector](coach/experiments/yam_sim_faas/FAILURE_CONDITIONED_SIM.md) |
+| **Fruit correction** | Select a fruit for a lift or select the apple and bowl for placement. Review the three camera views and keep verified demonstrations. [Fruit tasks](coach/experiments/yam_sim_faas/CLICK_TO_CORRECT.md) |
+| **Build a scene** | Start with a red block or yellow ball preset, or configure a supported object and target. Preview, record, and review the scene in chat. [Scene builder](coach/experiments/yam_sim_faas/SCENE_TASK_POC.md) |
 
-The apple rule is **an 8 cm lift held continuously for two seconds**. In one saved scene, the base model briefly reached **8.5 cm** but sustained only **0.6 cm** over its best two-second window. Peak height alone would have scored that run incorrectly. Other tasks need their own observable rules. Physical station diagnosis uses logs, camera checks, and operator labels to guide inspection. [Corrected held-out report](coach/experiments/yam_sim_faas/grasp_training/EXTENDED_500_STEP_EVAL.md) · [Diagnosis code](coach/experiments/yam_sim_faas/grasp_training/rollout_diagnosis.py)
+Automatic YAM scoring supports **apple pickup**, which requires an 8 cm lift held for two continuous seconds, and **apple into bowl**, which requires an 8 cm lift followed by release and a settled apple inside the bowl for the final second. Bowl comparisons use a joint-space checkpoint with verified bowl-training provenance. Other task definitions can use operator-reviewed physical trials. [Simulator workflows and scoring](coach/README.md) · [Bowl success rule](coach/src/teach_task_coach/yam_goals.py)
 
-## What the apple experiments showed
+## System design
 
-| Comparison | Result | What we learned |
+### How the extension fits into Dream Labs
+
+```mermaid
+flowchart TB
+    OP["Robot operator"] <--> UI["React chat, demo review, live evaluation"]
+
+    subgraph COACH["DreamCoach extension"]
+        UI <--> API["FastAPI workflow and approvals"]
+        API --> GUIDE["Task guidance and station preflight"]
+        API --> DEMOS["Demo intake, coverage and review"]
+        API --> TRAIN["Dataset and FaaS worker"]
+        API --> EVAL["Matched runner, replay scorer and paired audit"]
+        GUIDE --> STORE[("Workspace state and evidence")]
+        DEMOS --> STORE
+        DEMOS -->|"Kept demos"| TRAIN
+        TRAIN --> STORE
+        EVAL --> STORE
+    end
+
+    subgraph UPSTREAM["Dream Labs library and services"]
+        SDK["Python SDK and dataset validator"]
+        CLOUD["Dream API inference and FaaS"]
+        YAM["YAM MuJoCo example"]
+        STATION["Dream robot station and drivers"]
+        SDK <--> CLOUD
+    end
+
+    TRAIN -->|"Validate, upload and track jobs"| SDK
+    EVAL -->|"Select base or fine-tuned checkpoint"| SDK
+    DEMOS -->|"Record scripted corrections"| YAM
+    EVAL -->|"Reset and score matched scenes"| YAM
+    GUIDE -->|"Check cameras and station state"| STATION
+    STATION -->|"Supervised rollout recordings"| EVAL
+    API -.->|"Optional conversational guidance"| LLM["OpenAI"]
+    OP -.->|"Supplied independent trial snapshot"| STATS["Standalone statistical evaluator"]
+
+    classDef coach fill:#fff0e3,stroke:#b5724f,color:#422616
+    classDef upstream fill:#edf2ff,stroke:#7282b9,color:#222b4a
+    class UI,API,GUIDE,DEMOS,TRAIN,EVAL,STORE,STATS coach
+    class SDK,CLOUD,YAM,STATION upstream
+```
+
+### How a comparison closes the loop
+
+```mermaid
+sequenceDiagram
+    actor Operator
+    participant Coach as DreamCoach
+    participant Store as Workspace evidence
+    participant Dream as Dream API and FaaS
+    participant YAM as YAM simulator
+
+    Operator->>Coach: Approve task rule and review demos
+    Coach->>Store: Save reviewed demos and dataset validation
+    opt New fine-tune explicitly approved
+        Operator->>Coach: Approve paid FaaS submission
+        Coach->>Dream: Upload dataset and submit job
+        Dream-->>Coach: Publish checkpoint when ready
+    end
+    Operator->>Coach: Select an eligible checkpoint and run comparison
+    Coach->>Store: Freeze scenes, model order, checkpoints and score rule
+    loop Each missing or invalid trial
+        Coach->>YAM: Reset to the saved scene
+        YAM->>Dream: Request actions from the selected checkpoint
+        Dream-->>YAM: Return action chunks
+        YAM-->>Coach: Return the recorded trace and task measurements
+        Coach->>Store: Save the outcome or interruption
+    end
+    Coach-->>Operator: Show paired counts, failure evidence and next steps
+    Operator->>Coach: Choose a setup repair, a retest or new training demos
+```
+
+## Evaluation and failure diagnosis
+
+The paired simulator runner compares checkpoints on matched scenes and checks that action replay agrees with recorded robot state. For apple pickup it can distinguish a poor approach, mistimed closure, contact without a sustained lift, and a trial that ended while the apple was still rising. Technical interruptions, safety stops, and unverifiable recordings are visible separately from completed task misses. Saved traces can be diagnosed without new Dream inference. [Per-run diagnostic implementation](coach/experiments/yam_sim_faas/grasp_training/rollout_diagnosis.py) · [Paired evidence contract](coach/PAIRED_EVIDENCE.md)
+
+| Evaluation design | Output |
+| --- | --- |
+| **Matched simulator scenes** | Paired counts, observed success-rate difference, replay checks, and per-scene diagnoses. Results are descriptive for the tested scenes. |
+| **Prospective matched physical scenes** | Reviewed outcomes, reset and holdout attestations, recorded metadata, interventions, response time, and safety stops. A complete audit can estimate a conservative paired interval. Promotion requires an eligible verdict and explicit operator action. |
+| **Independent physical trials** | The standalone `dream-eval` engine checks eligibility and estimates the success-rate difference with an interval and verdict. It expects prospective, held-out, human-reviewed independent attempts in one scenario, with a fixed horizon or predeclared interim looks. |
+
+Incomplete or unsuitable evidence can return `not_evaluable` with counts and reasons. Both audit paths preserve evidence and produce checksums for reproducible review. [Paired audit](coach/PAIRED_EVIDENCE.md) · [Independent evaluator](src/dreamlab/evaluation/README.md) · [Statistical audit in DreamCoach](coach/STATISTICAL_AUDIT.md)
+
+## Research results
+
+**A fine-tune can appear to fail when the evaluation ends before its task can finish.** In the first apple pickup pilot, the nine-request cutoff stopped several runs while the apple was still rising. Another attempt stopped on a small gripper command overshoot. The corrected simulator evaluation allowed twelve requests for both models and clamped small finite overshoots to the gripper range while retaining stops for larger violations. Scoring checked sustained height. [Original pilot](coach/experiments/yam_sim_faas/grasp_training/HELDOUT_500_STEP_EVAL.md) · [Corrected evaluation and replay checks](coach/experiments/yam_sim_faas/grasp_training/EXTENDED_500_STEP_EVAL.md)
+
+| Study | Observed passes | What it tested |
 | --- | --- | --- |
-| [Original held-out test](coach/experiments/yam_sim_faas/grasp_training/HELDOUT_500_STEP_EVAL.md) | Base **0/4**, 500-step fine-tune **1/4** | The nine-request cap cut lifts short and a small normalized gripper overshoot triggered a simulator stop. |
-| [Fresh scenes after fixing the evaluation](coach/experiments/yam_sim_faas/grasp_training/EXTENDED_500_STEP_EVAL.md) | Base **0/4**, same fine-tune **4/4** | Both models got twelve requests and were scored on sustained height. Small finite gripper overshoots were clamped in the simulator. Unsafe values still stopped the run. |
-| [Separately trained 500-step checkpoint](coach/experiments/yam_sim_faas/grasp_training/SECOND_ACCOUNT_500_STEP_EVAL.md) | Base **0/4**, second fine-tune **4/4** | A second dataset and four fresh scenes reproduced useful apple pickup under the corrected rule. |
-| [Timing study on an unchanged checkpoint](coach/experiments/yam_sim_faas/CLOSED_LOOP_REPAIR_STUDY.md) | **7/8** at nine requests, **8/8** at twelve. Separate same-trajectory confirmation **14/19** at nine, **19/19** at twelve. | Five valid confirmation trajectories first passed on request ten or eleven. One of twenty attempts restarted and was retained as invalid. |
+| [Original matched pilot](coach/experiments/yam_sim_faas/grasp_training/HELDOUT_500_STEP_EVAL.md) | Base **0/4**, fine-tune **1/4** | The shorter trial budget cut lifts short. One attempt stopped on a gripper command. |
+| [Fresh held-out comparison](coach/experiments/yam_sim_faas/grasp_training/EXTENDED_500_STEP_EVAL.md) | Base **0/4**, same fine-tune **4/4** | Whether the existing 500-step checkpoint passed under the corrected protocol on four new scenes. |
+| [Separately trained checkpoint](coach/experiments/yam_sim_faas/grasp_training/SECOND_ACCOUNT_500_STEP_EVAL.md) | Base **0/4**, second fine-tune **4/4** | Whether a separate 24-demo dataset and 500-step checkpoint showed a gain on another four fresh scenes. |
+| [Eight-scene horizon study](coach/experiments/yam_sim_faas/CLOSED_LOOP_REPAIR_STUDY.md#result-on-fresh-scenes-913920) | **7/8** at nine requests, **8/8** at twelve | Separate rollouts from a single unchanged checkpoint under two evaluation horizons. |
+| [Predeclared same-trajectory confirmation](coach/experiments/yam_sim_faas/CLOSED_LOOP_REPAIR_STUDY.md#independent-confirmation) | **14/19** at nine requests, **19/19** at twelve | Both budgets scored from the same saved trajectories. Five valid trajectories first passed on request ten or eleven. One of 20 planned attempts was invalid and retained. |
 
-Training produced the checkpoints. The evaluation fixes exposed behavior the first test missed without requiring another FaaS job. These results describe the tested simulator scenes. Physical reliability, transfer to other tasks, and reductions in operator time, demo count, or spending remain unmeasured. Open **Evaluation results → Explore the saved evidence** for the interactive timing study. The separate operator benchmark is prospective and its example is synthetic. [Operator-study design](coach/benchmark/README.md)
+**What DreamCoach contributed.** The extension surfaced the cutoff problem, applied a task-level success rule, and measured improvement already present in the trained checkpoint. The confirmation compared prefixes of the same recordings, so the model weights and earlier actions were identical. Retesting required no new FaaS job. Longer trials execute more actions. Physical reliability, savings in operator time or training spend, and the benefit of failure-conditioned collection at a fixed budget remain open questions. [Observed study and protocols](coach/experiments/yam_sim_faas/CLOSED_LOOP_REPAIR_STUDY.md) · [Prospective operator study design](coach/benchmark/README.md)
 
-## Collect demonstrations without a robot
+### Watch the apple pickup comparison
 
-| YAM workflow | What you can do |
+<p align="center">
+  <a href="coach/experiments/yam_sim_faas/grasp_training/full-901/comparison.mp4"><img src="docs/media/dreamcoach-apple-replay.png" width="720" alt="A local DreamCoach chat preview of held-out scene 901, with base Dream-1 on the left and the fine-tune lifting the apple on the right"></a>
+</p>
+
+The overhead and wrist views show the same held-out scene. In this 20-second comparison, the base model peaked at **7.91 cm** and returned the apple to its settled height. The fine-tune sustained an unsupported two-finger hold above **8 cm** for **2.05 seconds**. The screenshot shows the replay in a local DreamCoach chat preview. [Watch the full MP4](coach/experiments/yam_sim_faas/grasp_training/full-901/comparison.mp4) · [Scene 901 protocol, traces, and report](coach/experiments/yam_sim_faas/grasp_training/full-901/README.md)
+
+<details>
+<summary>Watch an animated preview of the grasp and lift</summary>
+
+![Animated excerpt from scene 901 showing the base and fine-tuned checkpoints from overhead and left-wrist cameras](docs/media/apple-pickup-preview.gif)
+
+</details>
+
+## Repository map
+
+| Path | Contents |
 | --- | --- |
-| **Apple pickup** | Import 24 bundled demos or run Dream-1 on fresh training scenes. The failure-conditioned collector records scripted corrections for selected failures and excludes reserved evaluation seeds. [Collection guide](coach/experiments/yam_sim_faas/FAILURE_CONDITIONED_SIM.md) |
-| **Fruit correction** | Click an apple or banana for a lift, or click an apple and bowl for placement. Review three synchronized camera views before keeping the result. [Supported fruit tasks](coach/experiments/yam_sim_faas/CLICK_TO_CORRECT.md) |
-| **Build a scene** | Choose a red-block or yellow-ball preset, or configure a supported object and target. Preview, record, and review the scene in chat. [Scene builder](coach/experiments/yam_sim_faas/SCENE_TASK_POC.md) |
+| [`coach/frontend/`](coach/frontend/) | React and TypeScript conversation, simulator controls, and evaluation views |
+| [`coach/src/teach_task_coach/`](coach/src/teach_task_coach/) | FastAPI service, simulator workflow, FaaS worker, and paired audit |
+| [`coach/experiments/yam_sim_faas/`](coach/experiments/yam_sim_faas/README.md) | YAM collectors, replay tools, frozen protocols, and measured results |
+| [`src/dreamlab/evaluation/`](src/dreamlab/evaluation/README.md) | Standalone statistical evaluator and CLI |
+| [`dream_library/`](dream_library/README.md) | Upstream Dream Labs SDK, robot station, and examples |
 
-DreamCoach builds on the Dream Labs YAM MuJoCo example. Local corrections undergo physics and dataset checks before review. Fresh model rollouts and checkpoint comparisons use the Dream API. Whether failure-conditioned collection beats random scripted collection at the same training budget remains unmeasured.
+DreamCoach is available under [Apache 2.0](LICENSE). Vendored packages, robot models, and other third-party assets retain their respective licenses. [Third-party notices](dream_library/THIRD-PARTY-LICENSES.md)
 
-## Run DreamCoach locally
+## Technical setup
 
-Install Git, uv, Node.js, and npm. Run these commands from the repository root.
+### Run DreamCoach locally
+
+Install Git, [uv](https://docs.astral.sh/uv/), and Node.js with npm. The commands use the pinned Python and dependency versions in the repository.
 
 ```sh
-cd coach
+git clone https://github.com/tureisD/DreamLabHack.git
+cd DreamLabHack/coach
 uv sync --locked --group dev --extra sim
 cd frontend
 npm ci
@@ -73,20 +195,13 @@ cd ..
 uv run --locked --extra sim teach-task-coach serve
 ```
 
-Open [DreamCoach on localhost](http://127.0.0.1:8765), choose a Quick start, or click **Begin**. For live inference and training, create a [Dream Labs API key](https://platform.dreamlabs.ai/api-keys) and enter it in the masked connection field. The coach checks the server's Dream API access and can read datasets, fine-tuning jobs, and available models. Set `OPENAI_API_KEY` on the local server to enable conversational AI. Keep credentials out of chat. [Local configuration](coach/README.md)
+Open [DreamCoach on localhost](http://127.0.0.1:8765). Choose a simulator quick start or select **Begin**. For live Dream inference and training, create a Dream Labs API key and paste it into the masked connection field. The server validates Dream API access. Set `OPENAI_API_KEY` on the local server to enable AI chat. Keep API keys out of chat and Git. [Dream API keys](https://platform.dreamlabs.ai/api-keys) · [Local configuration](coach/README.md#run-locally)
 
-For physical runs, connect the Dream station and enable rollout recording. For shared hosting, the Docker deployment supports separate Dream account workspaces and persistent storage. [Robot station setup](dream_library/robots/README.md) · [Hosting guide](coach/HOSTING.md)
+For a scripted walkthrough with no account or hardware, use the [isolated offline demo](coach/README.md#offline-apple-pickup-walkthrough).
 
-## Two evaluation designs
+### Run the standalone evaluator
 
-| Evidence | Use |
-| --- | --- |
-| Both checkpoints attempt each **matched scene** | The coach's paired audit. Simulator results are descriptive. Eligible physical comparisons require a frozen plan, reviewed labels, reset attestations, and safety-stop accounting. [Matched-scene audit](coach/PAIRED_EVIDENCE.md) |
-| **Independent**, prospective, held-out physical trials with human-reviewed outcomes in one scenario | The standalone evaluator. Run a fixed horizon or predeclared interim looks and get eligibility checks, effect, interval, and verdict. [Independent-trial methods](src/dreamlab/evaluation/README.md) |
-
-### Standalone statistical evaluator
-
-Run from the repository root on Linux. The example uses synthetic data and requires no credentials.
+Run from the repository root on Linux for CLI artifact publication. The fixture is synthetic and requires no credentials. Use a new output directory.
 
 ```sh
 uv sync --locked --extra eval --group dev
@@ -94,34 +209,8 @@ uv run --locked --extra eval dream-eval evaluate \
   --input tests/fixtures/evaluation_request.json --output-dir example-run
 ```
 
-Choose a new output directory. The CLI saves submitted and canonical inputs, a JSON report, a summary, and a reproducibility manifest. Publishing artifacts requires Linux and a filesystem with atomic no-replace rename. The Python evaluator also works on other platforms.
+The CLI writes submitted and canonical inputs, a report, a Markdown summary, and a reproducibility manifest. The Python evaluator works on other platforms. [Evaluator API and commands](src/dreamlab/evaluation/README.md) · [Testing and diagnostics](docs/testing-and-diagnostics.md)
 
-```python
-from pathlib import Path
+### Connect hardware or host the service
 
-from dreamlab.contracts import EvaluationRequest
-from dreamlab.evaluation.engine import StatisticalEvaluator
-
-request = EvaluationRequest.model_validate_json(
-    Path("tests/fixtures/evaluation_request.json").read_bytes()
-)
-report = StatisticalEvaluator().evaluate(request)
-```
-
-The estimated effect is candidate minus baseline. An `improved` verdict requires the interval's lower bound to clear the predefined minimum gain. Ineligible or incomplete evidence can return `not_evaluable` with counts and reasons. [Evaluator workflow](docs/evaluation-workflow.md) · [Testing and diagnostics](docs/testing-and-diagnostics.md)
-
-## Repository map
-
-| Path | Contents |
-| --- | --- |
-| [`coach/`](coach/README.md) | FastAPI server, React chat, workflow state, and Dream SDK integration |
-| [`coach/experiments/yam_sim_faas/`](coach/experiments/yam_sim_faas/README.md) | Simulator collectors, replay tools, held-out protocols, and results |
-| [`src/dreamlab/evaluation/`](src/dreamlab/evaluation/README.md) | Standalone evaluation engine and CLI |
-| [`docs/`](docs/README.md) | Evaluation contracts, validation, and research roadmap |
-| [`dream_library/`](dream_library/README.md) | Upstream Dream Labs client, robot station, and examples |
-
-Use upstream `dreamcli` for robot setup and Live View, or `dream.DreamClient` to call Dream-1 from your own loop. [Python SDK](dream_library/dream_client/README.md) · [DreamAPI documentation](https://platform.dreamlabs.ai/api-documentation)
-
-## License
-
-[Apache License 2.0](LICENSE). Vendored packages, robot models, and external assets retain their respective licenses. [Third-party notices](dream_library/THIRD-PARTY-LICENSES.md)
+For supervised physical trials, connect the Dream robot station, enable rollout recording, and point DreamCoach at the station URL and rollout directory. Use the local coach for hardware actions. The hosted Docker service supports separate account workspaces and persistent storage for simulator runs. [Robot station setup](dream_library/robots/README.md) · [Coach hosting guide](coach/HOSTING.md)
